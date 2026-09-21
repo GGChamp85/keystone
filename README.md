@@ -16,6 +16,8 @@ Keystone runs entirely on infrastructure you own: an OpenAI-compatible inference
 
 - [Why Keystone](#why-keystone)
 - [Architecture](#architecture)
+- [What you need](#what-you-need)
+- [Watch it write code](#watch-it-write-code)
 - [Run it locally in 10 minutes](#run-it-locally-in-10-minutes)
 - [Use it](#use-it)
 - [Connect your own git server](#connect-your-own-git-server)
@@ -81,9 +83,64 @@ A background agent task moves through the graph above — `PLANNING → CODING �
 
 ---
 
+## What you need
+
+| Component | Needed for | Notes |
+|---|---|---|
+| Docker + Compose v2, `make` | Everything | The whole stack is `docker-compose.yml` |
+| Postgres, Redis/Valkey, Qdrant | Everything | Started for you by `make up` — nothing to install separately |
+| Sandbox daemon (`keystoned`) | Any agentic coding task (not plain chat completions) | Runs sandboxed git clones/tool calls/tests; gVisor by default, no KVM needed. `make sandbox-images` builds its runtime image — required before the first task |
+| **A git host** | Agentic coding tasks (chat-only use doesn't need one) | Keystone never invents a repo to work in — point it at your own git server, or run [Gitea](https://gitea.io) (MIT) in five minutes for a local/test one. See [Connect your own git server](#connect-your-own-git-server) |
+| **A coding model** | Everything model-related | Either (a) GPUs running vLLM — see [Models](#models) for real VRAM numbers, or (b) **no GPU at all**: `benchmarks/frontier_proxy.py` puts a real frontier model (Claude, today) behind the same OpenAI-compatible interface — this is what [Watch it write code](#watch-it-write-code) below uses |
+
+That's the complete list — no managed SaaS dependency anywhere in it (see [Tech stack](#tech-stack--open-source-only-no-managed-saas)).
+
+---
+
+## Watch it write code
+
+The fastest path to seeing Keystone actually fix a bug — no GPU required, using a real frontier model as the coding backend via `benchmarks/frontier_proxy.py` (real translation layer, not a mock — see [Run the benchmark suite](#run-the-benchmark-suite) for the proof this genuinely works: a real bug, solved end to end, independently verified).
+
+```bash
+# 1. Clone, configure, and point the coding role at a real frontier model
+#    instead of a GPU — all *before* bringing the stack up, since the app
+#    container reads VLLM_CODING_URL from .env at startup, not your shell.
+git clone https://github.com/GGChamp85/keystone.git && cd keystone
+cp .env.example .env
+# Edit .env: set POSTGRES_PASSWORD, REDIS_PASSWORD, QDRANT_API_KEY,
+# KEYSTONE_ROOT_ADMIN_TOKEN, and GIT_ALLOWED_HOSTS/GIT_HOST_API_URL/
+# GIT_HOST_TOKEN for a real git host it can clone/push/PR against (see
+# "Connect your own git server" below — Keystone never invents a repo).
+# Set VLLM_CODING_URL=http://host.docker.internal:8090/v1 (Docker Desktop;
+# on Linux see the comment above that line in .env.example).
+
+# 2. Bring up the stack (Postgres, Redis, Qdrant, the app, the sandbox daemon)
+make certs && make build && make up && make db-migrate
+make sandbox-images     # sandbox runtime image — required before any task can run
+
+# 3. Start the real frontier-model proxy the .env above points at
+export ANTHROPIC_API_KEY=sk-ant-...
+FRONTIER_PROXY_MODEL=claude-opus-4-6 python -m benchmarks.frontier_proxy &   # serves on :8090
+
+# 4. Create an API key and submit a real task
+make api-key
+curl -X POST http://localhost:8080/v1/keystone/tasks \
+  -H "Authorization: Bearer ks-XXXX-XXXXXXXX" -H "Content-Type: application/json" \
+  -d '{"task": "Fix the bug where ...", "repository_url": "https://<your-git-host>/you/your-repo", "model": "coding"}'
+
+# 5. Watch it work
+open http://localhost:8080/app/    # live plan → tool calls → quality gates → review → tests, streaming in
+```
+
+What happens next is the real agent loop, not a canned response: it clones the repo into a sandbox, reads and greps the real code, writes a patch with real tools, runs lint/typecheck/security scanners, gets reviewed by a second model pass, runs the repo's real test suite, and — only if every one of those actually passed — commits, pushes a branch, and opens a real pull request for you to read like any other contributor's PR.
+
+Prefer a terminal session over a background task, the way you'd use Claude Code or the Codex CLI interactively? See [Work from the terminal](#use-it) below — [OpenCode](https://github.com/sst/opencode) pre-configured against Keystone gives you exactly that, same real tools, same models.
+
+---
+
 ## Run it locally in 10 minutes
 
-**Prerequisites**: Docker with Compose v2, `make`, and (if you want the agent to actually do anything) an OpenAI-compatible GPU endpoint — either your own vLLM-served models or, for a first look with no GPU at all, point `VLLM_CODING_URL` at any OpenAI-compatible endpoint you already have.
+This brings up the full stack (no model backend chosen yet — see [What you need](#what-you-need) for the two real options, and [Watch it write code](#watch-it-write-code) if you want to skip straight to a working agentic task with no GPU).
 
 ```bash
 # 1. Clone and configure
@@ -125,7 +182,11 @@ open http://localhost:8080/app/   # paste your API key, submit a task, watch the
 
 ## Use it
 
-**OpenAI-compatible chat completions** — point any OpenAI SDK/client at Keystone by swapping the base URL:
+Three ways in, depending on what you want — a raw completion, an autonomous background task, or an interactive terminal session:
+
+### Chat completions (OpenAI-compatible)
+
+Point any OpenAI SDK/client at Keystone by swapping the base URL — no agent, no tools, just a completion:
 
 ```bash
 curl -X POST http://localhost:8080/v1/chat/completions \
@@ -138,7 +199,9 @@ curl -X POST http://localhost:8080/v1/chat/completions \
   }'
 ```
 
-**Submit a background coding task** — the agent clones the repo, explores it with real tools, edits it, runs quality gates and the real test suite, and opens a PR:
+### Background coding task (the agentic path — see [Watch it write code](#watch-it-write-code) for the full walkthrough)
+
+The agent clones the repo into a sandbox, explores it with real tools, edits it, runs quality gates and the real test suite, and opens a PR — you submit it and come back to a review, like assigning a task to a contributor:
 
 ```bash
 curl -X POST http://localhost:8080/v1/keystone/tasks \
@@ -152,7 +215,9 @@ curl -X POST http://localhost:8080/v1/keystone/tasks \
   }'
 ```
 
-**Work from the terminal** — [OpenCode](https://github.com/sst/opencode), pre-configured against Keystone (`cli/opencode.config.json`), gives a Claude-Code-style interactive agent that runs entirely on your self-hosted models:
+### Interactive terminal session
+
+[OpenCode](https://github.com/sst/opencode), pre-configured against Keystone (`cli/opencode.config.json`), gives a Claude-Code-style interactive agent — the same real tools and models, but you drive it turn by turn instead of submitting a task and walking away:
 
 ```bash
 opencode

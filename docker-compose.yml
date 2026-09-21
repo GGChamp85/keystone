@@ -17,6 +17,14 @@ x-common-env: &common-env
   SANDBOX_BACKEND: ${SANDBOX_BACKEND:-gvisor}
   TEMPORAL_HOST: temporal:7233
   TEMPORAL_NAMESPACE: keystone
+  # Real overrides, not just documentation — set these in .env to point a
+  # role at anything else (your own vLLM elsewhere, or
+  # benchmarks/frontier_proxy.py for a real frontier model with no GPU at
+  # all; from inside this container that's http://host.docker.internal:8090/v1
+  # on Docker Desktop). Defaults are the vllm-* services below when enabled.
+  VLLM_CODING_URL: ${VLLM_CODING_URL:-http://vllm-coding:8000/v1}
+  VLLM_CODING_FALLBACK_URL: ${VLLM_CODING_FALLBACK_URL:-http://vllm-coding-fallback:8000/v1}
+  VLLM_REASONING_URL: ${VLLM_REASONING_URL:-http://vllm-reasoning:8000/v1}
 
 services:
   app:
@@ -26,9 +34,6 @@ services:
     ports: ["8080:8080"]
     environment:
       <<: *common-env
-      VLLM_CODING_URL: http://vllm-coding:8000/v1
-      VLLM_CODING_FALLBACK_URL: http://vllm-coding-fallback:8000/v1
-      VLLM_REASONING_URL: http://vllm-reasoning:8000/v1
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -51,9 +56,6 @@ services:
     restart: unless-stopped
     environment:
       <<: *common-env
-      VLLM_CODING_URL: http://vllm-coding:8000/v1
-      VLLM_CODING_FALLBACK_URL: http://vllm-coding-fallback:8000/v1
-      VLLM_REASONING_URL: http://vllm-reasoning:8000/v1
     depends_on:
       postgres: { condition: service_healthy }
       temporal: { condition: service_started }
