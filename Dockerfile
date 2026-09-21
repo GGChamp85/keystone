@@ -10,7 +10,7 @@ COPY src/ ./src/
 # Keystone Agents' plan/execution-trace UI (web/) — built once here so the
 # runtime image never needs Node.js at all, matching this Dockerfile's
 # existing pattern of a slim runtime stage with only what's needed to run.
-FROM node:22-slim AS web-builder
+FROM node:25-slim AS web-builder
 WORKDIR /web
 COPY web/package.json web/package-lock.json* ./
 RUN npm install
