@@ -8,6 +8,7 @@ Main FastAPI application.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
@@ -47,7 +48,21 @@ async def lifespan(app: FastAPI):
         mcp_app = app.state.mcp_asgi_app
         await mcp_stack.enter_async_context(mcp_app.router.lifespan_context(mcp_app))
         logger.info("vs.mcp_ready")
+
+        # Periodic PR-status poller (src/orchestrator/pr_polling.py) — not
+        # Temporal-durable, a plain background asyncio task like the rest of
+        # this app's own non-durable fallback path; a missed pass just gets
+        # picked up next interval since it only ever reads current state.
+        from src.orchestrator.pr_polling import run_pr_polling_loop
+
+        pr_poll_stop = asyncio.Event()
+        pr_poll_task = asyncio.create_task(run_pr_polling_loop(pr_poll_stop))
+        logger.info("vs.pr_polling_started", interval_seconds=settings.pr_poll_interval_seconds)
+
         yield
+
+        pr_poll_stop.set()
+        await pr_poll_task
 
     from src.api.middleware.rate_limiter import close_redis
     from src.db.connection import close_db

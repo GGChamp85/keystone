@@ -183,6 +183,7 @@ def _state_to_dict(state: AgentState) -> dict[str, Any]:
         "task_id": str(state.task_id),
         "tenant_id": str(state.tenant_id) if state.tenant_id else None,
         "api_key_id": str(state.api_key_id) if state.api_key_id else None,
+        "user_slug": state.user_slug,
         "task_description": state.task_description,
         "repository_url": state.repository_url,
         "branch": state.branch,
@@ -287,6 +288,7 @@ def _dict_to_state(d: dict[str, Any]) -> AgentState:
     state.task_id = _UUID(d["task_id"]) if isinstance(d.get("task_id"), str) else d.get("task_id", state.task_id)
     state.tenant_id = _UUID(d["tenant_id"]) if d.get("tenant_id") else None
     state.api_key_id = _UUID(d["api_key_id"]) if d.get("api_key_id") else None
+    state.user_slug = d.get("user_slug")
     state.task_description = d.get("task_description", "")
     state.repository_url = d.get("repository_url")
     state.branch = d.get("branch", "main")

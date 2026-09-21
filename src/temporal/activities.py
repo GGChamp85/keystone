@@ -39,6 +39,8 @@ async def run_agent_task(
     max_iterations: int,
     enable_reasoning_review: bool,
     enable_sandbox_testing: bool,
+    user_id: str | None = None,
+    user_slug: str | None = None,
 ) -> dict[str, Any]:
     """
     Runs the full Plan -> Code -> Review -> Test -> Fix loop for one task.
@@ -71,6 +73,8 @@ async def run_agent_task(
             enable_reasoning_review=enable_reasoning_review,
             enable_sandbox_testing=enable_sandbox_testing,
             context_files=context_files,
+            user_id=UUID(user_id) if user_id else None,
+            user_slug=user_slug,
             heartbeat_callback=_heartbeat,
         )
     except Exception as exc:

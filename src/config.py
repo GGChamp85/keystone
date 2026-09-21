@@ -126,6 +126,7 @@ class Settings(BaseSettings):
     git_host_token: SecretStr | None = None  # bot account token used to open PRs on the agent's behalf
     git_host_commit_author_name: str = "Keystone Agents"
     git_host_commit_author_email: str = "keystone-agents@keystone.local"
+    pr_poll_interval_seconds: int = 300  # src/orchestrator/pr_polling.py's periodic merged/rejected feedback check
 
     # ── Package mirrors (internal, air-gap-safe — src/orchestrator/repo_profile.py) ──
     pip_index_url: str | None = None  # e.g. https://pypi.internal.keystone.local/simple

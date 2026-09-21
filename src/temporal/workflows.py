@@ -42,6 +42,8 @@ class AgentWorkflowInput:
     preferred_model: str | None = None
     enable_reasoning_review: bool = True
     enable_sandbox_testing: bool = True
+    user_id: str | None = None
+    user_slug: str | None = None
 
 
 @workflow.defn
@@ -78,6 +80,8 @@ class CodingAgentWorkflow:
                 input.max_iterations,
                 input.enable_reasoning_review,
                 input.enable_sandbox_testing,
+                input.user_id,
+                input.user_slug,
             ],
             start_to_close_timeout=timedelta(seconds=DEFAULT_MAX_WALL_CLOCK_SECONDS + 300),
             heartbeat_timeout=timedelta(minutes=3),

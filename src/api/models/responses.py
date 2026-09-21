@@ -203,6 +203,15 @@ class AgentTaskSubmittedResponse(BaseModel):
     temporal_workflow_id: str | None = None
 
 
+class TaskFeedbackResponse(BaseModel):
+    id: UUID
+    task_id: UUID
+    user_id: str | None
+    verdict: str
+    reason: str | None
+    created_at: datetime
+
+
 # ── Health ────────────────────────────────────────────────────
 
 

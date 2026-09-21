@@ -15,6 +15,8 @@ node happens to run first for a given task.
 
 from __future__ import annotations
 
+import re
+
 import structlog
 
 from src.orchestrator.state import AgentPhase, AgentState
@@ -22,6 +24,14 @@ from src.orchestrator.workspace import Workspace
 from src.sandbox.manager import get_sandbox_manager
 
 logger = structlog.get_logger(__name__)
+
+
+def slugify_for_branch(text: str) -> str:
+    """Git-ref-safe slug (lowercase, alnum and '-' only, collapsed) for the
+    `keystone/<slug>/<task_id>` working branch name — e.g. a user's email
+    local-part ("ada.lovelace@x.com" -> "ada-lovelace")."""
+    slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+    return slug or "user"
 
 
 def next_gate_phase(state: AgentState) -> AgentPhase:
@@ -55,7 +65,7 @@ async def get_or_clone_workspace(state: AgentState) -> Workspace:
         if not state.repository_url:
             raise ValueError("get_or_clone_workspace requires state.repository_url")
         clone_result = await ws.clone(state.repository_url, state.branch)
-        state.working_branch = f"keystone/agent/{state.task_id}"
+        state.working_branch = f"keystone/{state.user_slug or 'agent'}/{state.task_id}"
         await ws.create_branch(state.working_branch)
         state.repo_cloned = True
         logger.info(

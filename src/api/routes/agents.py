@@ -14,12 +14,20 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from src.api.middleware.auth import require_scope
-from src.api.models.requests import AgentTaskRequest, IngestRepositoryRequest
-from src.api.models.responses import AgentTaskResponse, AgentTaskSubmittedResponse, AgentTaskSummaryResponse
-from src.db.models import APIKey, Tenant, User
+from src.api.models.requests import AgentTaskRequest, IngestRepositoryRequest, SubmitTaskFeedbackRequest
+from src.api.models.responses import (
+    AgentTaskResponse,
+    AgentTaskSubmittedResponse,
+    AgentTaskSummaryResponse,
+    TaskFeedbackResponse,
+)
+from src.db.connection import get_db_context
+from src.db.models import AgentTask, APIKey, FeedbackVerdict, TaskFeedback, Tenant, User
 from src.memory.ingestion import CodeIngestionPipeline
+from src.orchestrator.concurrency import ConcurrencyLimitExceeded
 from src.orchestrator.engine import get_keystone_engine
 from src.orchestrator.events import TERMINAL_PHASES, block_for_next_event, read_task_events_from
+from src.orchestrator.nodes._shared import slugify_for_branch
 
 router = APIRouter(prefix="/v1/keystone", tags=["keystone"])
 
@@ -34,20 +42,24 @@ async def submit_task(
     user: User | None = auth[2]
     engine = get_keystone_engine()
 
-    task_id = await engine.submit_task(
-        tenant_id=tenant.id,
-        api_key_id=api_key.id,
-        user_id=user.id if user else None,
-        task_description=req.task,
-        repository_url=req.repository_url,
-        branch=req.branch,
-        file_paths=req.file_paths,
-        model=req.model,
-        max_iterations=req.max_iterations,
-        enable_reasoning_review=req.enable_reasoning_review,
-        enable_sandbox_testing=req.enable_sandbox_testing,
-        context_files=req.context_files,
-    )
+    try:
+        task_id = await engine.submit_task(
+            tenant_id=tenant.id,
+            api_key_id=api_key.id,
+            user_id=user.id if user else None,
+            user_slug=slugify_for_branch(user.email.split("@")[0]) if user else None,
+            task_description=req.task,
+            repository_url=req.repository_url,
+            branch=req.branch,
+            file_paths=req.file_paths,
+            model=req.model,
+            max_iterations=req.max_iterations,
+            enable_reasoning_review=req.enable_reasoning_review,
+            enable_sandbox_testing=req.enable_sandbox_testing,
+            context_files=req.context_files,
+        )
+    except ConcurrencyLimitExceeded as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
 
     return AgentTaskSubmittedResponse(task_id=task_id, status="pending")
 
@@ -136,6 +148,44 @@ async def cancel_task(
     if not cancelled:
         raise HTTPException(status_code=404, detail="Task not found or not running")
     return {"status": "cancelled", "task_id": str(task_id)}
+
+
+@router.post("/tasks/{task_id}/feedback", response_model=TaskFeedbackResponse, status_code=201)
+async def submit_task_feedback(
+    task_id: UUID,
+    req: SubmitTaskFeedbackRequest,
+    auth: tuple = Depends(require_scope("agent")),
+):
+    """A human's own verdict on a completed task — accept/reject/merge/revert
+    plus an optional reason src/memory/extract.py can later turn into a
+    proposed memory. Complements src/orchestrator/pr_polling.py's automatic
+    merged/rejected detection; this is the path for everything a PR's own
+    open/closed/merged state can't tell you (accepted-without-a-PR, a
+    revert caught by a human, etc.)."""
+    tenant: Tenant = auth[1]
+    user: User | None = auth[2]
+
+    async with get_db_context() as db:
+        task = await db.get(AgentTask, task_id)
+        if task is None or task.tenant_id != tenant.id:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        feedback = TaskFeedback(
+            task_id=task_id,
+            user_id=str(user.id) if user else None,
+            verdict=FeedbackVerdict(req.verdict),
+            reason=req.reason,
+        )
+        db.add(feedback)
+        await db.flush()
+        return TaskFeedbackResponse(
+            id=feedback.id,
+            task_id=feedback.task_id,
+            user_id=feedback.user_id,
+            verdict=feedback.verdict.value,
+            reason=feedback.reason,
+            created_at=feedback.created_at,
+        )
 
 
 @router.post("/ingest")

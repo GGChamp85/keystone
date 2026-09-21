@@ -90,6 +90,14 @@ class AgentState:
     task_id: UUID = field(default_factory=uuid4)
     tenant_id: UUID | None = None
     api_key_id: UUID | None = None
+    # A git-ref-safe slug for the real user behind this task (src/db/models.py's
+    # User, resolved at submission — src/orchestrator/nodes/_shared.py's
+    # slugify_for_branch()), used in the working branch name
+    # (keystone/<user_slug>/<task_id>) so concurrent developers' branches
+    # don't collide and a PR's author is obvious from its branch alone.
+    # None for a key not yet linked to a user — branch naming falls back to
+    # "agent" in that case, same as before Phase 4.
+    user_slug: str | None = None
 
     # ── Task definition ───────────────────────────────────────
     task_description: str = ""

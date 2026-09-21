@@ -27,9 +27,15 @@ from temporalio.client import Client, WorkflowHandle
 
 from src.config import get_settings
 from src.db.connection import get_db_context
-from src.db.models import AgentTask, TaskStatus
+from src.db.models import AgentTask, TaskStatus, Tenant
 from src.memory.vector_store import VectorStore
 from src.orchestrator.circuit_breaker import CircuitBreakerConfig, CircuitBreakerTripped
+from src.orchestrator.concurrency import (
+    ConcurrencyLimitExceeded,
+    per_user_fair_share,
+    release_task_slot,
+    try_acquire_task_slot,
+)
 from src.orchestrator.events import publish_task_event
 from src.orchestrator.graph import HeartbeatCallback, _state_to_dict, build_agent_graph
 from src.orchestrator.state import AgentPhase, AgentState
@@ -91,13 +97,26 @@ class KeystoneEngine:
         enable_sandbox_testing: bool = True,
         context_files: dict[str, str] | None = None,
         user_id: UUID | None = None,
+        user_slug: str | None = None,
     ) -> UUID:
         """
         Create a new agent task and start execution.
         Returns the task ID immediately; execution runs in background.
+
+        Raises ConcurrencyLimitExceeded (caught by the API route -> 429) if
+        the tenant, or the calling user's fair share of it, is already at
+        Tenant.max_concurrent_agents — checked before any task row is
+        created, so a rejected submission never leaves behind an orphaned
+        PENDING task that will never run.
         """
         task_id = uuid4()
         settings = get_settings()
+
+        async with get_db_context() as db:
+            tenant = await db.get(Tenant, tenant_id)
+        tenant_max = tenant.max_concurrent_agents if tenant is not None else 3
+        if not await try_acquire_task_slot(tenant_id, task_id, tenant_max, user_id=user_id):
+            raise ConcurrencyLimitExceeded(tenant_max, per_user_fair_share(tenant_max) if user_id else None)
 
         # Persist task to database
         async with get_db_context() as db:
@@ -132,6 +151,8 @@ class KeystoneEngine:
             "enable_reasoning_review": enable_reasoning_review,
             "enable_sandbox_testing": enable_sandbox_testing,
             "context_files": context_files or {},
+            "user_id": user_id,
+            "user_slug": user_slug,
             "heartbeat_callback": _publish_event,
         }
 
@@ -155,6 +176,8 @@ class KeystoneEngine:
                     max_iterations=max_iterations,
                     enable_reasoning_review=enable_reasoning_review,
                     enable_sandbox_testing=enable_sandbox_testing,
+                    user_id=str(user_id) if user_id else None,
+                    user_slug=user_slug,
                 ),
                 id=workflow_id,
                 task_queue=settings.temporal_task_queue,
@@ -207,6 +230,8 @@ class KeystoneEngine:
         enable_reasoning_review: bool,
         enable_sandbox_testing: bool,
         context_files: dict[str, str],
+        user_id: UUID | None = None,
+        user_slug: str | None = None,
         heartbeat_callback: HeartbeatCallback | None = None,
     ) -> dict[str, Any]:
         """
@@ -237,6 +262,7 @@ class KeystoneEngine:
             max_iterations=max_iterations,
             enable_reasoning_review=enable_reasoning_review,
             enable_sandbox_testing=enable_sandbox_testing,
+            user_slug=user_slug,
         )
 
         # Retrieve RAG context from Qdrant
@@ -407,6 +433,15 @@ class KeystoneEngine:
                 except Exception as exc:
                     logger.warning("keystone.repo_sandbox_cleanup_failed", task_id=str(task_id), error=str(exc))
 
+            # Concurrency slot released unconditionally, on every exit path
+            # (success, failure, circuit-breaker trip, or an unhandled
+            # exception) — a task that never releases its slot would
+            # permanently shrink the tenant's real capacity.
+            try:
+                await release_task_slot(tenant_id, task_id, user_id=user_id)
+            except Exception as exc:
+                logger.warning("keystone.concurrency_slot_release_failed", task_id=str(task_id), error=str(exc))
+
     async def _finalize_git_workflow(self, task_id: UUID, final_state: dict[str, Any]) -> dict[str, Any]:
         """
         Runs once, after the graph reaches COMPLETE with a cloned repo:
@@ -419,7 +454,8 @@ class KeystoneEngine:
         to persist alongside the rest of the task's result.
         """
         settings = get_settings()
-        working_branch = final_state.get("working_branch") or f"keystone/agent/{task_id}"
+        fallback_slug = final_state.get("user_slug") or "agent"
+        working_branch = final_state.get("working_branch") or f"keystone/{fallback_slug}/{task_id}"
         ws = Workspace(get_sandbox_manager(), task_id=str(task_id))
         result: dict[str, Any] = {"branch_name": working_branch}
 
