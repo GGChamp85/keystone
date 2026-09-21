@@ -4,8 +4,62 @@
 # nodeSelector — this is what makes the "separate GPU nodes for coding vs.
 # reasoning" architecture actually portable across cluster sizes, instead of
 # docker-compose's hardcoded --device-ids assuming one specific host.
+#
+# Two independent scaling axes, controlled by $cfg.replicas and
+# $cfg.nodeCount — never combine both above 1 for the same role, see the
+# comment above the StatefulSet's `replicas` field below:
+#   - replicas > 1: N *independent* full model instances (each its own
+#     tensor-parallel group of $cfg.gpuCount GPUs on one node) behind the
+#     load-balanced Service below — real horizontal throughput scaling,
+#     the standard, well-tested Kubernetes pattern (this is what most
+#     production deployments should reach for first).
+#   - nodeCount > 1: ONE model instance pipeline-parallel across that many
+#     nodes (each still $cfg.gpuCount-wide tensor-parallel) — for a model
+#     whose weights + KV-cache genuinely don't fit one node's GPU pool
+#     even at full tensor-parallel width (src/inference/config.py's
+#     VLLMConfig.pipeline_parallel_size/distributed_executor_backend
+#     generate the matching --pipeline-parallel-size/
+#     --distributed-executor-backend=ray flags). Real vLLM multi-node
+#     mechanics (docs.vllm.ai/en/latest/serving/distributed_serving.html):
+#     pod ordinal 0 starts a Ray head and the vLLM OpenAI server on top of
+#     it; ordinals 1..N-1 join that Ray cluster as workers and block —
+#     vLLM's own Ray executor then schedules pipeline stages across all of
+#     them. This chart's `helm template`/`helm lint` output is verified in
+#     CI; the actual multi-node bootstrap has NOT been verified against
+#     real multi-node GPU hardware (this dev environment has none) —
+#     re-verify with scripts/smoke_glm_toolcall.py the first time a real
+#     nodeCount > 1 deployment goes up.
 {{- range $role, $cfg := .Values.vllm }}
 {{- if $cfg.enabled }}
+{{- $replicas := $cfg.replicas | default 1 }}
+{{- $nodeCount := $cfg.nodeCount | default 1 }}
+{{- $isMultiNode := gt ($nodeCount | int) 1 }}
+{{- $podCount := $isMultiNode | ternary $nodeCount $replicas }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "keystone.fullname" $ }}-vllm-{{ $role }}-headless
+  labels: {{- include "keystone.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: vllm-{{ $role }}
+  annotations:
+    keystone.dev/purpose: "StatefulSet pod governance and, for multi-node roles, stable per-pod DNS so Ray workers can address the head pod (ordinal 0) — not for client traffic."
+spec:
+  clusterIP: None
+  ports:
+    - port: 8000
+      name: http
+    - port: 6379
+      name: ray-gcs
+  selector:
+    {{- include "keystone.selectorLabels" $ | nindent 4 }}
+    app.kubernetes.io/component: vllm-{{ $role }}
+---
+# Client-facing, load-balanced Service — real traffic (VLLM_CODING_URL etc.
+# in configmap.yaml) targets this one. With replicas > 1 every pod behind
+# it is an independent full model instance, so plain round-robin
+# ClusterIP load balancing is correct; with nodeCount > 1 only ordinal 0
+# (the Ray head + API server) actually answers HTTP, so replicas stays 1
+# and this simply proxies straight to it.
 apiVersion: v1
 kind: Service
 metadata:
@@ -13,13 +67,15 @@ metadata:
   labels: {{- include "keystone.labels" $ | nindent 4 }}
     app.kubernetes.io/component: vllm-{{ $role }}
 spec:
-  clusterIP: None
   ports:
     - port: 8000
       name: http
   selector:
     {{- include "keystone.selectorLabels" $ | nindent 4 }}
     app.kubernetes.io/component: vllm-{{ $role }}
+    {{- if $isMultiNode }}
+    statefulset.kubernetes.io/pod-name: {{ include "keystone.fullname" $ }}-vllm-{{ $role }}-0
+    {{- end }}
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -28,8 +84,12 @@ metadata:
   labels: {{- include "keystone.labels" $ | nindent 4 }}
     app.kubernetes.io/component: vllm-{{ $role }}
 spec:
-  serviceName: {{ include "keystone.fullname" $ }}-vllm-{{ $role }}
-  replicas: 1
+  serviceName: {{ include "keystone.fullname" $ }}-vllm-{{ $role }}-headless
+  # See the file-level comment above: this is EITHER independent
+  # horizontal replicas (nodeCount == 1) OR the pod count of one
+  # pipeline-parallel multi-node instance (nodeCount > 1) — never both at
+  # once for the same role.
+  replicas: {{ $podCount }}
   selector:
     matchLabels:
       {{- include "keystone.selectorLabels" $ | nindent 6 }}
@@ -51,6 +111,48 @@ spec:
         - name: vllm
           image: {{ include "keystone.image" (dict "root" $ "image" ($cfg.image | default $.Values.image.vllm)) }}
           imagePullPolicy: {{ $.Values.image.vllm.pullPolicy }}
+          {{- if $isMultiNode }}
+          # Real vLLM multi-node bootstrap (see the file-level comment):
+          # ordinal 0 becomes the Ray head and runs the actual API server
+          # on top of it; every other ordinal joins as a Ray worker and
+          # blocks forever — vLLM's Ray executor (selected by
+          # --distributed-executor-backend=ray, from this role's
+          # distributed_executor_backend in src/inference/config.py)
+          # schedules pipeline stages onto them from the head.
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              ORDINAL="${HOSTNAME##*-}"
+              HEAD_ADDR="{{ include "keystone.fullname" $ }}-vllm-{{ $role }}-0.{{ include "keystone.fullname" $ }}-vllm-{{ $role }}-headless.{{ $.Release.Namespace }}.svc.cluster.local"
+              if [ "$ORDINAL" = "0" ]; then
+                ray start --head --port=6379 --num-gpus={{ $cfg.gpuCount }} --disable-usage-stats
+                exec python3 -m vllm.entrypoints.openai.api_server \
+                  --model={{ $cfg.model }} \
+                  --served-model-name={{ $cfg.servedModelName }} \
+                  --tensor-parallel-size={{ $cfg.gpuCount }} \
+                  --pipeline-parallel-size={{ $nodeCount }} \
+                  --distributed-executor-backend=ray \
+                  --max-model-len={{ $cfg.maxModelLen }} \
+                  --gpu-memory-utilization=0.92 \
+                  --enable-prefix-caching \
+                  --enable-chunked-prefill \
+                  --trust-remote-code \
+                  {{- if $cfg.toolParser }}
+                  --enable-auto-tool-choice \
+                  --tool-call-parser={{ $cfg.toolParser }} \
+                  {{- end }}
+                  {{- if $cfg.kvCacheDtype }}
+                  --kv-cache-dtype={{ $cfg.kvCacheDtype }} \
+                  {{- end }}
+                  --port=8000
+              else
+                until ray start --address="${HEAD_ADDR}:6379" --num-gpus={{ $cfg.gpuCount }} --disable-usage-stats --block; do
+                  echo "waiting for Ray head ${HEAD_ADDR} to be reachable..." >&2
+                  sleep 5
+                done
+              fi
+          {{- else }}
           command:
             - python3
             - "-m"
@@ -68,7 +170,11 @@ spec:
             - "--enable-auto-tool-choice"
             - "--tool-call-parser={{ $cfg.toolParser }}"
             {{- end }}
+            {{- if $cfg.kvCacheDtype }}
+            - "--kv-cache-dtype={{ $cfg.kvCacheDtype }}"
+            {{- end }}
             - "--port=8000"
+          {{- end }}
           env:
             - name: VLLM_NO_USAGE_STATS
               value: "1"
@@ -82,6 +188,7 @@ spec:
             {{- end }}
           ports:
             - containerPort: 8000
+            - containerPort: 6379
           volumeMounts:
             - name: model-cache
               mountPath: /root/.cache/huggingface
@@ -95,6 +202,39 @@ spec:
         - name: model-cache
           persistentVolumeClaim:
             claimName: {{ include "keystone.fullname" $ }}-model-cache
+---
+{{- if and $cfg.autoscaling $cfg.autoscaling.enabled (not $isMultiNode) }}
+# Horizontal autoscaling by real vLLM load, not CPU — vLLM is GPU-bound so
+# a CPU-percentage HPA would never trigger. Uses KEDA's Prometheus scaler
+# against the real num_requests_waiting metric these pods already expose
+# (see observability/grafana/provisioning/dashboards/json/vllm-inference.json)
+# rather than standing up a separate Prometheus Adapter + custom-metrics
+# API just for this. Requires KEDA installed in-cluster
+# (keda.sh — real, self-hosted, Apache-2.0) and $.Values.observability's
+# Prometheus reachable at the URL below; both are operator responsibilities
+# outside this chart, so this whole block stays opt-in per role.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "keystone.fullname" $ }}-vllm-{{ $role }}
+  labels: {{- include "keystone.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: vllm-{{ $role }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: {{ include "keystone.fullname" $ }}-vllm-{{ $role }}
+  minReplicaCount: {{ $cfg.autoscaling.minReplicas | default 1 }}
+  maxReplicaCount: {{ $cfg.autoscaling.maxReplicas | default 4 }}
+  cooldownPeriod: {{ $cfg.autoscaling.cooldownSeconds | default 300 }}
+  triggers:
+    - type: prometheus
+      metadata:
+        serverAddress: {{ $cfg.autoscaling.prometheusUrl | default (printf "http://%s-prometheus:9090" (include "keystone.fullname" $)) }}
+        query: >-
+          sum(vllm:num_requests_waiting{service="{{ include "keystone.fullname" $ }}-vllm-{{ $role }}"})
+        threshold: {{ $cfg.autoscaling.queueDepthThreshold | default 8 | quote }}
+{{- end }}
 {{- end }}
 {{- end }}
 ---

@@ -91,6 +91,14 @@ jobs:
       - uses: azure/setup-helm@v4
       - run: helm lint helm/keystone --set training.enabled=true --set observability.enabled=true
       - run: helm template keystone-ci helm/keystone --set observability.enabled=true --set training.enabled=true > /dev/null
+      - name: helm template — single-node vLLM roles enabled (the default replicas=1/nodeCount=1 path)
+        run: |
+          helm lint helm/keystone --set vllm.coding.enabled=true --set vllm.coding-fallback.enabled=true --set vllm.reasoning.enabled=true
+          helm template keystone-ci helm/keystone --set vllm.coding.enabled=true --set vllm.coding-fallback.enabled=true --set vllm.reasoning.enabled=true > /dev/null
+      - name: helm template — multi-node (nodeCount>1) and KEDA autoscaling branches
+        run: |
+          helm template keystone-ci helm/keystone --set vllm.coding.enabled=true --set vllm.coding.nodeCount=2 > /dev/null
+          helm template keystone-ci helm/keystone --set vllm.coding.enabled=true --set vllm.coding.replicas=3 --set vllm.coding.autoscaling.enabled=true > /dev/null
 
   shellcheck:
     name: Shellcheck (airgap/, pki/, scripts/)

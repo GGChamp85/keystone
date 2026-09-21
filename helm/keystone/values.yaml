@@ -109,6 +109,27 @@ vllm:
   coding:
     enabled: false
     gpuCount: 8
+    # replicas: N independent full model instances for horizontal
+    # throughput scaling (real load balancing — see templates/vllm.yaml's
+    # file-level comment). nodeCount: > 1 pipeline-parallels ONE instance
+    # across that many nodes for a model too big for one node's GPU pool.
+    # Never raise both above 1 for the same role.
+    replicas: 1
+    nodeCount: 1
+    # KV-cache dtype — "fp8"/"fp8_e4m3" frees real KV-cache headroom on a
+    # fixed GPU budget at a real (if usually small) numerical cost; leave
+    # unset until verified on real hardware. See
+    # src/inference/config.py's VLLMConfig.kv_cache_dtype.
+    kvCacheDtype: ""
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 4
+      queueDepthThreshold: 8 # vllm:num_requests_waiting per pod before scaling out
+      cooldownSeconds: 300
+      # prometheusUrl: override only if this chart's own bundled Prometheus
+      # (templates/observability.yaml) isn't what you scrape from — the
+      # default targets that in-cluster Service directly.
     model: "zai-org/GLM-5.3-Flash"
     servedModelName: glm-5.3-flash
     maxModelLen: 131072
@@ -132,6 +153,15 @@ vllm:
   coding-fallback:
     enabled: false
     gpuCount: 4
+    replicas: 1
+    nodeCount: 1
+    kvCacheDtype: ""
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      queueDepthThreshold: 8
+      cooldownSeconds: 300
     model: "Qwen/Qwen2.5-Coder-32B-Instruct"
     servedModelName: qwen-coder-32b
     maxModelLen: 131072
@@ -144,6 +174,15 @@ vllm:
   reasoning:
     enabled: false
     gpuCount: 2
+    replicas: 1
+    nodeCount: 1
+    kvCacheDtype: ""
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 2
+      queueDepthThreshold: 8
+      cooldownSeconds: 300
     model: "deepseek-ai/DeepSeek-R1"
     servedModelName: deepseek-r1
     maxModelLen: 65536
