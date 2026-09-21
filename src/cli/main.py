@@ -16,6 +16,7 @@ Configured the same way `cli/opencode.config.json` already is:
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Annotated
 
@@ -26,7 +27,9 @@ from rich.table import Table
 
 app = typer.Typer(add_completion=False, help="Keystone — self-hosted LLM inference & autonomous coding agents.")
 memory_app = typer.Typer(add_completion=False, help="Inspect and manage what the agent has learned.")
+finetune_app = typer.Typer(add_completion=False, help="Start and manage fine-tuning jobs.")
 app.add_typer(memory_app, name="memory")
+app.add_typer(finetune_app, name="finetune")
 
 console = Console()
 error_console = Console(stderr=True, style="bold red")
@@ -175,6 +178,137 @@ def memory_unpin(memory_id: Annotated[str, typer.Argument()]):
     """Unpin a memory."""
     record = _request_one("POST", f"/v1/keystone/memory/{memory_id}/unpin")
     console.print(f"[green]Unpinned[/green] {record['id']}")
+
+
+def _parse_config_value(raw: str):
+    """A --set VALUE is JSON first (so `--set lora_r=16` and `--set eval_steps=25`
+    become real ints, `--set use_qlora=true` a real bool), falling back to the
+    literal string when it isn't valid JSON (e.g. a bare model path)."""
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+
+
+def _parse_config_sets(sets: list[str]) -> dict:
+    config: dict = {}
+    for item in sets:
+        if "=" not in item:
+            error_console.print(f"--set expects KEY=VALUE, got: {item!r}")
+            raise typer.Exit(code=1)
+        key, _, raw_value = item.partition("=")
+        config[key] = _parse_config_value(raw_value)
+    return config
+
+
+def _finetune_job_table(jobs: list[dict]) -> Table:
+    table = Table(show_lines=False)
+    table.add_column("ID", style="dim", no_wrap=True)
+    table.add_column("Type")
+    table.add_column("Base model")
+    table.add_column("Status")
+    table.add_column("Created")
+    for j in jobs:
+        table.add_row(str(j["id"])[:8], j["job_type"], j["base_model"], j["status"], j["created_at"])
+    return table
+
+
+def _print_finetune_job(job: dict) -> None:
+    console.print(
+        f"[bold]{job['id']}[/bold]  {job['job_type']}  {job['base_model']}  status=[cyan]{job['status']}[/cyan]"
+    )
+    if job.get("metrics"):
+        console.print(f"  metrics: {job['metrics']}")
+    if job.get("output_model_path"):
+        console.print(f"  output: {job['output_model_path']}")
+    if job.get("error_message"):
+        error_console.print(f"  error: {job['error_message']}")
+
+
+@finetune_app.command("start")
+def finetune_start(
+    job_type: Annotated[str, typer.Argument(help="lora | sft | dpo")],
+    base_model: Annotated[str, typer.Argument(help="Base model id, e.g. Qwen/Qwen2.5-Coder-32B-Instruct")],
+    training_data_path: Annotated[str, typer.Argument(help="Path to the training_data JSONL, reachable by the server")],
+    set_: Annotated[
+        list[str], typer.Option("--set", help="Trainer config override KEY=VALUE, repeatable (e.g. --set num_epochs=3)")
+    ] = [],  # noqa: B006 — typer reads the default list, never mutated
+):
+    """Start a fine-tuning job."""
+    config = _parse_config_sets(set_)
+    body = {"job_type": job_type, "base_model": base_model, "training_data_path": training_data_path, "config": config}
+    job = _request_one("POST", "/v1/finetune/jobs", json=body)
+    console.print(f"[green]Started[/green] job {job['id']}")
+    _print_finetune_job(job)
+
+
+@finetune_app.command("list")
+def finetune_list(status: Annotated[str | None, typer.Option(help="Filter by status")] = None):
+    """List fine-tuning jobs for your tenant."""
+    params = {"status": status} if status else {}
+    jobs = _request_many("GET", "/v1/finetune/jobs", params=params)
+    if not jobs:
+        console.print("No fine-tuning jobs found.")
+        return
+    console.print(_finetune_job_table(jobs))
+
+
+@finetune_app.command("status")
+def finetune_status(job_id: Annotated[str, typer.Argument()]):
+    """Show one job's current status and metrics."""
+    job = _request_one("GET", f"/v1/finetune/jobs/{job_id}")
+    _print_finetune_job(job)
+
+
+@finetune_app.command("preview")
+def finetune_preview(
+    job_id: Annotated[str, typer.Argument()],
+    lines: Annotated[int, typer.Option(help="Number of records to preview")] = 5,
+):
+    """Preview the first records of a job's real training data."""
+    result = _request_one("GET", f"/v1/finetune/jobs/{job_id}/dataset-preview", params={"lines": lines})
+    console.print(f"{result['path']}  ({result['total_records']} records)")
+    for record in result["preview"]:
+        console.print(record)
+
+
+@finetune_app.command("promote")
+def finetune_promote(job_id: Annotated[str, typer.Argument()]):
+    """Promote a completed job's adapter to the tenant's default for its base model."""
+    job = _request_one("POST", f"/v1/finetune/jobs/{job_id}/promote")
+    console.print(f"[green]Promoted[/green] {job['id']} — new requests for {job['base_model']} now route to it.")
+
+
+@finetune_app.command("rollback")
+def finetune_rollback(job_id: Annotated[str, typer.Argument()]):
+    """Retire a promoted job's adapter — routing falls back to the base model."""
+    job = _request_one("POST", f"/v1/finetune/jobs/{job_id}/rollback")
+    console.print(f"[yellow]Rolled back[/yellow] {job['id']} — routing now falls back to the base model.")
+
+
+@finetune_app.command("watch")
+def finetune_watch(job_id: Annotated[str, typer.Argument()]):
+    """Stream a job's live progress until it reaches a terminal status."""
+    url = f"{_base_url()}/v1/finetune/jobs/{job_id}/stream"
+    headers = {"Authorization": f"Bearer {_api_key()}"}
+    try:
+        with (
+            httpx.Client(timeout=httpx.Timeout(connect=10.0, read=None, write=10.0, pool=10.0)) as client,
+            client.stream("GET", url, headers=headers) as resp,
+        ):
+            if resp.status_code != 200:
+                error_console.print(f"Request failed ({resp.status_code}): {resp.read().decode()}")
+                raise typer.Exit(code=1)
+            for line in resp.iter_lines():
+                if not line.startswith("data: "):
+                    continue
+                payload = json.loads(line[len("data: ") :])
+                console.print(f"[cyan]{payload['status']}[/cyan]  {payload.get('message', '')}")
+                if payload.get("metrics"):
+                    console.print(f"  metrics: {payload['metrics']}")
+    except httpx.ConnectError as exc:
+        error_console.print(f"Could not reach {_base_url()}: {exc}")
+        raise typer.Exit(code=1) from exc
 
 
 if __name__ == "__main__":
