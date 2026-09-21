@@ -243,7 +243,26 @@ Each task in `benchmarks/tasks/` is scored by actually executing the model's com
 | `claude-opus` | 3/3 | Real Anthropic API call, real sandboxed test execution. |
 | `claude-sonnet` | 3/3 | Same. |
 
-**Read this result for what it is, not more**: this is a 3-task single-function smoke suite that exists to prove the harness itself — sandboxed execution, real cost accounting, gated frontier clients — is genuinely wired end to end, not a claim that Keystone's self-hosted models match or beat frontier models. The repo-scale, multi-file, SWE-bench-lite-style benchmark suite that would actually support a quality comparison (real repos, real failing tests, run through the full agent loop) is still on the roadmap — see `ROADMAP.md`'s Phase 6. No number in this README is invented; where a real measurement doesn't exist yet, the roadmap says so instead of guessing.
+**Read this result for what it is, not more**: this is a 3-task single-function smoke suite that exists to prove the harness itself — sandboxed execution, real cost accounting, gated frontier clients — is genuinely wired end to end, not a claim that Keystone's self-hosted models match or beat frontier models. No number in this README is invented; where a real measurement doesn't exist yet, the roadmap says so instead of guessing.
+
+### The real repo-scale benchmark
+
+`benchmarks/agent_runner.py` is the actual thing a quality comparison needs: a repo-scale task run through the *real* agent loop (`src/orchestrator/engine.py`'s real engine, real tools, real quality gates, a real git workflow) against a seeded repository with a genuine bug and a real failing test — not a single free-standing completion.
+
+```bash
+python -m benchmarks.agent_runner --task token_bucket --max-iterations 8
+```
+
+To use a real frontier model as the coding backend for this, `benchmarks/frontier_proxy.py` translates `src/inference/client.py`'s exact OpenAI-compatible wire protocol to and from the real Anthropic Messages API — point `VLLM_CODING_URL` at it and the unmodified orchestrator runs against Claude:
+
+```bash
+FRONTIER_PROXY_MODEL=claude-opus-4-6 python -m benchmarks.frontier_proxy   # serves on :8090
+export VLLM_CODING_URL=http://localhost:8090/v1
+```
+
+**Run for real** against a live Gitea, a live sandbox, and Claude: the seeded `token_bucket` task (a token-bucket rate limiter whose `_refill()` doesn't cap tokens at capacity) was **solved in 67.6s across 5 iterations** — real planning, real tool-based coding, real quality gates, real review, real tests, a real push, and a real PR opened — independently confirmed by cloning the pushed branch in a *fresh* sandbox and re-running both the fail-to-pass and pass-to-pass tests, both passing. Requires `GIT_HOST_API_URL`/`GIT_HOST_TOKEN`/`GIT_ALLOWED_HOSTS` pointed at a real Gitea reachable from inside a sandbox (see `tests/test_git_workflow_integration.py`'s module docstring for how to stand one up).
+
+**Still honestly incomplete**: only one repo task exists so far (the plan calls for 10–20), there's no persisted comparison sweep yet (base vs. base+RAG vs. fine-tuned vs. frontier, all through this same harness), and no web UI comparison panel — see `ROADMAP.md`'s Phase 6.
 
 ---
 
