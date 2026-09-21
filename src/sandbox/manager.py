@@ -65,6 +65,13 @@ class SandboxManager:
                 "network_enabled": network_enabled,
                 "max_concurrent_per_tenant": self.settings.sandbox_max_concurrent,
             },
+            # A network-enabled sandbox applies one real iptables rule per
+            # configured egress host (src/sandbox/security.py's
+            # build_egress_policy) before the daemon responds — each one a
+            # real OS-level DNS lookup that can legitimately take several
+            # seconds. The client-wide 30s default is tuned for the common
+            # no-network case; this call specifically needs real headroom.
+            timeout=90.0 if network_enabled else 30.0,
         )
         resp.raise_for_status()
         data = resp.json()

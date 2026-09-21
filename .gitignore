@@ -19,6 +19,10 @@ nginx/certs/*.pem
 nginx/certs/*.key
 pki/ca/
 pki/certs/
+pki/test-ca/
+pki/test-certs/
+docker/sandbox-runtimes/ca-certs/*.crt
+docker/sandbox-runtimes/ca-certs/*.pem
 
 # Data / model caches
 data/

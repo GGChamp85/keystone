@@ -350,8 +350,16 @@ services:
 
 networks:
   keystone-network:
+    name: keystone-network
     driver: bridge
+  # Pinned, unprefixed name: src/sandbox/backends/gvisor.py's _SANDBOX_NETWORK
+  # constant attaches task sandboxes to this exact Docker network name — without
+  # `name:` here, Compose prefixes it with the project name (e.g.
+  # "myproject_keystone-sandbox-net"), which the daemon then can't find,
+  # failing every network-enabled sandbox (e.g. a git clone) with a real 404
+  # "network keystone-sandbox-net not found" from the Docker API.
   keystone-sandbox-net:
+    name: keystone-sandbox-net
     driver: bridge
     internal: false
 

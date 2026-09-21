@@ -144,6 +144,44 @@ class EgressPolicy:
         )
         self.rules.insert(0, rule)
 
+
+def build_egress_policy(
+    git_allowed_hosts: list[str],
+    pip_index_url: str | None = None,
+    npm_registry_url: str | None = None,
+    go_proxy_url: str | None = None,
+) -> EgressPolicy:
+    """
+    The real, deployment-specific egress policy — `EgressPolicy()` alone
+    only carries `DEFAULT_EGRESS_RULES`' placeholder `*.internal.keystone.local`
+    hostnames, which a real deployment (one that set `GIT_ALLOWED_HOSTS` to
+    its own git server per the README's "Connect your own git server"
+    instructions) never actually resolves; without this, a repository URL
+    would correctly pass `_validate_repo_url`'s SSRF allowlist check and
+    then have its real git clone silently blocked by this policy's
+    DENY-by-default egress rules — the exact bug this closes.
+
+    Each real configured host gets its own ALLOW rule (highest priority,
+    via `add_allow_rule`); the git hosts always do (Git operations are
+    Keystone's core workflow), the mirror URLs only when actually
+    configured (an unset one would otherwise cost a real, wasted DNS
+    timeout on every sandbox creation for a host nobody set up).
+    """
+    policy = EgressPolicy()
+    for host in git_allowed_hosts:
+        policy.add_allow_rule(host, port=443, description=f"Configured git host: {host}")
+
+    from urllib.parse import urlparse
+
+    for url in (pip_index_url, npm_registry_url, go_proxy_url):
+        if not url:
+            continue
+        host = urlparse(url).hostname
+        if host:
+            policy.add_allow_rule(host, port=443, description=f"Configured package mirror: {host}")
+
+    return policy
+
     def to_iptables_commands(self, interface: str = "eth0") -> list[str]:
         """
         Generate iptables commands to enforce this policy.

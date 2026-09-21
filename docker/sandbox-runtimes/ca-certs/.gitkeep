@@ -1,0 +1,15 @@
+Drop your internal CA's root certificate(s) here (e.g. pki/ca/ca.crt) before
+running `make sandbox-images` — every *.crt file in this directory is baked
+into the sandbox image's trust store at build time via update-ca-certificates.
+
+Real need this closes: a repository_url on your own internal git host
+(README's "Connect your own git server") that uses a cert signed by your
+internal CA (pki/generate_ca.sh's own pattern, used elsewhere in this repo
+for nginx/OpenBao) would otherwise fail `git clone` inside the sandbox with
+"certificate signer not trusted" — the sandbox's base image only trusts
+publicly-known CAs, not one you minted yourself. An internal git host with a
+publicly-trusted certificate needs nothing here.
+
+This directory is intentionally empty by default (only this placeholder
+file) — a normal `make sandbox-images` build stays air-gap-safe and adds
+zero extra trusted roots.

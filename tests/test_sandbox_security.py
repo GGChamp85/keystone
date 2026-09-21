@@ -10,6 +10,7 @@ import time
 from src.sandbox.security import (
     EgressPolicy,
     SecretVault,
+    build_egress_policy,
     sanitize_environment,
     scan_sandbox_output,
 )
@@ -34,6 +35,51 @@ def test_add_allow_rule_takes_priority():
     policy = EgressPolicy()
     policy.add_allow_rule("custom.internal.keystone.local", port=443, description="test")
     assert policy.rules[0].destination == "custom.internal.keystone.local"
+
+
+def test_build_egress_policy_allows_the_real_configured_git_host():
+    """The bug this closes: a repository_url that passes _validate_repo_url's
+    SSRF allowlist (settings.git_allowed_hosts) must actually be allowed
+    through the sandbox's own egress firewall too — a bare EgressPolicy()
+    only ever allows the placeholder *.internal.keystone.local hostnames,
+    regardless of what a real deployment configured."""
+    policy = build_egress_policy(["git.mycompany.example"])
+    allow_destinations = [r.destination for r in policy.rules if r.action.value == "allow"]
+    assert "git.mycompany.example" in allow_destinations
+
+
+def test_build_egress_policy_configured_host_takes_priority_over_defaults():
+    policy = build_egress_policy(["git.mycompany.example"])
+    assert policy.rules[0].destination == "git.mycompany.example"
+
+
+def test_build_egress_policy_omits_unconfigured_mirror_hosts():
+    """An unset pip/npm/go mirror must not add an allow rule for a
+    placeholder hostname nobody configured — DEFAULT_EGRESS_RULES already
+    does that, and duplicating it here would just double the wasted DNS
+    lookup, not add any real capability."""
+    policy = build_egress_policy(["git.mycompany.example"])
+    added_destinations = {r.destination for r in policy.rules[:1]}
+    assert added_destinations == {"git.mycompany.example"}
+
+
+def test_build_egress_policy_includes_configured_mirror_hosts_by_hostname():
+    policy = build_egress_policy(
+        ["git.mycompany.example"],
+        pip_index_url="https://pypi.mycompany.example/simple",
+        npm_registry_url="https://npm.mycompany.example",
+        go_proxy_url="https://goproxy.mycompany.example",
+    )
+    allow_destinations = [r.destination for r in policy.rules if r.action.value == "allow"]
+    assert "pypi.mycompany.example" in allow_destinations
+    assert "npm.mycompany.example" in allow_destinations
+    assert "goproxy.mycompany.example" in allow_destinations
+
+
+def test_build_egress_policy_still_denies_public_internet_by_default():
+    policy = build_egress_policy(["git.mycompany.example"])
+    destinations = [r.destination for r in policy.rules]
+    assert "0.0.0.0/0" in destinations
 
 
 def test_sanitize_environment_blocks_known_secret_names():

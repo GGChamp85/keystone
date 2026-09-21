@@ -34,7 +34,7 @@ from src.observability import sandbox_executions_total
 from src.sandbox.backends.base import SandboxBackend
 from src.sandbox.backends.firecracker import FirecrackerBackend, firecracker_available
 from src.sandbox.backends.gvisor import GVisorBackend
-from src.sandbox.security import EgressPolicy
+from src.sandbox.security import build_egress_policy
 
 logger = structlog.get_logger()
 
@@ -148,7 +148,12 @@ async def create_sandbox(req: CreateRequest):
         raise
     _handle_owner[handle] = req.tenant_id
 
-    policy = EgressPolicy()
+    policy = build_egress_policy(
+        settings.git_allowed_hosts,
+        settings.pip_index_url,
+        settings.npm_registry_url,
+        settings.go_proxy_url,
+    )
     allowed = [
         {"cidr": r.destination, "port": r.port}
         for r in policy.rules

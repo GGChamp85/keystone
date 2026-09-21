@@ -19,6 +19,12 @@
 #
 # Build: docker build -f docker/sandbox-runtimes/python.Dockerfile -t keystone-sandbox-python:latest .
 # In an air-gapped build, --build-arg PIP_INDEX_URL=https://pypi.internal.keystone.local/simple
+#
+# To trust an internal CA (e.g. for an internal git host whose cert is
+# signed by pki/generate_ca.sh's CA, not a public one) drop its root cert(s)
+# into docker/sandbox-runtimes/ca-certs/ before building — see that
+# directory's own .gitkeep for the real failure this closes. Empty by
+# default; a normal build adds zero extra trusted roots.
 
 FROM python:3.12-slim
 
@@ -43,6 +49,9 @@ RUN pip install --no-cache-dir \
     ruff>=0.6.0 \
     mypy>=1.11.0 \
     bandit>=1.7.9
+
+COPY docker/sandbox-runtimes/ca-certs/ /usr/local/share/ca-certificates/
+RUN update-ca-certificates
 
 RUN groupadd -r sandbox && useradd -r -g sandbox -d /workspace sandbox \
     && mkdir -p /workspace && chown -R sandbox:sandbox /workspace
