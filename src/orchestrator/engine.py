@@ -62,9 +62,13 @@ class KeystoneEngine:
         self._temporal_unavailable = False  # sticky, so we don't retry-connect every request
 
     async def _get_vector_store(self) -> VectorStore:
+        # One VectorStore (one Qdrant client connection) reused across every
+        # tenant's tasks — it now holds a real per-tenant Qdrant *collection*
+        # internally (src/memory/vector_store.py), lazily ensured per tenant
+        # inside search()/upsert_chunks() itself, since this getter has no
+        # single tenant_id to ensure ahead of time.
         if self._vector_store is None:
             self._vector_store = VectorStore()
-            await self._vector_store.ensure_collection()
         return self._vector_store
 
     async def _get_temporal_client(self) -> Client | None:

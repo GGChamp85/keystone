@@ -151,21 +151,25 @@ async def test_submit_task_raises_when_a_slot_is_already_held(tenant_id, api_key
 
 
 async def test_submit_task_acquires_and_releases_a_real_slot_end_to_end(tenant_id, api_key_id):
-    """No repository_url -> the background execution fails fast at the (in
-    this test env, unreachable) inference endpoint and hits _execute_task's
+    """No repository_url -> the background execution fails at the (in this
+    test env, unreachable) inference endpoint and hits _execute_task's
     `finally`, which must release the slot — proving the real acquire (in
     submit_task) -> release (in _execute_task) wiring, not just the Redis
-    primitives in isolation above."""
+    primitives in isolation above. When a real Qdrant is configured
+    (QDRANT_HOST), RAG retrieval runs for real first — including, on a cold
+    process, loading the real embedding model — before the inference call
+    fails, so the wait allows for that rather than assuming an instant
+    failure."""
     engine = get_keystone_engine()
     task_id = await engine.submit_task(
         tenant_id=tenant_id,
         api_key_id=api_key_id,
-        task_description="A real task that will fail fast — no repository_url, no reachable inference endpoint.",
+        task_description="A real task that will fail — no repository_url, no reachable inference endpoint.",
     )
     assert task_id is not None
     assert await current_tenant_concurrency(tenant_id) == 1
 
-    for _ in range(50):  # up to ~5s for the background task to fail and release
+    for _ in range(300):  # up to ~30s — covers a cold embedding-model load when Qdrant is real
         if await current_tenant_concurrency(tenant_id) == 0:
             break
         await asyncio.sleep(0.1)
