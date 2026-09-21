@@ -176,7 +176,7 @@ Then open the live UI and watch an agent actually work:
 open http://localhost:8080/app/   # paste your API key, submit a task, watch the plan/tool-trace stream in
 ```
 
-**Troubleshooting**: `make status` shows every container's health; `make logs` / `make logs-vllm` tail application/model logs; `make vllm-status` checks model endpoint health specifically; `make clean` tears down containers, volumes, and cached data for a clean retry.
+**Troubleshooting**: `keystone doctor` (`src/cli/doctor.py`) is the real diagnostic — it connects directly to Postgres, Redis, Qdrant, the sandbox daemon, each model endpoint, the git host, and package mirrors (independent of whether the app itself is even up yet) and reports exactly what's wrong, not just pass/fail. `make status` shows every container's health; `make logs` / `make logs-vllm` tail application/model logs; `make vllm-status` checks model endpoint health specifically; `make clean` tears down containers, volumes, and cached data for a clean retry.
 
 ---
 
