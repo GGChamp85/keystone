@@ -14,7 +14,7 @@ Optimizations applied:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -59,6 +59,19 @@ class VLLMConfig:
     # never receives `tools=`).
     tool_protocol: str = "native"  # "native" | "text"
     tool_parser: str | None = None
+
+    # LoRA adapter serving (src/db/models.py's ModelAdapter registry) — flags
+    # verified against vLLM's real current docs (docs.vllm.ai/en/latest/
+    # features/lora.html): `--enable-lora`, `--max-lora-rank N`,
+    # `--max-loras N`, `--lora-modules name=path name2=path2 ...`.
+    # `lora_modules` is `(served_name, path)` pairs — src/inference/
+    # model_router.py builds this list from each tenant's *promoted*
+    # ModelAdapter rows, so a served name always corresponds to a real,
+    # currently-promoted adapter, never a stale or candidate one.
+    enable_lora: bool = False
+    max_lora_rank: int = 64
+    max_loras: int = 4
+    lora_modules: list[tuple[str, str]] = field(default_factory=list)
 
     def to_cli_args(self) -> list[str]:
         args = [
@@ -113,6 +126,14 @@ class VLLMConfig:
 
         if self.tool_protocol == "native" and self.tool_parser:
             args += ["--enable-auto-tool-choice", "--tool-call-parser", self.tool_parser]
+
+        if self.enable_lora:
+            args.append("--enable-lora")
+            args += ["--max-lora-rank", str(self.max_lora_rank)]
+            args += ["--max-loras", str(self.max_loras)]
+            if self.lora_modules:
+                args.append("--lora-modules")
+                args += [f"{name}={path}" for name, path in self.lora_modules]
 
         return args
 

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from src.inference.config import (
+    VLLMConfig,
     coding_fallback_model_config,
     coding_model_config,
     reasoning_model_config,
@@ -72,3 +73,48 @@ def test_to_command_includes_model_flag():
     cfg = coding_model_config()
     command = cfg.to_command()
     assert "--model zai-org/GLM-5.3-Flash" in command
+
+
+def test_lora_disabled_by_default_emits_no_lora_flags():
+    """No deployment should get --enable-lora it didn't ask for — flags must
+    stay absent by default, not just default to empty/zero values."""
+    cfg = coding_model_config()
+    args = cfg.to_cli_args()
+    assert "--enable-lora" not in args
+    assert "--max-lora-rank" not in args
+    assert "--max-loras" not in args
+    assert "--lora-modules" not in args
+
+
+def test_enabling_lora_emits_the_real_vllm_flags():
+    """Flag names/syntax verified against vLLM's real current docs
+    (docs.vllm.ai/en/latest/features/lora.html): --enable-lora,
+    --max-lora-rank N, --max-loras N, --lora-modules name=path ..."""
+    cfg = VLLMConfig(model="zai-org/GLM-5.3-Flash", enable_lora=True, max_lora_rank=32, max_loras=2)
+    args = cfg.to_cli_args()
+    assert "--enable-lora" in args
+    rank_idx = args.index("--max-lora-rank")
+    assert args[rank_idx + 1] == "32"
+    loras_idx = args.index("--max-loras")
+    assert args[loras_idx + 1] == "2"
+
+
+def test_lora_modules_render_as_name_equals_path_pairs():
+    cfg = VLLMConfig(
+        model="zai-org/GLM-5.3-Flash",
+        enable_lora=True,
+        lora_modules=[("tenant-a-lora", "/data/adapters/tenant-a"), ("tenant-b-lora", "/data/adapters/tenant-b")],
+    )
+    args = cfg.to_cli_args()
+    idx = args.index("--lora-modules")
+    assert args[idx + 1 : idx + 3] == ["tenant-a-lora=/data/adapters/tenant-a", "tenant-b-lora=/data/adapters/tenant-b"]
+
+
+def test_lora_modules_omitted_flag_when_enabled_but_no_modules_given():
+    """--enable-lora with no --lora-modules is a real, valid vLLM startup
+    (adapters can be registered dynamically later via the load-adapter API)
+    — the flag must simply be absent, not emitted with an empty value."""
+    cfg = VLLMConfig(model="zai-org/GLM-5.3-Flash", enable_lora=True)
+    args = cfg.to_cli_args()
+    assert "--enable-lora" in args
+    assert "--lora-modules" not in args

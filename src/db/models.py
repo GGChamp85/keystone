@@ -105,6 +105,12 @@ class UserRole(enum.StrEnum):
     DEVELOPER = "developer"
 
 
+class AdapterStatus(enum.StrEnum):
+    CANDIDATE = "candidate"
+    PROMOTED = "promoted"
+    RETIRED = "retired"
+
+
 # ── Tenant ────────────────────────────────────────────────────
 
 
@@ -333,6 +339,46 @@ class FineTuneJob(Base):
     completed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     error_message = Column(Text, nullable=True)
+
+
+# ── Model Adapter ─────────────────────────────────────────────
+
+
+class ModelAdapter(Base):
+    """A trained LoRA/SFT/DPO adapter, registered so src/inference/model_router.py
+    can route a tenant's requests to it once promoted. `is_default` marks the
+    one adapter (per tenant + base_model_id) that routing actually uses —
+    application code's responsibility to keep at most one true per group,
+    same as this project's other soft invariants (no DB-level partial unique
+    index for it, matching e.g. AgentMemory's pinned flag)."""
+
+    __tablename__ = "model_adapters"
+    __table_args__ = (Index("ix_model_adapters_tenant_base_model", "tenant_id", "base_model_id"),)
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    base_model_id = Column(String(255), nullable=False)  # e.g. "zai-org/GLM-5.3-Flash"
+    name = Column(String(255), nullable=False)
+    path = Column(String(1024), nullable=False)  # filesystem/volume path vLLM's --lora-modules points at
+    rank = Column(Integer, nullable=False)
+    job_type = Column(String(50), nullable=False)  # "lora" | "sft" | "dpo"
+    job_id = Column(UUID(as_uuid=True), ForeignKey("finetune_jobs.id", ondelete="SET NULL"), nullable=True)
+    # No FK yet — benchmark_runs doesn't exist until Phase 6; a plain
+    # nullable column now, upgraded to a real FK in that phase's migration
+    # rather than inventing the table early just to satisfy this one.
+    benchmark_run_id = Column(UUID(as_uuid=True), nullable=True)
+    status = Column(SAEnum(AdapterStatus), default=AdapterStatus.CANDIDATE, nullable=False)
+    is_default = Column(Boolean, default=False, nullable=False)
+    metrics = Column(JSONB, default=dict)  # eval_loss, benchmark pass rate, etc. — whatever produced the verdict
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    tenant = relationship("Tenant")
+    job = relationship("FineTuneJob")
 
 
 # ── Agent Memory ──────────────────────────────────────────────

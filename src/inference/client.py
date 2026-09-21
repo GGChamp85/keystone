@@ -88,6 +88,7 @@ class InferenceClient:
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
+        model_override: str | None = None,
         **kwargs: Any,
     ) -> dict:
         """
@@ -100,6 +101,14 @@ class InferenceClient:
         `response_format` in the same request (verified against vLLM's own
         OpenAI-compatible server: guided decoding and tool-calling are separate
         code paths), so callers pick one or the other per turn, never both.
+
+        `model_override`: send a different `model` value than this client's
+        own `model_id` — e.g. a promoted per-tenant LoRA adapter's served
+        name (src/inference/model_router.py's resolve_served_model_name),
+        still against this same endpoint (a vLLM instance started with
+        `--enable-lora` serves its base model and every one of its
+        registered `--lora-modules` names on one endpoint, not separate
+        ones per adapter).
         """
         if tools and response_format:
             raise ValueError(
@@ -109,7 +118,7 @@ class InferenceClient:
             )
 
         payload: dict[str, Any] = {
-            "model": self.model_id,
+            "model": model_override or self.model_id,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
@@ -137,7 +146,7 @@ class InferenceClient:
         usage = data.get("usage", {})
         logger.info(
             "vs_inference.completion",
-            model=self.model_id,
+            model=model_override or self.model_id,
             prompt_tokens=usage.get("prompt_tokens", 0),
             completion_tokens=usage.get("completion_tokens", 0),
             latency_ms=round(elapsed * 1000),
@@ -213,14 +222,16 @@ class InferenceClient:
         stop: list[str] | None = None,
         frequency_penalty: float = 0.0,
         presence_penalty: float = 0.0,
+        model_override: str | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[str]:
         """
-        Yield SSE chunks from a streaming completion.
+        Yield SSE chunks from a streaming completion. `model_override`: see
+        `complete()`'s docstring — same per-tenant adapter routing applies.
         Each yielded string is a complete `data: {...}` SSE line.
         """
         payload = {
-            "model": self.model_id,
+            "model": model_override or self.model_id,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,

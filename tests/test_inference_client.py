@@ -109,6 +109,36 @@ async def test_tools_and_tool_choice_reach_the_server_and_tool_calls_parse(fake_
         await client.close()
 
 
+async def test_model_override_replaces_the_sent_model_field(fake_server):
+    """model_override (src/inference/model_router.py's per-tenant adapter
+    routing) must change what's actually sent as "model", not just be
+    accepted and ignored — a promoted adapter's served name has to reach
+    vLLM's real /chat/completions request for adapter serving to work."""
+    async with httpx.AsyncClient() as h:
+        await h.post(f"{fake_server}/reset", json={})
+    client = InferenceClient(base_url=fake_server, model_id="base-model")
+    try:
+        await client.complete([{"role": "user", "content": "hi"}], model_override="tenant-abc-lora")
+        async with httpx.AsyncClient() as h:
+            sent = (await h.get(f"{fake_server}/last_payload")).json()
+        assert sent["model"] == "tenant-abc-lora"
+    finally:
+        await client.close()
+
+
+async def test_no_model_override_falls_back_to_the_clients_own_model_id(fake_server):
+    async with httpx.AsyncClient() as h:
+        await h.post(f"{fake_server}/reset", json={})
+    client = InferenceClient(base_url=fake_server, model_id="base-model")
+    try:
+        await client.complete([{"role": "user", "content": "hi"}])
+        async with httpx.AsyncClient() as h:
+            sent = (await h.get(f"{fake_server}/last_payload")).json()
+        assert sent["model"] == "base-model"
+    finally:
+        await client.close()
+
+
 async def test_tools_and_response_format_together_is_rejected_client_side(fake_server):
     client = InferenceClient(base_url=fake_server, model_id="test-model")
     try:

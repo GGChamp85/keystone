@@ -14,8 +14,10 @@ from __future__ import annotations
 
 import re
 from typing import ClassVar
+from uuid import UUID
 
 import structlog
+from sqlalchemy import select
 
 from src.inference.client import InferenceClient, get_inference_client
 
@@ -93,6 +95,52 @@ def classify_task_to_role(task_description: str) -> str:
     if _CODING_PATTERNS.search(task_description):
         return "coding"
     return "coding"
+
+
+# ── Adapter-aware routing ─────────────────────────────────────
+
+
+async def resolve_served_model_name(base_model_id: str, tenant_id: UUID, fallback_served_name: str) -> str:
+    """
+    The model name to actually put in a chat-completion request's `model`
+    field for this tenant: a promoted LoRA adapter's own served name
+    (src/db/models.py's ModelAdapter, registered on a vLLM instance started
+    with `--enable-lora --lora-modules <name>=<path>` — see
+    src/inference/config.py's VLLMConfig) if this tenant has one for
+    `base_model_id`, else `fallback_served_name` (the base model itself).
+
+    Real, DB-backed, and independently tested — but not yet called from
+    any orchestrator node (src/orchestrator/nodes/*.py still always uses
+    the base model's own served name for every request). Wiring every
+    node's inference call to resolve and pass this per-tenant is later
+    work: it touches every call site that builds a chat completion
+    request, and there is no real promoted adapter to route to until a
+    real fine-tuning run (needs a GPU this dev environment doesn't have)
+    actually produces and promotes one.
+    """
+    from src.db.connection import get_db_context
+    from src.db.models import AdapterStatus, ModelAdapter
+
+    async with get_db_context() as db:
+        result = await db.execute(
+            select(ModelAdapter).where(
+                ModelAdapter.tenant_id == tenant_id,
+                ModelAdapter.base_model_id == base_model_id,
+                ModelAdapter.status == AdapterStatus.PROMOTED,
+                ModelAdapter.is_default.is_(True),
+            )
+        )
+        adapter = result.scalars().first()
+
+    if adapter is not None:
+        logger.info(
+            "model_router.routed_to_adapter",
+            tenant_id=str(tenant_id),
+            base_model_id=base_model_id,
+            adapter_name=adapter.name,
+        )
+        return adapter.name
+    return fallback_served_name
 
 
 # ── Router ────────────────────────────────────────────────────
