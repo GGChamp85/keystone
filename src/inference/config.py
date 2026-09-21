@@ -27,6 +27,20 @@ class VLLMConfig:
     max_num_seqs: int = 64
     max_num_batched_tokens: int | None = None
 
+    # Multi-node distributed serving: tensor-parallel splits a model's
+    # layers across GPUs within a node (fast NVLink/NVSwitch interconnect);
+    # pipeline-parallel splits the *stack of layers* across nodes when a
+    # model's weights don't fit one node's GPU pool even at full
+    # tensor-parallel width — real vLLM flags (docs.vllm.ai/en/latest/
+    # serving/distributed_serving.html), not a bespoke scheme. vLLM
+    # auto-selects the Ray executor once total world size
+    # (tensor_parallel_size * pipeline_parallel_size) exceeds one node's
+    # GPU count; `distributed_executor_backend` forces it explicitly so the
+    # Ray cluster bootstrap (helm/keystone/templates/vllm.yaml) and the
+    # engine's own choice never disagree.
+    pipeline_parallel_size: int = 1
+    distributed_executor_backend: str | None = None  # "ray" | "mp" | None (vLLM picks)
+
     # Prefix caching & chunked prefill
     enable_prefix_caching: bool = True
     enable_chunked_prefill: bool = True
@@ -35,6 +49,17 @@ class VLLMConfig:
     # Quantization
     quantization: str | None = None  # "fp8", "awq", "gptq", None
     dtype: str = "auto"
+
+    # KV-cache dtype — "fp8"/"fp8_e4m3"/"fp8_e5m2" roughly halves KV-cache
+    # memory versus the model dtype, which at fixed gpu_memory_utilization
+    # converts directly into more concurrent sequences (higher throughput)
+    # or a longer max context — the real lever for "best performance" on a
+    # fixed GPU budget once the weights themselves are already FP8 on disk
+    # (see coding_model_config's docstring) and prefix caching/chunked
+    # prefill are already on. None leaves vLLM's default (matches model
+    # dtype) — only enable once accuracy impact is verified on real
+    # hardware, since it is a real (if usually small) numerical trade-off.
+    kv_cache_dtype: str | None = None
 
     # KV cache
     block_size: int = 16
@@ -83,6 +108,8 @@ class VLLMConfig:
             str(self.port),
             "--tensor-parallel-size",
             str(self.tensor_parallel_size),
+            "--pipeline-parallel-size",
+            str(self.pipeline_parallel_size),
             "--max-model-len",
             str(self.max_model_len),
             "--gpu-memory-utilization",
@@ -111,6 +138,12 @@ class VLLMConfig:
 
         if self.quantization:
             args += ["--quantization", self.quantization]
+
+        if self.kv_cache_dtype:
+            args += ["--kv-cache-dtype", self.kv_cache_dtype]
+
+        if self.distributed_executor_backend:
+            args += ["--distributed-executor-backend", self.distributed_executor_backend]
 
         if self.api_key:
             args += ["--api-key", self.api_key]
@@ -148,6 +181,8 @@ class VLLMConfig:
 def coding_model_config(
     gpu_count: int = 8,
     max_context: int = 131072,
+    node_count: int = 1,
+    kv_cache_dtype: str | None = None,
 ) -> VLLMConfig:
     """
     GPU Node A: GLM-5.3-Flash (zai-org, MIT) — primary coding model.
@@ -169,11 +204,24 @@ def coding_model_config(
     beyond what an 8-GPU node budgets for by default; raise `max_context`
     per-deployment once real KV-cache headroom is confirmed on real
     hardware.
+
+    `node_count` > 1 pipeline-parallels the model across that many nodes
+    (each still `gpu_count`-wide tensor-parallel) instead of requiring a
+    single node with `gpu_count` GPUs — real deployments on smaller-VRAM
+    GPUs (e.g. 8x40GB, where the weights alone leave little KV-cache
+    headroom) or wanting more concurrent-request throughput than one
+    node's KV-cache budget allows should raise this rather than shrinking
+    `max_context`/`max_num_seqs`. `kv_cache_dtype="fp8"` (or "fp8_e4m3")
+    frees further KV-cache headroom on a fixed GPU budget — off by default
+    since it is a real numerical trade-off, not a free win; verify
+    accuracy on real hardware before enabling it in production.
     """
     return VLLMConfig(
         model="zai-org/GLM-5.3-Flash",
         served_model_name="glm-5.3-flash",
         tensor_parallel_size=gpu_count,
+        pipeline_parallel_size=node_count,
+        distributed_executor_backend="ray" if node_count > 1 else None,
         max_model_len=max_context,
         gpu_memory_utilization=0.92,
         max_num_seqs=32,
@@ -181,6 +229,7 @@ def coding_model_config(
         enable_chunked_prefill=True,
         max_chunked_prefill_tokens=16384,
         quantization=None,  # already FP8 on disk — see docstring
+        kv_cache_dtype=kv_cache_dtype,
         block_size=16,
         swap_space_gb=8,
         tool_protocol="native",
@@ -200,16 +249,21 @@ def coding_fallback_model_config(
     gpu_count: int = 4,
     max_context: int = 131072,
     use_fp8: bool = False,
+    node_count: int = 1,
 ) -> VLLMConfig:
     """
     GPU Node A2: Qwen2.5-Coder-32B — coding fallback, used when GLM-5.3-Flash
     is unhealthy or unavailable (src/inference/model_router.py's
     FALLBACK_CHAINS). 4x A100 80GB tensor-parallel, 128K context window.
+    `node_count` > 1 pipeline-parallels across that many nodes — see
+    coding_model_config's docstring for when that's the right lever.
     """
     return VLLMConfig(
         model="Qwen/Qwen2.5-Coder-32B-Instruct",
         served_model_name="qwen-coder-32b",
         tensor_parallel_size=gpu_count,
+        pipeline_parallel_size=node_count,
+        distributed_executor_backend="ray" if node_count > 1 else None,
         max_model_len=max_context,
         gpu_memory_utilization=0.92,
         max_num_seqs=32,

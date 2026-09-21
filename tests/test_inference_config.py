@@ -118,3 +118,52 @@ def test_lora_modules_omitted_flag_when_enabled_but_no_modules_given():
     args = cfg.to_cli_args()
     assert "--enable-lora" in args
     assert "--lora-modules" not in args
+
+
+def test_single_node_omits_distributed_executor_backend():
+    """A single-node deployment (the default) must not force a Ray
+    executor it doesn't need — vLLM's own default (in-process/mp) is
+    correct until pipeline-parallel actually spans more than one node."""
+    cfg = coding_model_config()
+    args = cfg.to_cli_args()
+    assert "--pipeline-parallel-size" in args
+    idx = args.index("--pipeline-parallel-size")
+    assert args[idx + 1] == "1"
+    assert "--distributed-executor-backend" not in args
+
+
+def test_multi_node_sets_pipeline_parallel_size_and_ray_backend():
+    """node_count > 1 is the real multi-node lever — see
+    coding_model_config's docstring: pipeline-parallel across nodes,
+    tensor-parallel still within each node."""
+    cfg = coding_model_config(gpu_count=8, node_count=2)
+    args = cfg.to_cli_args()
+    tp_idx = args.index("--tensor-parallel-size")
+    assert args[tp_idx + 1] == "8"
+    pp_idx = args.index("--pipeline-parallel-size")
+    assert args[pp_idx + 1] == "2"
+    backend_idx = args.index("--distributed-executor-backend")
+    assert args[backend_idx + 1] == "ray"
+
+
+def test_coding_fallback_also_supports_multi_node():
+    cfg = coding_fallback_model_config(node_count=2)
+    args = cfg.to_cli_args()
+    pp_idx = args.index("--pipeline-parallel-size")
+    assert args[pp_idx + 1] == "2"
+    assert "--distributed-executor-backend" in args
+
+
+def test_kv_cache_dtype_omitted_by_default():
+    """fp8 KV cache is a real numerical trade-off — must stay opt-in, never
+    silently on."""
+    cfg = coding_model_config()
+    args = cfg.to_cli_args()
+    assert "--kv-cache-dtype" not in args
+
+
+def test_kv_cache_dtype_emits_the_real_flag_when_set():
+    cfg = coding_model_config(kv_cache_dtype="fp8_e4m3")
+    args = cfg.to_cli_args()
+    idx = args.index("--kv-cache-dtype")
+    assert args[idx + 1] == "fp8_e4m3"
