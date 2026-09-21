@@ -236,3 +236,132 @@ export async function streamTask(
     }
   }
 }
+
+// ── Fine-tuning (src/api/routes/finetune.py) ────────────────────────
+
+export interface FineTuneJob {
+  id: string
+  base_model: string
+  job_type: string
+  status: string
+  config: Record<string, unknown>
+  metrics: Record<string, unknown>
+  output_model_path: string | null
+  started_at: string | null
+  completed_at: string | null
+  created_at: string
+  error_message: string | null
+}
+
+export interface StartFineTuneRequest {
+  job_type: string
+  base_model: string
+  training_data_path: string
+  config: Record<string, unknown>
+}
+
+export async function startFineTuneJob(req: StartFineTuneRequest): Promise<FineTuneJob> {
+  const resp = await fetch('/v1/finetune/jobs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(req),
+  })
+  if (!resp.ok) {
+    throw new Error(`Failed to start job (${resp.status}): ${await resp.text()}`)
+  }
+  return resp.json()
+}
+
+export async function listFineTuneJobs(status?: string): Promise<FineTuneJob[]> {
+  const qs = status ? `?status=${encodeURIComponent(status)}` : ''
+  const resp = await fetch(`/v1/finetune/jobs${qs}`, { headers: authHeaders() })
+  if (!resp.ok) {
+    throw new Error(`Failed to list jobs (${resp.status})`)
+  }
+  return resp.json()
+}
+
+export async function getFineTuneJob(jobId: string): Promise<FineTuneJob> {
+  const resp = await fetch(`/v1/finetune/jobs/${jobId}`, { headers: authHeaders() })
+  if (!resp.ok) {
+    throw new Error(`Failed to fetch job (${resp.status})`)
+  }
+  return resp.json()
+}
+
+export interface DatasetPreview {
+  path: string
+  total_records: number
+  preview: Record<string, unknown>[]
+}
+
+export async function previewFineTuneDataset(jobId: string, lines = 5): Promise<DatasetPreview> {
+  const resp = await fetch(`/v1/finetune/jobs/${jobId}/dataset-preview?lines=${lines}`, {
+    headers: authHeaders(),
+  })
+  if (!resp.ok) {
+    throw new Error(`Failed to preview dataset (${resp.status}): ${await resp.text()}`)
+  }
+  return resp.json()
+}
+
+async function fineTuneJobAction(jobId: string, action: 'promote' | 'rollback'): Promise<FineTuneJob> {
+  const resp = await fetch(`/v1/finetune/jobs/${jobId}/${action}`, {
+    method: 'POST',
+    headers: authHeaders(),
+  })
+  if (!resp.ok) {
+    throw new Error(`Failed to ${action} job (${resp.status}): ${await resp.text()}`)
+  }
+  return resp.json()
+}
+
+export const promoteFineTuneJob = (jobId: string): Promise<FineTuneJob> => fineTuneJobAction(jobId, 'promote')
+export const rollbackFineTuneJob = (jobId: string): Promise<FineTuneJob> => fineTuneJobAction(jobId, 'rollback')
+
+// Mirrors src/finetuning/events.py's publish_finetune_event() payload.
+export interface FineTuneEvent {
+  status: string
+  message: string
+  metrics: Record<string, unknown>
+  timestamp: number
+}
+
+export const FINETUNE_TERMINAL_STATUSES = new Set(['completed', 'failed'])
+
+export async function streamFineTuneJob(
+  jobId: string,
+  onEvent: (ev: FineTuneEvent) => void,
+  signal: AbortSignal,
+): Promise<void> {
+  const resp = await fetch(`/v1/finetune/jobs/${jobId}/stream`, {
+    headers: authHeaders(),
+    signal,
+  })
+  if (!resp.ok || !resp.body) {
+    throw new Error(`Stream connection failed (${resp.status})`)
+  }
+
+  const reader = resp.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+
+    const frames = buffer.split('\n\n')
+    buffer = frames.pop() ?? ''
+
+    for (const frame of frames) {
+      const dataLine = frame.split('\n').find((line) => line.startsWith('data: '))
+      if (!dataLine) continue
+      try {
+        onEvent(JSON.parse(dataLine.slice('data: '.length)) as FineTuneEvent)
+      } catch {
+        // malformed frame — skip rather than crash the whole stream
+      }
+    }
+  }
+}
