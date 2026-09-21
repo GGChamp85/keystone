@@ -4,18 +4,26 @@
 """
 Keystone — command-line client.
 
-A real HTTP client against a running Keystone deployment's API — never
-talks to Postgres directly, so it works from any machine (a developer's
-laptop, an OpenCode session via `cli/opencode/commands/memory.md`, CI)
-that can reach the API, the same way the OpenAI-compatible endpoints do.
-Configured the same way `cli/opencode.config.json` already is:
+Most commands are a real HTTP client against a running Keystone
+deployment's API — never talk to Postgres directly, so they work from any
+machine (a developer's laptop, an OpenCode session via
+`cli/opencode/commands/memory.md`, CI) that can reach the API, the same
+way the OpenAI-compatible endpoints do. Configured the same way
+`cli/opencode.config.json` already is:
 
   KEYSTONE_INFERENCE_URL   base URL, e.g. http://localhost:8080
   KEYSTONE_API_KEY         a real ks-... API key with the "agent" scope
+
+`doctor` is the one exception — it diagnoses a deployment that may not be
+up *yet*, so it connects to configured infrastructure directly (real
+Postgres/Redis/Qdrant/sandbox-daemon/model-endpoint/git-host checks —
+see src/cli/doctor.py) using this same machine's real environment/.env,
+not the API.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from typing import Annotated
@@ -24,6 +32,9 @@ import httpx
 import typer
 from rich.console import Console
 from rich.table import Table
+
+from src.cli.doctor import CheckStatus, run_all_checks
+from src.config import get_settings
 
 app = typer.Typer(add_completion=False, help="Keystone — self-hosted LLM inference & autonomous coding agents.")
 memory_app = typer.Typer(add_completion=False, help="Inspect and manage what the agent has learned.")
@@ -309,6 +320,42 @@ def finetune_watch(job_id: Annotated[str, typer.Argument()]):
     except httpx.ConnectError as exc:
         error_console.print(f"Could not reach {_base_url()}: {exc}")
         raise typer.Exit(code=1) from exc
+
+
+_STATUS_STYLE = {
+    CheckStatus.OK: ("green", "OK"),
+    CheckStatus.WARN: ("yellow", "WARN"),
+    CheckStatus.FAIL: ("bold red", "FAIL"),
+    CheckStatus.SKIP: ("dim", "SKIP"),
+}
+
+
+@app.command("doctor")
+def doctor():
+    """Diagnose your Keystone deployment — real checks against Postgres, Redis, Qdrant, the
+    sandbox daemon, model endpoints, the git host, package mirrors, and secret strength, each
+    reporting exactly what's wrong (and often how to fix it), not just pass/fail."""
+    settings = get_settings()
+    results = asyncio.run(run_all_checks(settings))
+
+    table = Table(show_lines=False)
+    table.add_column("Check")
+    table.add_column("Status")
+    table.add_column("Detail", overflow="fold")
+    for r in results:
+        style, label = _STATUS_STYLE[r.status]
+        table.add_row(r.name, f"[{style}]{label}[/{style}]", r.message)
+    console.print(table)
+
+    fail_count = sum(1 for r in results if r.status == CheckStatus.FAIL)
+    warn_count = sum(1 for r in results if r.status == CheckStatus.WARN)
+    if fail_count:
+        error_console.print(f"\n{fail_count} check(s) FAILED, {warn_count} warning(s).")
+        raise typer.Exit(code=1)
+    if warn_count:
+        console.print(f"\n[yellow]{warn_count} warning(s)[/yellow] — nothing failing outright.")
+    else:
+        console.print("\n[green]All checks passed.[/green]")
 
 
 if __name__ == "__main__":
