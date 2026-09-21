@@ -20,6 +20,10 @@ Platform foundation — self-hosted, air-gapped LLM inference gateway and autono
 - **Infrastructure**: Kubernetes/Helm chart (client-VPC production tier) and OpenTofu modules (RunPod dev/test tier); NetworkPolicy-segmented tiers; OpenBao-backed secrets with a real init/unseal/seed lifecycle.
 - **Compliance**: full third-party license inventory (`docs/LICENSES_AND_COMPLIANCE.md`) and telemetry audit (`docs/TELEMETRY_AUDIT.md`), including catching and fixing a Redis relicensing issue (switched to Valkey) before it shipped.
 
+### Fixed
+- **The sandbox's egress firewall never actually allowed a deployment's real configured `GIT_ALLOWED_HOSTS`** — only the hardcoded placeholder `*.internal.keystone.local` hostnames, regardless of what an operator set. A custom git host correctly passed the SSRF allowlist check (`_validate_repo_url`) and then had its real `git clone` silently blocked by egress DENY, completely breaking the README's own "Connect your own git server" instructions for anyone who followed them. Found and fixed by actually running `tests/test_git_workflow_integration.py` end to end against a live Gitea for the first time — `build_egress_policy()` now wires the real configured git/mirror hosts into real ALLOW rules.
+- **`docker-compose.yml`'s sandbox network had no pinned name**, so Compose silently prefixed it with the project name; every network-enabled sandbox (any git operation) then failed outright with a real 404 from the Docker API. Same discovery pass as above.
+
 ### Known limitations (tracked, not hidden)
 - Model-quality behavior on Keystone's own self-hosted models (the actual LLM output) is unverified in this codebase's development environment, which has no GPU — see `docs/deployment/KUBERNETES_CLIENT_VPC.md` for what's verified vs. GPU-gated.
 - No adapter has been fine-tuned on real GPU hardware yet, and fine-tuning's "only promote if it beats base+RAG" auto-verdict gate isn't wired up — promotion is a manual decision today.
