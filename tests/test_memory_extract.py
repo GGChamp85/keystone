@@ -25,6 +25,8 @@ pytestmark = [pytest.mark.integration, requires_integration_env]
 
 
 class FakeExtractClient:
+    model_id = "test-reasoning-model"  # real InferenceClient attribute — resolve_model_name_for_client reads it
+
     def __init__(self, response: dict | None = None, error: Exception | None = None):
         self._response = response
         self._error = error

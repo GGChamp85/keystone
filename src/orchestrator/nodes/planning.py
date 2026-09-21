@@ -14,6 +14,7 @@ import time
 import structlog
 
 from src.inference.client import get_inference_client
+from src.inference.model_router import resolve_model_name_for_client
 from src.orchestrator.state import AgentPhase, AgentState, IterationRecord
 
 logger = structlog.get_logger(__name__)
@@ -55,6 +56,7 @@ async def planning_node(state: AgentState) -> AgentState:
     """
     t0 = time.monotonic()
     client = get_inference_client(state.primary_model)
+    model_name = await resolve_model_name_for_client(client, state.tenant_id)
 
     # Build user prompt
     user_parts = [f"## Task\n{state.task_description}"]
@@ -95,6 +97,7 @@ async def planning_node(state: AgentState) -> AgentState:
             messages=messages,
             temperature=0.1,
             max_tokens=4096,
+            model_override=model_name,
         )
 
         usage = response.get("usage", {})

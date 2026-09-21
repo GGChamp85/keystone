@@ -30,6 +30,7 @@ import time
 import structlog
 
 from src.inference.client import get_inference_client
+from src.inference.model_router import resolve_model_name_for_client
 from src.orchestrator.context import trim_turns_to_budget
 from src.orchestrator.nodes._shared import get_or_clone_workspace
 from src.orchestrator.state import (
@@ -149,6 +150,7 @@ def _build_agentic_user_context(state: AgentState) -> str:
 async def _run_agentic_loop(state: AgentState, ws: Workspace) -> tuple[bool, str, list[str]]:
     """Returns (model_signaled_done, final_summary_text, paths_touched_this_call)."""
     client = get_inference_client(state.primary_model)
+    model_name = await resolve_model_name_for_client(client, state.tenant_id)
     protocol = get_tool_protocol(state.tool_protocol)
 
     # Turn-structured, not a flat message list: each entry is one or more
@@ -171,7 +173,7 @@ async def _run_agentic_loop(state: AgentState, ws: Workspace) -> tuple[bool, str
     for _step in range(state.max_tool_steps):
         messages = trim_turns_to_budget(turns, max_tokens=state.max_context_tokens, keep_head_turns=1)
         response = await client.complete(
-            messages=messages, temperature=0.15, max_tokens=8192, **protocol.request_kwargs()
+            messages=messages, temperature=0.15, max_tokens=8192, model_override=model_name, **protocol.request_kwargs()
         )
         usage = response.get("usage", {})
         state.add_tokens(usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0))
@@ -261,6 +263,7 @@ async def _code_standalone(state: AgentState) -> AgentState:
     """
     t0 = time.monotonic()
     client = get_inference_client(state.primary_model)
+    model_name = await resolve_model_name_for_client(client, state.tenant_id)
 
     user_parts = []
 
@@ -312,7 +315,9 @@ async def _code_standalone(state: AgentState) -> AgentState:
     parsed = None
 
     try:
-        response = await client.complete(messages=messages, temperature=0.15, max_tokens=16384)
+        response = await client.complete(
+            messages=messages, temperature=0.15, max_tokens=16384, model_override=model_name
+        )
 
         usage = response.get("usage", {})
         prompt_tokens = usage.get("prompt_tokens", 0)

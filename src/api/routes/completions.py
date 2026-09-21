@@ -22,7 +22,7 @@ from src.api.models.requests import CompletionRequest
 from src.api.models.responses import ModelInfo, ModelListResponse
 from src.config import get_settings
 from src.db.models import APIKey, Tenant
-from src.inference.model_router import get_model_router
+from src.inference.model_router import get_model_router, resolve_model_name_for_client
 
 router = APIRouter(prefix="/v1", tags=["inference"])
 
@@ -70,12 +70,16 @@ async def chat_completions(
     # Route to correct model
     router_instance = get_model_router()
     client, resolved_role = await router_instance.get_client(req.model)
+    # This tenant's own promoted LoRA adapter for this base model, if any —
+    # the direct customer-facing gateway, so this is the highest-value
+    # place adapter routing applies (src/inference/model_router.py).
+    model_name = await resolve_model_name_for_client(client, tenant.id)
 
     messages = [{"role": m.role, "content": m.content} for m in req.messages]
 
     if req.stream:
         return StreamingResponse(
-            _stream_completion(client, messages, req, tenant, api_key, resolved_role),
+            _stream_completion(client, messages, req, tenant, api_key, resolved_role, model_name),
             media_type="text/event-stream",
             headers={"X-VS-Model": resolved_role, "Cache-Control": "no-cache"},
         )
@@ -89,6 +93,7 @@ async def chat_completions(
         stop=req.stop,
         frequency_penalty=req.frequency_penalty,
         presence_penalty=req.presence_penalty,
+        model_override=model_name,
     )
 
     usage = response.get("usage", {})
@@ -99,7 +104,7 @@ async def chat_completions(
     return response
 
 
-async def _stream_completion(client, messages, req, tenant, api_key, role):
+async def _stream_completion(client, messages, req, tenant, api_key, role, model_override=None):
     total_tokens = 0
     async for chunk in client.stream(
         messages=messages,
@@ -109,6 +114,7 @@ async def _stream_completion(client, messages, req, tenant, api_key, role):
         stop=req.stop,
         frequency_penalty=req.frequency_penalty,
         presence_penalty=req.presence_penalty,
+        model_override=model_override,
     ):
         yield chunk
         # Estimate tokens from streamed content

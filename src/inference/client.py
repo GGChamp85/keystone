@@ -164,6 +164,7 @@ class InferenceClient:
         temperature: float = 0.1,
         max_tokens: int = 4096,
         on_usage: Callable[[int, int], None] | None = None,
+        model_override: str | None = None,
     ) -> dict[str, Any]:
         """
         A completion whose content is guaranteed-parseable JSON matching
@@ -179,6 +180,9 @@ class InferenceClient:
         since this method returns only the parsed dict, not the raw response,
         callers that track token spend (e.g. `AgentState.add_tokens`) need this
         hook rather than losing usage accounting entirely.
+
+        `model_override`: see `complete()`'s docstring — passed through
+        unchanged on every attempt, including the self-correction retry.
         """
         response_format = {
             "type": "json_schema",
@@ -188,7 +192,11 @@ class InferenceClient:
         current_messages = messages
         for attempt in range(2):
             data = await self.complete(
-                current_messages, temperature=temperature, max_tokens=max_tokens, response_format=response_format
+                current_messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                response_format=response_format,
+                model_override=model_override,
             )
             if on_usage is not None:
                 usage = data.get("usage", {})

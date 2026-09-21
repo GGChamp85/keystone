@@ -34,6 +34,8 @@ requires_sandbox = pytest.mark.skipif(
 class ScriptedClient:
     """Stands in for InferenceClient — returns pre-scripted `complete()` responses in order, one per call."""
 
+    model_id = "test-coding-model"  # real InferenceClient attribute — resolve_model_name_for_client reads it
+
     def __init__(self, script: list[dict]):
         self._script = list(script)
         self.calls: list[dict] = []
@@ -244,3 +246,55 @@ async def test_agentic_loop_trims_old_turns_once_the_context_budget_is_exceeded(
     tool_result_count = sum(1 for m in last_call_messages if m.get("role") == "tool")
     assert tool_result_count < 3, "expected at least one earlier big tool-result turn to have been dropped"
     assert any("dropped" in (m.get("content") or "") for m in last_call_messages)
+
+
+@requires_sandbox
+async def test_agentic_loop_routes_to_the_tenants_promoted_adapter(repo_workspace):
+    """Real end-to-end proof that src/inference/model_router.py's adapter
+    routing actually reaches the coding node's real inference call — not
+    just that resolve_model_name_for_client works in isolation
+    (tests/test_model_router_adapters.py already covers that): a real
+    Postgres-backed Tenant + promoted ModelAdapter, and the scripted
+    client's own model_id set to match the adapter's base_model_id, so
+    the *only* way model_override could come out right is if coding.py
+    really called resolve_model_name_for_client with this tenant's id."""
+    from src.db.connection import get_db_context
+    from src.db.models import AdapterStatus, ModelAdapter, Tenant, TenantTier
+
+    _task_id, ws = repo_workspace
+    state = _make_state()
+    tenant_id = uuid.uuid4()
+
+    async with get_db_context() as db:
+        db.add(Tenant(id=tenant_id, name="adapter-routing-test", email=f"{tenant_id}@test.dev", tier=TenantTier.FREE))
+        await db.flush()
+        db.add(
+            ModelAdapter(
+                tenant_id=tenant_id,
+                base_model_id="test-coding-model",  # matches ScriptedClient.model_id
+                name="tenant-coding-lora-v1",
+                path="/data/adapters/tenant-coding-lora-v1",
+                rank=64,
+                job_type="lora",
+                status=AdapterStatus.PROMOTED,
+                is_default=True,
+            )
+        )
+        await db.flush()
+
+    try:
+        state.tenant_id = tenant_id
+        script = ScriptedClient([_final_response("No changes needed.")])
+
+        with (
+            patch("src.orchestrator.nodes.coding.get_inference_client", return_value=script),
+            patch("src.orchestrator.nodes._shared.Workspace", return_value=ws),
+        ):
+            await coding_node(state)
+
+        assert script.calls[0]["kwargs"]["model_override"] == "tenant-coding-lora-v1"
+    finally:
+        async with get_db_context() as db:
+            row = await db.get(Tenant, tenant_id)
+            if row is not None:
+                await db.delete(row)

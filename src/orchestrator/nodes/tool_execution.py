@@ -20,6 +20,7 @@ from __future__ import annotations
 import structlog
 
 from src.inference.client import get_inference_client
+from src.inference.model_router import resolve_model_name_for_client
 from src.orchestrator.nodes.coding import coding_node
 from src.orchestrator.state import AgentPhase, AgentState
 
@@ -86,6 +87,7 @@ async def _run_root_cause_analysis(state: AgentState) -> dict:
     still safe and correct on its own.
     """
     client = get_inference_client("reasoning")
+    model_name = await resolve_model_name_for_client(client, state.tenant_id)
     user_content = (
         f"## Task\n{state.task_description}\n\n"
         f"## Current Plan\n{state.plan}\n\n"
@@ -98,7 +100,11 @@ async def _run_root_cause_analysis(state: AgentState) -> dict:
     ]
     try:
         return await client.chat_structured(
-            messages, ROOT_CAUSE_SCHEMA, schema_name="root_cause", on_usage=state.add_tokens
+            messages,
+            ROOT_CAUSE_SCHEMA,
+            schema_name="root_cause",
+            on_usage=state.add_tokens,
+            model_override=model_name,
         )
     except Exception as exc:
         logger.warning("fixing.root_cause_unavailable", task_id=str(state.task_id), error=str(exc))

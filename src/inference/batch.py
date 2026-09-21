@@ -175,14 +175,18 @@ async def _process_embedding_job(job: BatchJob) -> dict[str, Any]:
 
 
 async def _process_completion_job(job: BatchJob) -> dict[str, Any]:
+    from uuid import UUID
+
     from src.inference.client import get_inference_client
+    from src.inference.model_router import resolve_model_name_for_client
 
     client = get_inference_client(job.model_role)
+    model_name = await resolve_model_name_for_client(client, UUID(job.tenant_id))
     completions = []
     total_prompt_tokens = 0
     total_completion_tokens = 0
     for item in job.items:
-        response = await client.complete(messages=[{"role": "user", "content": item}])
+        response = await client.complete(messages=[{"role": "user", "content": item}], model_override=model_name)
         usage = response.get("usage", {})
         total_prompt_tokens += usage.get("prompt_tokens", 0)
         total_completion_tokens += usage.get("completion_tokens", 0)

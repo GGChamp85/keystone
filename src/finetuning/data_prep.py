@@ -33,6 +33,14 @@ def prepare_continued_pretraining_data(
     """
     Phase 1: Domain Adaptation — Unsupervised continued pre-training data.
     Reads all code files from internal repos and creates a JSONL dataset.
+
+    Deduplicates by exact content hash across the whole run, not just
+    within one file — a real gap this had before: `sha256` was computed
+    and stored on every record, but never checked against what had already
+    been seen, so a vendored copy of the same file (a monorepo's
+    node_modules-adjacent bundling, a submodule pulled in twice under
+    different paths, etc.) would train on the identical text more than
+    once. The corpus is real code multiple times over, not more real code.
     """
     if file_extensions is None:
         file_extensions = [".py", ".js", ".ts", ".go", ".rs", ".java", ".cpp", ".c"]
@@ -40,6 +48,8 @@ def prepare_continued_pretraining_data(
     records = []
     files_processed = 0
     files_skipped = 0
+    files_deduped = 0
+    seen_hashes: set[str] = set()
 
     for repo_path in repo_paths:
         repo = Path(repo_path)
@@ -65,6 +75,11 @@ def prepare_continued_pretraining_data(
                 if len(content.strip()) < 50:
                     files_skipped += 1
                     continue
+                full_hash = hashlib.sha256(content.encode()).hexdigest()
+                if full_hash in seen_hashes:
+                    files_deduped += 1
+                    continue
+                seen_hashes.add(full_hash)
                 rel_path = str(fpath.relative_to(repo))
                 records.append(
                     {
@@ -72,7 +87,7 @@ def prepare_continued_pretraining_data(
                         "source": str(repo.name),
                         "file_path": rel_path,
                         "language": fpath.suffix.lstrip("."),
-                        "sha256": hashlib.sha256(content.encode()).hexdigest()[:16],
+                        "sha256": full_hash[:16],
                     }
                 )
                 files_processed += 1
@@ -87,6 +102,7 @@ def prepare_continued_pretraining_data(
     stats = {
         "files_processed": files_processed,
         "files_skipped": files_skipped,
+        "files_deduped": files_deduped,
         "records": len(records),
         "output": output_path,
     }

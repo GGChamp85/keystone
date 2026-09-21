@@ -24,6 +24,7 @@ from uuid import UUID
 import structlog
 
 from src.inference.client import StructuredOutputError, get_inference_client
+from src.inference.model_router import resolve_model_name_for_client
 from src.memory.store import MemoryRecord, create_memory
 
 logger = structlog.get_logger(__name__)
@@ -109,6 +110,7 @@ async def propose_memories_from_task(
         return []
 
     client = get_inference_client("reasoning")
+    model_name = await resolve_model_name_for_client(client, tenant_id)
     signal = _build_signal(task_description, root_cause_notes, quality_findings, review_comments)
     messages = [
         {"role": "system", "content": EXTRACT_SYSTEM_PROMPT},
@@ -116,7 +118,9 @@ async def propose_memories_from_task(
     ]
 
     try:
-        parsed = await client.chat_structured(messages, EXTRACT_SCHEMA, schema_name="memory_proposals")
+        parsed = await client.chat_structured(
+            messages, EXTRACT_SCHEMA, schema_name="memory_proposals", model_override=model_name
+        )
     except StructuredOutputError as exc:
         logger.warning("memory.extraction_unavailable", tenant_id=str(tenant_id), error=str(exc))
         return []

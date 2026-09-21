@@ -19,13 +19,23 @@ from src.orchestrator.state import AgentPhase, AgentState, ReviewComment, TestRe
 
 
 class FakeRootCauseClient:
+    model_id = "test-reasoning-model"  # real InferenceClient attribute — resolve_model_name_for_client reads it
+
     def __init__(self, response: dict | None = None, error: Exception | None = None):
         self._response = response
         self._error = error
         self.call_count = 0
 
     async def chat_structured(
-        self, messages, schema, *, schema_name="response", temperature=0.1, max_tokens=4096, on_usage=None
+        self,
+        messages,
+        schema,
+        *,
+        schema_name="response",
+        temperature=0.1,
+        max_tokens=4096,
+        on_usage=None,
+        model_override=None,
     ):
         self.call_count += 1
         if self._error is not None:

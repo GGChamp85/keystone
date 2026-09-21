@@ -143,6 +143,20 @@ async def resolve_served_model_name(base_model_id: str, tenant_id: UUID, fallbac
     return fallback_served_name
 
 
+async def resolve_model_name_for_client(client: InferenceClient, tenant_id: UUID | None) -> str:
+    """Convenience wrapper for orchestrator call sites (src/orchestrator/
+    nodes/*.py): the model name a request to `client` should actually use
+    for `tenant_id` — that tenant's promoted adapter if one exists for
+    `client.model_id`, else `client.model_id` itself unchanged. Skips the
+    DB lookup entirely when `tenant_id` is None (a key not yet linked to a
+    tenant context — same "None means no per-tenant behavior" convention
+    already used for user_id elsewhere in this codebase), rather than
+    treating a missing tenant as an error."""
+    if tenant_id is None:
+        return client.model_id
+    return await resolve_served_model_name(client.model_id, tenant_id, client.model_id)
+
+
 # ── Router ────────────────────────────────────────────────────
 
 

@@ -24,6 +24,7 @@ import time
 import structlog
 
 from src.inference.client import StructuredOutputError, get_inference_client
+from src.inference.model_router import resolve_model_name_for_client
 from src.orchestrator.nodes._shared import get_or_clone_workspace
 from src.orchestrator.state import (
     AgentPhase,
@@ -101,6 +102,7 @@ async def review_node(state: AgentState) -> AgentState:
 
     t0 = time.monotonic()
     client = get_inference_client("reasoning")
+    model_name = await resolve_model_name_for_client(client, state.tenant_id)
 
     try:
         user_parts = [f"## Task\n{state.task_description}"]
@@ -149,6 +151,7 @@ async def review_node(state: AgentState) -> AgentState:
                 temperature=0.1,
                 max_tokens=8192,
                 on_usage=_track_usage,
+                model_override=model_name,
             )
         except StructuredOutputError as exc:
             return _fail_closed(state, f"model did not return a valid review after a self-correction retry ({exc})")
