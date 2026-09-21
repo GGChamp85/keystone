@@ -1,0 +1,8 @@
+{
+  "id": "token_bucket",
+  "language": "python",
+  "instruction": "The TokenBucket rate limiter in token_bucket.py has a bug: after being idle for a while, _refill() lets self.tokens grow past self.capacity without bound, so a burst of consume() calls after an idle period can let through more requests than the configured capacity allows. Fix _refill() so tokens are always capped at self.capacity, without breaking the existing tests in tests/test_token_bucket.py.",
+  "test_command": "python -m pytest tests/ -v",
+  "fail_to_pass": ["tests/test_token_bucket.py::test_tokens_never_exceed_capacity_after_long_idle"],
+  "pass_to_pass": ["tests/test_token_bucket.py::test_consume_within_capacity"]
+}
