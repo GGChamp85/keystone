@@ -129,6 +129,45 @@ export const forgetMemory = (id: string): Promise<MemoryRecord> => memoryAction(
 export const pinMemory = (id: string): Promise<MemoryRecord> => memoryAction(id, 'pin')
 export const unpinMemory = (id: string): Promise<MemoryRecord> => memoryAction(id, 'unpin')
 
+// ── Team task list (src/api/routes/agents.py's GET /v1/keystone/tasks,
+// src/api/models/responses.py's AgentTaskSummaryResponse) ──────────
+
+export interface AgentTaskSummary {
+  id: string
+  user_id: string | null
+  status: string
+  task_description: string
+  repository_url: string | null
+  branch: string
+  branch_name: string | null
+  pr_url: string | null
+  pr_number: number | null
+  model_role: string
+  error_message: string | null
+  started_at: string | null
+  completed_at: string | null
+  created_at: string
+}
+
+export interface ListTasksParams {
+  user_id?: string
+  repository_url?: string
+  limit?: number
+}
+
+export async function listTasks(params: ListTasksParams = {}): Promise<AgentTaskSummary[]> {
+  const query = new URLSearchParams()
+  if (params.user_id) query.set('user_id', params.user_id)
+  if (params.repository_url) query.set('repository_url', params.repository_url)
+  if (params.limit) query.set('limit', String(params.limit))
+  const qs = query.toString()
+  const resp = await fetch(`/v1/keystone/tasks${qs ? `?${qs}` : ''}`, { headers: authHeaders() })
+  if (!resp.ok) {
+    throw new Error(`Failed to list tasks (${resp.status})`)
+  }
+  return resp.json()
+}
+
 // Mirrors src/orchestrator/events.py's _summarize() payload exactly —
 // keep these two in sync.
 export interface TaskEvent {

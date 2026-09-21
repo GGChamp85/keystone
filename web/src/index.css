@@ -537,3 +537,114 @@ button:disabled {
   border-color: var(--accent);
   background: var(--accent-soft);
 }
+
+/* Team task list */
+
+.task-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.task-item {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 18px;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 0.15s ease;
+}
+
+.task-item:hover {
+  box-shadow: var(--shadow-md);
+}
+
+.task-item-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.task-badge {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: var(--text-dim);
+  border: 1px solid transparent;
+}
+
+.task-status-badge-completed {
+  color: var(--green);
+  border: 1px solid #bbf7d0;
+  background: var(--green-soft);
+}
+
+.task-status-badge-running,
+.task-status-badge-pending {
+  color: var(--accent);
+  border: 1px solid #bfdbfe;
+  background: var(--accent-soft);
+}
+
+.task-status-badge-failed,
+.task-status-badge-timed_out {
+  color: var(--red);
+  border: 1px solid #fecaca;
+  background: var(--red-soft);
+}
+
+.task-status-badge-cancelled {
+  color: var(--yellow);
+  border: 1px solid #fde68a;
+  background: var(--yellow-soft);
+}
+
+.task-description {
+  margin: 0 0 10px;
+  line-height: 1.5;
+}
+
+.task-item-meta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.task-item-meta code {
+  background: #f1f5f9;
+  color: #334155;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.task-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.task-pr-link {
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.task-pr-link:hover {
+  text-decoration: underline;
+}
+
+.task-item-actions .back-link {
+  margin-bottom: 0;
+}

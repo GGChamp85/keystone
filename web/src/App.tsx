@@ -3,18 +3,22 @@ import { ApiKeyBar } from './components/ApiKeyBar'
 import { MemoryPanel } from './components/MemoryPanel'
 import { TaskSubmitForm } from './components/TaskSubmitForm'
 import { TaskStreamView } from './components/TaskStreamView'
+import { TeamTaskList } from './components/TeamTaskList'
+
+type View = 'memory' | 'team'
 
 function taskIdFromUrl(): string | null {
   return new URLSearchParams(window.location.search).get('task')
 }
 
-function viewFromUrl(): 'memory' | null {
-  return new URLSearchParams(window.location.search).get('view') === 'memory' ? 'memory' : null
+function viewFromUrl(): View | null {
+  const v = new URLSearchParams(window.location.search).get('view')
+  return v === 'memory' || v === 'team' ? v : null
 }
 
 export default function App() {
   const [taskId, setTaskIdState] = useState<string | null>(taskIdFromUrl)
-  const [view, setViewState] = useState<'memory' | null>(viewFromUrl)
+  const [view, setViewState] = useState<View | null>(viewFromUrl)
 
   function setTaskId(id: string | null) {
     const url = new URL(window.location.href)
@@ -26,7 +30,7 @@ export default function App() {
     setViewState(null)
   }
 
-  function setView(next: 'memory' | null) {
+  function setView(next: View | null) {
     const url = new URL(window.location.href)
     if (next) url.searchParams.set('view', next)
     else url.searchParams.delete('view')
@@ -41,10 +45,19 @@ export default function App() {
       <header className="app-header">
         <h1>Keystone Agents</h1>
         <div className="api-key-bar">
-          {view !== 'memory' && !taskId && (
-            <button className="nav-link" onClick={() => setView('memory')}>
-              Memory
-            </button>
+          {!taskId && (
+            <>
+              {view !== 'team' && (
+                <button className="nav-link" onClick={() => setView('team')}>
+                  Tasks
+                </button>
+              )}
+              {view !== 'memory' && (
+                <button className="nav-link" onClick={() => setView('memory')}>
+                  Memory
+                </button>
+              )}
+            </>
           )}
           <ApiKeyBar />
         </div>
@@ -53,6 +66,8 @@ export default function App() {
       <main>
         {view === 'memory' ? (
           <MemoryPanel onBack={() => setView(null)} />
+        ) : view === 'team' ? (
+          <TeamTaskList onOpenTask={setTaskId} />
         ) : taskId ? (
           <TaskStreamView taskId={taskId} onBack={() => setTaskId(null)} />
         ) : (
