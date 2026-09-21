@@ -111,6 +111,7 @@ def create_app() -> FastAPI:
     app.mount("/metrics", metrics_app)
     from src.api.routes.agents import router as agents_router
     from src.api.routes.completions import router as completions_router
+    from src.api.routes.finetune import router as finetune_router
     from src.api.routes.health import router as health_router
     from src.api.routes.keys import router as keys_router
     from src.api.routes.mcp import build_mcp_asgi_app
@@ -121,6 +122,7 @@ def create_app() -> FastAPI:
     app.include_router(keys_router)
     app.include_router(agents_router)
     app.include_router(memory_router)
+    app.include_router(finetune_router)
 
     # MCP server (src/api/routes/mcp.py) — real endpoint at /v1/keystone/mcp.
     # Stored on app.state so `lifespan()` above can enter its session
