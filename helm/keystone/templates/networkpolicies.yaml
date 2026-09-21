@@ -1,0 +1,138 @@
+# Copyright 2024-2026 Gaurav Gupta / Keystone — Apache 2.0
+#
+# Replaces docker-compose's single flat bridge network with real tier
+# segmentation: app can reach db/redis/qdrant/vLLM/sandbox-daemon, but
+# nothing else can reach the db tier directly, and the sandbox-daemon tier
+# is isolated except for the app/worker calling it.
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "keystone.fullname" . }}-default-deny
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress"]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "keystone.fullname" . }}-allow-app-to-data-tier
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app.kubernetes.io/component, operator: In, values: [postgres, redis, qdrant, temporal] }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - { key: app.kubernetes.io/component, operator: In, values: [app, worker] }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "keystone.fullname" . }}-allow-app-to-vllm
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app.kubernetes.io/component, operator: In, values: [vllm-coding, vllm-coding-fallback, vllm-reasoning] }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - { key: app.kubernetes.io/component, operator: In, values: [app, worker] }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "keystone.fullname" . }}-allow-app-to-sandbox-daemon
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "keystone.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: sandbox-daemon
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - { key: app.kubernetes.io/component, operator: In, values: [app, worker] }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "keystone.fullname" . }}-allow-ingress-to-app
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "keystone.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: app
+  policyTypes: ["Ingress"]
+  ingress:
+    - {} # ingress controller traffic — narrow to the ingress-nginx namespace if your cluster labels it
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "keystone.fullname" . }}-allow-app-to-openbao
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "keystone.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: openbao
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - { key: app.kubernetes.io/component, operator: In, values: [app, worker] }
+---
+# The observability tier was a real gap here until this pass: the
+# cluster-wide default-deny above blocks ALL ingress with no exception
+# unless a rule explicitly allows it — verified this the hard way on a
+# real kind cluster: Prometheus's scrape targets and Loki's push endpoint
+# were both silently unreachable (connections hanging, not erroring)
+# under this exact policy set before these three rules existed.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "keystone.fullname" . }}-allow-prometheus-to-scrape-targets
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app.kubernetes.io/component, operator: In, values: [app, worker, sandbox-daemon, vllm-coding, vllm-coding-fallback, vllm-reasoning] }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "keystone.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: prometheus
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "keystone.fullname" . }}-allow-observability-internal
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app.kubernetes.io/component, operator: In, values: [prometheus, loki, alertmanager] }
+  policyTypes: ["Ingress"]
+  ingress:
+    # Grafana querying Prometheus + Loki; Promtail pushing to Loki;
+    # Prometheus alerting to Alertmanager; Loki's own ruler alerting to
+    # Alertmanager too.
+    - from:
+        - podSelector:
+            matchExpressions:
+              - { key: app.kubernetes.io/component, operator: In, values: [grafana, promtail, prometheus, loki] }
+{{- end }}

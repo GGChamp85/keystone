@@ -1,0 +1,51 @@
+# Copyright 2024-2026 Gaurav Gupta / Keystone — Apache 2.0
+# Overrides for the RunPod dev/test tier — internet-connected, single
+# small GPU pod, no HA. See infra/opentofu/environments/runpod-test/.
+app:
+  replicaCount: 1
+  autoscaling:
+    enabled: false
+worker:
+  replicaCount: 1
+postgres:
+  storage: 10Gi
+redis:
+  storage: 2Gi
+qdrant:
+  storage: 10Gi
+openbao:
+  storage: 2Gi
+sandboxDaemon:
+  backend: gvisor # RunPod's standard GPU pods are containerized — no /dev/kvm
+vllm:
+  # GLM-5.3-Flash (the production default `coding` role) needs ~328GB of
+  # weights alone — nowhere near a single test GPU. This overlay points
+  # `coding` at Qwen2.5-Coder-32B-Instruct instead (overriding model/image/
+  # toolParser back to the values.yaml `coding-fallback` role's settings),
+  # so the lightweight single-GPU test tier stays actually runnable; the
+  # `coding-fallback` role itself is left disabled here to avoid asking for
+  # a second GPU pod this tier doesn't have.
+  coding:
+    enabled: true
+    gpuCount: 1 # size down from the 8-GPU production split for a single test GPU
+    model: "Qwen/Qwen2.5-Coder-32B-Instruct"
+    servedModelName: qwen-coder-32b
+    maxModelLen: 32768
+    toolParser: hermes
+    image:
+      repository: vllm/vllm-openai
+      tag: v0.29.0
+    nodeSelector: {}
+    resources:
+      requests: { cpu: "4", memory: "24Gi", nvidia.com/gpu: "1" }
+      limits: { cpu: "8", memory: "48Gi", nvidia.com/gpu: "1" }
+  coding-fallback:
+    enabled: false
+  reasoning:
+    enabled: false
+ingress:
+  enabled: false # access via port-forward/NodePort on the test tier
+networkPolicy:
+  enabled: true
+secrets:
+  useOpenBao: false

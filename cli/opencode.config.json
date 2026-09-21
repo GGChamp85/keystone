@@ -1,0 +1,58 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "keystone-inference": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Keystone Inference",
+      "options": {
+        "baseURL": "{env:KEYSTONE_INFERENCE_URL}/v1",
+        "apiKey": "{env:KEYSTONE_API_KEY}"
+      },
+      "models": {
+        "coding": {
+          "name": "Keystone Coding (GLM-5.3-Flash)",
+          "limit": { "context": 131072, "output": 16384 }
+        },
+        "coding_fallback": {
+          "name": "Keystone Coding Fallback (Qwen2.5-Coder-32B)",
+          "limit": { "context": 131072, "output": 16384 }
+        },
+        "reasoning": {
+          "name": "Keystone Reasoning (critic)",
+          "limit": { "context": 65536, "output": 16384 }
+        }
+      }
+    }
+  },
+  "model": "keystone-inference/coding",
+  "small_model": "keystone-inference/coding_fallback",
+
+  "mcp": {
+    "keystone-memory": {
+      "type": "remote",
+      "url": "{env:KEYSTONE_INFERENCE_URL}/v1/keystone/mcp",
+      "enabled": true,
+      "headers": {
+        "Authorization": "Bearer {env:KEYSTONE_API_KEY}"
+      }
+    }
+  },
+
+  "permission": {
+    "*": "ask",
+    "bash": {
+      "*": "ask",
+      "git status": "allow",
+      "git diff*": "allow",
+      "git log*": "allow",
+      "ls*": "allow",
+      "cat*": "allow",
+      "grep*": "allow",
+      "rm -rf*": "deny",
+      "git push*": "deny"
+    },
+    "edit": "ask"
+  },
+
+  "instructions": ["KEYSTONE.md"]
+}

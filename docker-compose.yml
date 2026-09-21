@@ -1,0 +1,368 @@
+# Copyright 2024-2026 Gaurav Gupta / Keystone — Apache 2.0
+# Full stack (single-box dev tier): Keystone Inference (LLM serving) + Keystone Agents (coding agent)
+# For multi-node/production, see helm/keystone/ and infra/opentofu/.
+
+version: "3.9"
+
+x-common-env: &common-env
+  VS_ENV: production
+  VS_PLATFORM_NAME: Keystone
+  DATABASE_URL: postgresql+asyncpg://keystone:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/keystone
+  REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379/0
+  QDRANT_HOST: qdrant
+  QDRANT_PORT: "6333"
+  QDRANT_API_KEY: ${QDRANT_API_KEY:?QDRANT_API_KEY must be set}
+  KEYSTONE_ROOT_ADMIN_TOKEN: ${KEYSTONE_ROOT_ADMIN_TOKEN:?KEYSTONE_ROOT_ADMIN_TOKEN must be set}
+  SANDBOX_DAEMON_URL: http://sandbox-daemon:9000
+  SANDBOX_BACKEND: ${SANDBOX_BACKEND:-gvisor}
+  TEMPORAL_HOST: temporal:7233
+  TEMPORAL_NAMESPACE: keystone
+
+services:
+  app:
+    build: { context: ., dockerfile: Dockerfile }
+    container_name: keystone-app
+    restart: unless-stopped
+    ports: ["8080:8080"]
+    environment:
+      <<: *common-env
+      VLLM_CODING_URL: http://vllm-coding:8000/v1
+      VLLM_CODING_FALLBACK_URL: http://vllm-coding-fallback:8000/v1
+      VLLM_REASONING_URL: http://vllm-reasoning:8000/v1
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      qdrant: { condition: service_started }
+    networks: [keystone-network]
+    volumes: [app-data:/data]
+    deploy:
+      resources:
+        limits: { cpus: "2", memory: 2g }
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  worker:
+    build: { context: ., dockerfile: Dockerfile }
+    container_name: keystone-worker
+    command: ["python", "-m", "src.temporal.worker"]
+    restart: unless-stopped
+    environment:
+      <<: *common-env
+      VLLM_CODING_URL: http://vllm-coding:8000/v1
+      VLLM_CODING_FALLBACK_URL: http://vllm-coding-fallback:8000/v1
+      VLLM_REASONING_URL: http://vllm-reasoning:8000/v1
+    depends_on:
+      postgres: { condition: service_healthy }
+      temporal: { condition: service_started }
+    networks: [keystone-network]
+    volumes: [app-data:/data]
+    deploy:
+      resources:
+        limits: { cpus: "2", memory: 2g }
+
+  sandbox-daemon:
+    build: { context: ., dockerfile: docker/sandbox-daemon.Dockerfile }
+    container_name: keystone-sandbox-daemon
+    restart: unless-stopped
+    environment:
+      <<: *common-env
+    privileged: true  # needs the Docker socket (gVisor backend) or /dev/kvm (Firecracker backend)
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /dev/kvm:/dev/kvm
+    networks: [keystone-network, keystone-sandbox-net]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: keystone-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: keystone
+      POSTGRES_USER: keystone
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+    ports: ["5432:5432"]
+    volumes: [postgres-data:/var/lib/postgresql/data]
+    networks: [keystone-network]
+    deploy:
+      resources:
+        limits: { cpus: "2", memory: 2g }
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keystone -d keystone"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    # Valkey, not Redis: `redis:7-alpine` actually resolves to Redis 7.4+,
+    # which Redis Inc. relicensed off BSD to the non-open-source dual
+    # RSALv2/SSPLv1 in March 2024 — the same category of problem that drove
+    # Terraform -> OpenTofu and Vault -> OpenBao in this project. Valkey is
+    # the Linux Foundation's BSD-3-Clause fork, wire-protocol-compatible
+    # (same RESP protocol, same redis:// URL scheme, same redis-cli-style
+    # commands renamed to valkey-*) — verified as a drop-in replacement:
+    # `valkey-cli` speaks the same protocol the `redis` Python client
+    # already uses via REDIS_URL, no application code changes needed.
+    image: valkey/valkey:7.2-alpine
+    container_name: keystone-redis
+    restart: unless-stopped
+    ports: ["6379:6379"]
+    volumes: [redis-data:/data]
+    networks: [keystone-network]
+    command: >
+      valkey-server --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+      --maxmemory 512mb --maxmemory-policy allkeys-lru --appendonly yes
+    deploy:
+      resources:
+        limits: { cpus: "1", memory: 768m }
+    healthcheck:
+      test: ["CMD", "valkey-cli", "-a", "${REDIS_PASSWORD:?REDIS_PASSWORD must be set}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  qdrant:
+    image: qdrant/qdrant:v1.11.0
+    container_name: keystone-qdrant
+    restart: unless-stopped
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:?QDRANT_API_KEY must be set}
+      QDRANT__TELEMETRY_DISABLED: "true"
+    ports: ["6333:6333", "6334:6334"]
+    volumes: [qdrant-data:/qdrant/storage]
+    networks: [keystone-network]
+    deploy:
+      resources:
+        limits: { cpus: "2", memory: 4g }
+
+  # GLM-5.3-Flash (zai-org, MIT) — primary coding model. Uses vLLM's own
+  # dedicated pre-built image for this model (not a generic version tag):
+  # its glm5_next architecture (hybrid MLA + gated-linear-attention + a
+  # sparse indexer, 288-expert MoE, natively FP8 on disk) is new enough
+  # that vLLM ships a maintainer-built image specifically for it rather
+  # than relying on a generic release to have full support yet. See
+  # src/inference/config.py's coding_model_config() docstring for the
+  # verified footprint/tool-parser details this command mirrors.
+  vllm-coding:
+    image: vllm/vllm-openai:glm53-flash
+    container_name: keystone-vllm-coding
+    restart: unless-stopped
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices: [{ driver: nvidia, count: 8, capabilities: [gpu] }]
+    environment:
+      HF_TOKEN: "${HF_TOKEN}"
+      VLLM_NO_USAGE_STATS: "1"
+      HF_HUB_DISABLE_TELEMETRY: "1"
+    command: >
+      --model zai-org/GLM-5.3-Flash --served-model-name glm-5.3-flash
+      --tensor-parallel-size 8 --max-model-len 131072 --gpu-memory-utilization 0.92
+      --max-num-seqs 32 --enable-prefix-caching --enable-chunked-prefill
+      --max-num-batched-tokens 16384 --block-size 16 --swap-space 8
+      --trust-remote-code --enable-auto-tool-choice --tool-call-parser glm47
+      --port 8000
+    ports: ["8001:8000"]
+    volumes: [model-cache:/root/.cache/huggingface]
+    networks: [keystone-network]
+
+  # Qwen2.5-Coder-32B-Instruct — coding fallback, used when vllm-coding
+  # (GLM-5.3-Flash) is unhealthy (src/inference/model_router.py's
+  # FALLBACK_CHAINS). A conventional dense model, so it runs on the
+  # current generic vLLM release rather than a model-specific image.
+  vllm-coding-fallback:
+    image: vllm/vllm-openai:v0.29.0
+    container_name: keystone-vllm-coding-fallback
+    restart: unless-stopped
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices: [{ driver: nvidia, count: 4, capabilities: [gpu] }]
+    environment:
+      HF_TOKEN: "${HF_TOKEN}"
+      VLLM_NO_USAGE_STATS: "1"
+      HF_HUB_DISABLE_TELEMETRY: "1"
+    command: >
+      --model Qwen/Qwen2.5-Coder-32B-Instruct --served-model-name qwen-coder-32b
+      --tensor-parallel-size 4 --max-model-len 131072 --gpu-memory-utilization 0.92
+      --max-num-seqs 32 --enable-prefix-caching --enable-chunked-prefill
+      --max-num-batched-tokens 16384 --block-size 16 --swap-space 8
+      --trust-remote-code --enable-auto-tool-choice --tool-call-parser hermes
+      --port 8000
+    ports: ["8004:8000"]
+    volumes: [model-cache:/root/.cache/huggingface]
+    networks: [keystone-network]
+
+  vllm-reasoning:
+    image: vllm/vllm-openai:v0.29.0
+    container_name: keystone-vllm-reasoning
+    restart: unless-stopped
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices: [{ driver: nvidia, count: 2, capabilities: [gpu] }]
+    environment:
+      HF_TOKEN: "${HF_TOKEN}"
+      VLLM_NO_USAGE_STATS: "1"
+      HF_HUB_DISABLE_TELEMETRY: "1"
+    command: >
+      --model deepseek-ai/DeepSeek-R1 --served-model-name deepseek-r1
+      --tensor-parallel-size 2 --max-model-len 65536 --gpu-memory-utilization 0.90
+      --max-num-seqs 16 --enable-prefix-caching --enable-chunked-prefill
+      --max-num-batched-tokens 8192 --block-size 16 --swap-space 4
+      --trust-remote-code --port 8000
+    ports: ["8002:8000"]
+    volumes: [model-cache:/root/.cache/huggingface]
+    networks: [keystone-network]
+
+  temporal:
+    image: temporalio/auto-setup:1.24
+    container_name: keystone-temporal
+    restart: unless-stopped
+    ports: ["7233:7233"]
+    environment:
+      DB: postgres12
+      DB_PORT: "5432"
+      POSTGRES_SEEDS: postgres
+      POSTGRES_USER: keystone
+      POSTGRES_PWD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      DEFAULT_NAMESPACE: keystone
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [keystone-network]
+
+  temporal-ui:
+    image: temporalio/ui:2.27.0
+    container_name: keystone-temporal-ui
+    restart: unless-stopped
+    ports: ["8088:8080"]
+    environment: { TEMPORAL_ADDRESS: "temporal:7233" }
+    depends_on: [temporal]
+    networks: [keystone-network]
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: keystone-nginx
+    restart: unless-stopped
+    ports: ["443:443", "80:80"]
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+    depends_on: [app]
+    networks: [keystone-network]
+
+  # ---------- Observability (opt-in: docker compose --profile observability up) ----------
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    container_name: keystone-prometheus
+    restart: unless-stopped
+    profiles: ["observability"]
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    ports: ["9091:9090"]
+    networks: [keystone-network]
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: keystone-alertmanager
+    restart: unless-stopped
+    profiles: ["observability"]
+    volumes:
+      - ./observability/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    ports: ["9093:9093"]
+    networks: [keystone-network]
+
+  loki:
+    image: grafana/loki:3.2.0
+    container_name: keystone-loki
+    restart: unless-stopped
+    profiles: ["observability"]
+    volumes:
+      - ./observability/loki/loki-config.yaml:/etc/loki/local-config.yaml:ro
+      - loki-data:/loki
+    ports: ["3100:3100"]
+    networks: [keystone-network]
+
+  promtail:
+    image: grafana/promtail:3.2.0
+    container_name: keystone-promtail
+    restart: unless-stopped
+    profiles: ["observability"]
+    command: ["-config.file=/etc/promtail/config.yaml"]
+    volumes:
+      - ./observability/promtail/promtail-config.yaml:/etc/promtail/config.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [keystone-network]
+    depends_on: [loki]
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: keystone-grafana
+    restart: unless-stopped
+    profiles: ["observability"]
+    environment:
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-changeme}
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    ports: ["3000:3000"]
+    networks: [keystone-network]
+
+  openbao:
+    # Opt-in secrets backend for the dev/test tier (`docker compose --profile secrets up`).
+    # scripts/openbao_bootstrap.sh seeds it and renders .env.generated from its KV store —
+    # the plain-env-var path above (.env.example) stays the default for a quick local boot;
+    # this profile is for exercising the real secrets-management path before client handoff.
+    image: openbao/openbao:2.1
+    container_name: keystone-openbao
+    restart: unless-stopped
+    profiles: ["secrets"]
+    cap_add: [IPC_LOCK]
+    environment:
+      BAO_LOCAL_CONFIG: |
+        storage "file" { path = "/openbao/data" }
+        listener "tcp" { address = "0.0.0.0:8200" tls_disable = true }
+        disable_mlock = true
+    volumes:
+      - openbao-data:/openbao/data
+    ports: ["8200:8200"]
+    networks: [keystone-network]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8200/v1/sys/health?standbyok=true"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+networks:
+  keystone-network:
+    driver: bridge
+  keystone-sandbox-net:
+    driver: bridge
+    internal: false
+
+volumes:
+  postgres-data:
+  redis-data:
+  qdrant-data:
+  model-cache:
+  app-data:
+  openbao-data:
+  prometheus-data:
+  grafana-data:
+  alertmanager-data:
+  loki-data:

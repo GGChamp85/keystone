@@ -1,0 +1,16 @@
+apiVersion: v2
+name: keystone
+description: Keystone — self-hosted LLM inference (Keystone Inference) and autonomous coding agents (Keystone Agents)
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+home: https://github.com/GGChamp85/keystone
+sources:
+  - https://github.com/GGChamp85/keystone
+maintainers:
+  - name: Gaurav Gupta
+keywords:
+  - llm
+  - self-hosted
+  - coding-agent
+  - vllm

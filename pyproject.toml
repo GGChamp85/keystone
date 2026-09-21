@@ -1,0 +1,96 @@
+# Copyright 2024-2026 Gaurav Gupta / Keystone
+# Licensed under the Apache License, Version 2.0
+
+[project]
+name = "keystone"
+version = "1.0.0"
+description = "Keystone — Keystone Inference (Self-Hosted LLM Serving) & Keystone Agents (Autonomous Coding Agent)"
+license = {text = "Apache-2.0"}
+authors = [{name = "Gaurav Gupta", email = "gauravright@gmail.com"}]
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi[standard]>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "pydantic>=2.8.0",
+    "pydantic-settings>=2.4.0",
+    "sqlalchemy[asyncio]>=2.0.31",
+    "asyncpg>=0.29.0",
+    "alembic>=1.13.0",
+    "redis[hiredis]>=5.0.0",
+    "qdrant-client>=1.10.0",
+    "langgraph>=0.2.0",
+    "langchain-core>=0.3.0",
+    "httpx>=0.27.0",
+    "openai>=1.40.0",
+    "anthropic>=0.34.0",
+    "docker>=7.0.0",
+    "passlib[bcrypt]>=1.7.4",
+    "python-jose[cryptography]>=3.3.0",
+    "python-multipart>=0.0.9",
+    "structlog>=24.4.0",
+    "tenacity>=8.5.0",
+    "tiktoken>=0.7.0",
+    "sentence-transformers>=3.0.0",
+    "gitpython>=3.1.43",
+    "psutil>=6.0.0",
+    "temporalio>=1.7.0",
+    "prometheus-client>=0.20.0",
+    "cryptography>=43.0.0",
+    "typer>=0.12.0",
+    "rich>=13.7.0",
+    "mcp>=2.2.0",
+]
+
+[project.scripts]
+keystone = "src.cli.main:app"
+
+[project.optional-dependencies]
+finetuning = [
+    "torch>=2.4.0",
+    "transformers>=4.44.0",
+    "peft>=0.12.0",
+    "trl>=0.10.0",
+    "datasets>=2.20.0",
+    "bitsandbytes>=0.43.0",
+    "accelerate>=0.33.0",
+    "wandb>=0.17.0",
+]
+dev = [
+    "ruff>=0.6.0",
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=5.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/GGChamp85/keystone"
+Repository = "https://github.com/GGChamp85/keystone"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC", "S", "C4", "PERF", "SIM", "RUF"]
+ignore = [
+    "B008",     # Depends()/Security() as a default arg is the idiomatic FastAPI DI pattern
+    "S101",     # assert is fine in our own test/validation helpers
+    "S104",     # 0.0.0.0 binds are deliberate — every service here runs inside a container
+    "ASYNC109", # our async functions intentionally take a `timeout` param and enforce it via
+                # asyncio.wait_for internally, rather than requiring the caller wrap every call
+]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/*" = ["S603", "S607"]  # CLI scripts intentionally shell out
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

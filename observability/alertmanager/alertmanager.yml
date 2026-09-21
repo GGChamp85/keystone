@@ -1,0 +1,28 @@
+# Copyright 2024-2026 Gaurav Gupta / Keystone — Apache 2.0
+#
+# Default receiver is a no-op ("null") — deliberately, since this repo has
+# no client-specific Slack/PagerDuty/email endpoint to hardcode. Alerts are
+# real and will fire (see observability/prometheus/alerts.yml + Grafana's
+# Alerting UI), they just don't go anywhere until a real receiver is
+# configured. Uncomment/adapt the slack_configs block below and point
+# SLACK_WEBHOOK_URL at the client's actual incoming webhook.
+route:
+  receiver: default
+  group_by: ["alertname", "severity"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+receivers:
+  - name: default
+    # webhook_configs:
+    #   - url: 'http://your-internal-webhook-receiver/alerts'
+    # slack_configs:
+    #   - api_url: '${SLACK_WEBHOOK_URL}'
+    #     channel: '#keystone-alerts'
+    #     send_resolved: true
+
+inhibit_rules:
+  - source_matchers: ["severity = critical"]
+    target_matchers: ["severity = warning"]
+    equal: ["alertname"]

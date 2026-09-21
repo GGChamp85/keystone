@@ -1,0 +1,541 @@
+# Copyright 2024-2026 Gaurav Gupta / Keystone — Apache 2.0
+#
+# Self-hosted Prometheus + Grafana, matching the docker-compose dev tier's
+# `--profile observability` services — same scrape config, same dashboards
+# (helm/keystone/dashboards/*.json), so what's validated in dev/kind is
+# exactly what ships to the client VPC. Air-gap safe by construction: no
+# remote_write, no external Grafana plugin/marketplace pulls (dashboards
+# are provisioned from this chart's own files, not fetched at runtime).
+{{- if .Values.observability.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "keystone.fullname" . }}-prometheus-config
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+    app.kubernetes.io/component: prometheus
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+    rule_files:
+      - /etc/prometheus/alerts.yml
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets: ["{{ include "keystone.fullname" . }}-alertmanager:9093"]
+    scrape_configs:
+      - job_name: keystone-app
+        static_configs:
+          - targets: ["{{ include "keystone.fullname" . }}-app:{{ .Values.app.port }}"]
+        metrics_path: /metrics
+      - job_name: keystone-sandbox-daemon
+        static_configs:
+          - targets: ["{{ include "keystone.fullname" . }}-sandbox-daemon:9000"]
+        metrics_path: /metrics
+      {{- if .Values.vllm.coding.enabled }}
+      - job_name: vllm-coding
+        static_configs:
+          - targets: ["{{ include "keystone.fullname" . }}-vllm-coding:8000"]
+        metrics_path: /metrics
+      {{- end }}
+      {{- if .Values.vllm.reasoning.enabled }}
+      - job_name: vllm-reasoning
+        static_configs:
+          - targets: ["{{ include "keystone.fullname" . }}-vllm-reasoning:8000"]
+        metrics_path: /metrics
+      {{- end }}
+      {{- if (index .Values.vllm "coding-fallback").enabled }}
+      - job_name: vllm-coding-fallback
+        static_configs:
+          - targets: ["{{ include "keystone.fullname" . }}-vllm-coding-fallback:8000"]
+        metrics_path: /metrics
+      {{- end }}
+      - job_name: prometheus
+        static_configs:
+          - targets: ["localhost:9090"]
+  alerts.yml: |
+{{ .Files.Get "prometheus/alerts.yml" | indent 4 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "keystone.fullname" . }}-prometheus
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+    app.kubernetes.io/component: prometheus
+spec:
+  ports:
+    - port: 9090
+      name: http
+  selector:
+    {{- include "keystone.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: prometheus
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "keystone.fullname" . }}-prometheus
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+    app.kubernetes.io/component: prometheus
+spec:
+  serviceName: {{ include "keystone.fullname" . }}-prometheus
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "keystone.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: prometheus
+  template:
+    metadata:
+      labels:
+        {{- include "keystone.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: prometheus
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 65534, fsGroup: 65534 }
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v2.55.0
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --storage.tsdb.retention.time=15d
+            - --web.enable-lifecycle
+          ports:
+            - containerPort: 9090
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+            - name: data
+              mountPath: /prometheus
+          resources: {{- toYaml .Values.observability.prometheus.resources | nindent 12 }}
+          readinessProbe:
+            httpGet: { path: /-/ready, port: 9090 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap: { name: {{ include "keystone.fullname" . }}-prometheus-config }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.observability.prometheus.storageClassName }}
+        storageClassName: {{ .Values.observability.prometheus.storageClassName }}
+        {{- end }}
+        resources:
+          requests: { storage: {{ .Values.observability.prometheus.storage }} }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "keystone.fullname" . }}-grafana-provisioning
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+    app.kubernetes.io/component: grafana
+data:
+  datasource.yml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://{{ include "keystone.fullname" . }}-prometheus:9090
+        isDefault: true
+        editable: false
+      - name: Loki
+        type: loki
+        access: proxy
+        url: http://{{ include "keystone.fullname" . }}-loki:3100
+        editable: false
+      # No Alertmanager datasource entry — see observability/grafana/provisioning/
+      # datasources/datasource.yml's comment: verified this returns
+      # "plugin.unavailable" on grafana/grafana:11.2.0's health check.
+      # Alerting itself works without it (Prometheus -> Alertmanager, both
+      # deployed below) — Alertmanager's own UI is reachable directly.
+  dashboards.yml: |
+    apiVersion: 1
+    providers:
+      - name: Keystone
+        orgId: 1
+        folder: Keystone
+        type: file
+        disableDeletion: false
+        updateIntervalSeconds: 30
+        options:
+          path: /etc/grafana/provisioning/dashboards/json
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "keystone.fullname" . }}-grafana-dashboards
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+    app.kubernetes.io/component: grafana
+data:
+  {{- (.Files.Glob "dashboards/*.json").AsConfig | nindent 2 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "keystone.fullname" . }}-grafana
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+    app.kubernetes.io/component: grafana
+spec:
+  ports:
+    - port: 3000
+      name: http
+  selector:
+    {{- include "keystone.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: grafana
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "keystone.fullname" . }}-grafana
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+    app.kubernetes.io/component: grafana
+spec:
+  serviceName: {{ include "keystone.fullname" . }}-grafana
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "keystone.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: grafana
+  template:
+    metadata:
+      labels:
+        {{- include "keystone.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: grafana
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 472, fsGroup: 472 }
+      containers:
+        - name: grafana
+          image: grafana/grafana:11.2.0
+          env:
+            - name: GF_ANALYTICS_REPORTING_ENABLED
+              value: "false"
+            - name: GF_ANALYTICS_CHECK_FOR_UPDATES
+              value: "false"
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ include "keystone.fullname" . }}-secrets, key: GRAFANA_ADMIN_PASSWORD }
+          ports:
+            - containerPort: 3000
+          volumeMounts:
+            - name: provisioning-datasources
+              mountPath: /etc/grafana/provisioning/datasources
+            - name: provisioning-dashboards
+              mountPath: /etc/grafana/provisioning/dashboards
+            - name: dashboards-json
+              mountPath: /etc/grafana/provisioning/dashboards/json
+            - name: data
+              mountPath: /var/lib/grafana
+          resources: {{- toYaml .Values.observability.grafana.resources | nindent 12 }}
+          readinessProbe:
+            httpGet: { path: /api/health, port: 3000 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: provisioning-datasources
+          configMap:
+            name: {{ include "keystone.fullname" . }}-grafana-provisioning
+            items: [{ key: datasource.yml, path: datasource.yml }]
+        - name: provisioning-dashboards
+          configMap:
+            name: {{ include "keystone.fullname" . }}-grafana-provisioning
+            items: [{ key: dashboards.yml, path: dashboards.yml }]
+        - name: dashboards-json
+          configMap: { name: {{ include "keystone.fullname" . }}-grafana-dashboards }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests: { storage: 5Gi }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "keystone.fullname" . }}-alertmanager-config
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+    app.kubernetes.io/component: alertmanager
+data:
+  alertmanager.yml: |
+{{ .Files.Get "alertmanager/alertmanager.yml" | indent 4 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "keystone.fullname" . }}-alertmanager
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+    app.kubernetes.io/component: alertmanager
+spec:
+  ports:
+    - port: 9093
+      name: http
+  selector:
+    {{- include "keystone.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: alertmanager
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "keystone.fullname" . }}-alertmanager
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+    app.kubernetes.io/component: alertmanager
+spec:
+  serviceName: {{ include "keystone.fullname" . }}-alertmanager
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "keystone.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: alertmanager
+  template:
+    metadata:
+      labels:
+        {{- include "keystone.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: alertmanager
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 65534, fsGroup: 65534 }
+      containers:
+        - name: alertmanager
+          image: prom/alertmanager:v0.27.0
+          ports:
+            - containerPort: 9093
+          volumeMounts:
+            - name: config
+              mountPath: /etc/alertmanager
+            - name: data
+              mountPath: /alertmanager
+          resources: {{- toYaml .Values.observability.alertmanager.resources | nindent 12 }}
+          readinessProbe:
+            httpGet: { path: /-/ready, port: 9093 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap: { name: {{ include "keystone.fullname" . }}-alertmanager-config }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests: { storage: 2Gi }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "keystone.fullname" . }}-loki-config
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+    app.kubernetes.io/component: loki
+data:
+  local-config.yaml: |
+    auth_enabled: false
+    server:
+      http_listen_port: 3100
+      grpc_listen_port: 9096
+    common:
+      instance_addr: 127.0.0.1
+      path_prefix: /loki
+      storage:
+        filesystem:
+          chunks_directory: /loki/chunks
+          rules_directory: /loki/rules
+      replication_factor: 1
+      ring:
+        kvstore:
+          store: inmemory
+    query_range:
+      results_cache:
+        cache:
+          embedded_cache:
+            enabled: true
+            max_size_mb: 100
+    schema_config:
+      configs:
+        - from: 2020-10-24
+          store: tsdb
+          object_store: filesystem
+          schema: v13
+          index:
+            prefix: index_
+            period: 24h
+    ruler:
+      alertmanager_url: http://{{ include "keystone.fullname" . }}-alertmanager:9093
+    frontend:
+      encoding: protobuf
+    analytics:
+      reporting_enabled: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "keystone.fullname" . }}-loki
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+    app.kubernetes.io/component: loki
+spec:
+  ports:
+    - port: 3100
+      name: http
+  selector:
+    {{- include "keystone.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: loki
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "keystone.fullname" . }}-loki
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+    app.kubernetes.io/component: loki
+spec:
+  serviceName: {{ include "keystone.fullname" . }}-loki
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "keystone.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: loki
+  template:
+    metadata:
+      labels:
+        {{- include "keystone.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: loki
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 10001, fsGroup: 10001 }
+      containers:
+        - name: loki
+          image: grafana/loki:3.2.0
+          ports:
+            - containerPort: 3100
+          volumeMounts:
+            - name: config
+              mountPath: /etc/loki
+            - name: data
+              mountPath: /loki
+          resources: {{- toYaml .Values.observability.loki.resources | nindent 12 }}
+          readinessProbe:
+            httpGet: { path: /ready, port: 3100 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap: { name: {{ include "keystone.fullname" . }}-loki-config }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests: { storage: {{ .Values.observability.loki.storage }} }
+---
+# Promtail runs as a DaemonSet (one per node) using kubernetes_sd_configs +
+# a hostPath mount of /var/log/pods — NOT docker_sd_configs against a
+# Docker socket (the docker-compose dev tier's approach), because a
+# Kubernetes node's container runtime is very commonly containerd, not
+# dockerd (verified: kind nodes have no /var/run/docker.sock at all,
+# confirmed on a real kind cluster during development), and /var/log/pods
+# is the one log location kubelet guarantees regardless of runtime.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "keystone.fullname" . }}-promtail-config
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+    app.kubernetes.io/component: promtail
+data:
+  promtail.yaml: |
+    server:
+      http_listen_port: 9080
+      grpc_listen_port: 0
+    positions:
+      filename: /run/promtail/positions.yaml
+    clients:
+      - url: http://{{ include "keystone.fullname" . }}-loki:3100/loki/api/v1/push
+    scrape_configs:
+      - job_name: kubernetes-pods
+        kubernetes_sd_configs:
+          - role: pod
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_node_name]
+            target_label: node_name
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          - source_labels: [__meta_kubernetes_pod_container_name]
+            target_label: container
+          - source_labels: [__meta_kubernetes_pod_uid, __meta_kubernetes_pod_container_name]
+            target_label: __path__
+            separator: /
+            replacement: /var/log/pods/*$1/*.log
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "keystone.fullname" . }}-promtail
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+    app.kubernetes.io/component: promtail
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "keystone.fullname" . }}-promtail
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+    app.kubernetes.io/component: promtail
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "nodes/proxy", "services", "endpoints", "pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "keystone.fullname" . }}-promtail
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+    app.kubernetes.io/component: promtail
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "keystone.fullname" . }}-promtail
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "keystone.fullname" . }}-promtail
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "keystone.fullname" . }}-promtail
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+    app.kubernetes.io/component: promtail
+spec:
+  selector:
+    matchLabels:
+      {{- include "keystone.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: promtail
+  template:
+    metadata:
+      labels:
+        {{- include "keystone.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: promtail
+    spec:
+      serviceAccountName: {{ include "keystone.fullname" . }}-promtail
+      containers:
+        - name: promtail
+          image: grafana/promtail:3.2.0
+          args: ["-config.file=/etc/promtail/promtail.yaml"]
+          env:
+            - name: HOSTNAME
+              valueFrom: { fieldRef: { fieldPath: spec.nodeName } }
+          securityContext: { runAsUser: 0, privileged: true }
+          volumeMounts:
+            - name: config
+              mountPath: /etc/promtail
+            - name: varlog
+              mountPath: /var/log
+              readOnly: true
+            - name: positions
+              mountPath: /run/promtail
+          resources: {{- toYaml .Values.observability.promtail.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap: { name: {{ include "keystone.fullname" . }}-promtail-config }
+        - name: varlog
+          hostPath: { path: /var/log }
+        - name: positions
+          emptyDir: {}
+{{- end }}

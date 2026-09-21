@@ -1,0 +1,18 @@
+name: Question
+description: Ask a usage or deployment question
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For general questions, check [`docs/`](../../docs) and `README.md`'s Documentation table first — most deployment questions are answered there. If your cluster/setup lets you run it, `keystone doctor`'s output is the fastest way to help us help you.
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: What have you already tried / read?

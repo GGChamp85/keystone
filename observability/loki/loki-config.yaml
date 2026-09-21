@@ -1,0 +1,55 @@
+# Copyright 2024-2026 Gaurav Gupta / Keystone — Apache 2.0
+#
+# Single-binary Loki, filesystem storage — matches Prometheus/Grafana's
+# treatment in this same directory (self-hosted, small-scale, no object
+# store dependency). Based on Loki's own real cmd/loki/loki-local-config.yaml
+# for the pinned v3.2.0 release, adapted for a persistent (not /tmp) data
+# path and pointed at the Alertmanager service this compose stack also runs.
+#
+# Real finding while building this: Loki has its OWN default-on telemetry
+# separate from anything already covered in docs/TELEMETRY_AUDIT.md —
+# `analytics.reporting_enabled` defaults to true and phones home to
+# stats.grafana.org. Disabled below.
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+query_range:
+  results_cache:
+    cache:
+      embedded_cache:
+        enabled: true
+        max_size_mb: 100
+
+schema_config:
+  configs:
+    - from: 2020-10-24
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+ruler:
+  alertmanager_url: http://alertmanager:9093
+
+frontend:
+  encoding: protobuf
+
+analytics:
+  reporting_enabled: false

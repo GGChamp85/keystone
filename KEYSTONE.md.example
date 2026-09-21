@@ -1,0 +1,25 @@
+# Project instructions for Keystone Agents
+
+Copy this file to `KEYSTONE.md` at your repository root — OpenCode picks it
+up automatically via the `instructions` field in `cli/opencode.config.json`,
+the same way Claude Code reads `CLAUDE.md`.
+
+## What goes here
+
+- Build/test/lint commands specific to this repo
+- Architectural conventions the agent should follow (and avoid)
+- Anything a new engineer would need explained before their first PR
+
+## Example
+
+```
+## Commands
+- Install deps: `pip install -e ".[dev]"`
+- Run tests: `pytest tests/ -v`
+- Lint: `ruff check . && ruff format --check .`
+
+## Conventions
+- No bare `except Exception: pass` — log at minimum (see src/sandbox/security.py for the pattern)
+- New DB models need a real Alembic migration, not just a model class change
+- Sandboxed code execution goes through src/sandbox/manager.py — never shell out directly
+```

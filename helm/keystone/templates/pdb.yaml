@@ -1,0 +1,24 @@
+# Copyright 2024-2026 Gaurav Gupta / Keystone — Apache 2.0
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "keystone.fullname" . }}-app
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      {{- include "keystone.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: app
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "keystone.fullname" . }}-worker
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      {{- include "keystone.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker

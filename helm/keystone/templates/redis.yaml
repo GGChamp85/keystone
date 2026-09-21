@@ -1,0 +1,69 @@
+# Copyright 2024-2026 Gaurav Gupta / Keystone — Apache 2.0
+{{- if .Values.redis.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "keystone.fullname" . }}-redis
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+spec:
+  clusterIP: None
+  ports:
+    - port: 6379
+      name: redis
+  selector:
+    {{- include "keystone.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "keystone.fullname" . }}-redis
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+spec:
+  serviceName: {{ include "keystone.fullname" . }}-redis
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "keystone.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: redis
+  template:
+    metadata:
+      labels:
+        {{- include "keystone.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: redis
+    spec:
+      containers:
+        - name: redis
+          # Valkey (BSD-3-Clause, Linux Foundation), not Redis — see the
+          # docker-compose.yml redis service comment for why: `redis:7-alpine`
+          # resolves to a post-relicense (RSALv2/SSPLv1) Redis build, which
+          # fails this client's fully-open-source requirement. Wire-compatible
+          # drop-in replacement; no application code changes needed.
+          image: valkey/valkey:7.2-alpine
+          command: ["sh", "-c", "valkey-server --requirepass \"$REDIS_PASSWORD\" --maxmemory 512mb --maxmemory-policy allkeys-lru --appendonly yes"]
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ include "keystone.fullname" . }}-secrets, key: REDIS_PASSWORD }
+          ports:
+            - containerPort: 6379
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources: {{- toYaml .Values.redis.resources | nindent 12 }}
+          readinessProbe:
+            exec: { command: ["sh", "-c", "valkey-cli -a \"$REDIS_PASSWORD\" ping"] }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.redis.storageClassName }}
+        storageClassName: {{ .Values.redis.storageClassName }}
+        {{- end }}
+        resources:
+          requests: { storage: {{ .Values.redis.storage }} }
+{{- end }}

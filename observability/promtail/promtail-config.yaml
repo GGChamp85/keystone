@@ -1,0 +1,31 @@
+# Copyright 2024-2026 Gaurav Gupta / Keystone — Apache 2.0
+#
+# Ships every container's logs on this host to Loki via Docker service
+# discovery (docker_sd_configs against the mounted Docker socket) — no
+# per-service log-driver config needed, no manual log-path list to keep in
+# sync as services are added/removed. Verified for real: a container
+# logging "hello-from-keystone-promtail-test" showed up in a live Loki
+# query within seconds of the container starting.
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+    relabel_configs:
+      - source_labels: ["__meta_docker_container_name"]
+        regex: "/(.*)"
+        target_label: "container"
+      - source_labels: ["__meta_docker_container_log_stream"]
+        target_label: "stream"
+      - source_labels: ["__meta_docker_container_label_com_docker_compose_service"]
+        target_label: "compose_service"

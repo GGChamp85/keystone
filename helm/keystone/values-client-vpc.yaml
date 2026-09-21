@@ -1,0 +1,67 @@
+# Copyright 2024-2026 Gaurav Gupta / Keystone — Apache 2.0
+#
+# Placeholder overrides for the client's production VPC deployment.
+# Intentionally incomplete pending the client's cloud provider confirmation
+# (AWS/GCP/Azure/on-prem all imply a different StorageClass name, GPU
+# nodeSelector labels, and RWX filesystem for modelCache) — see the plan's
+# open-questions note. Fill in the TODOs below once that's confirmed rather
+# than guessing a specific cloud's conventions here.
+global:
+  imageRegistry: registry.internal.keystone.local # Harbor — see airgap/build_image_bundle.sh
+  environment: production
+
+app:
+  replicaCount: 3
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 20
+
+postgres:
+  storage: 100Gi
+  storageClassName: "" # TODO: client's block-storage StorageClass
+redis:
+  storage: 10Gi
+  storageClassName: ""
+qdrant:
+  storage: 200Gi
+  storageClassName: ""
+openbao:
+  storage: 10Gi
+  storageClassName: ""
+
+sandboxDaemon:
+  backend: firecracker # client-owned bare-metal/nested-virt nodes — see plan's Firecracker requirement
+  nodeSelector:
+    keystone.io/sandbox-capable: "true" # TODO: label the client's KVM-capable nodes with this
+
+vllm:
+  coding:
+    enabled: true
+    gpuCount: 8 # GLM-5.3-Flash's real weight footprint (~328GB) needs 8x80GB+ — see values.yaml's coding block
+    nodeSelector:
+      nodepool: gpu-coding # TODO: match the client's actual GPU node pool label
+  coding-fallback:
+    enabled: true
+    gpuCount: 4
+    nodeSelector:
+      nodepool: gpu-coding # TODO: match the client's actual GPU node pool label
+  reasoning:
+    enabled: true
+    gpuCount: 2
+    nodeSelector:
+      nodepool: gpu-reasoning
+
+modelCache:
+  storageClassName: "" # TODO: must be an RWX-capable class (NFS/EFS/Filestore) — shared across GPU nodes
+
+ingress:
+  enabled: true
+  className: nginx
+  host: keystone.client.local # TODO: client's real internal hostname
+  tls:
+    enabled: true
+    secretName: keystone-tls # issued by pki/issue_cert.sh's internal CA
+
+secrets:
+  useOpenBao: true # production: real secrets come from OpenBao, not the dev-tier Secret template

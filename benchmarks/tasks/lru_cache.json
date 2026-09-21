@@ -1,0 +1,9 @@
+{
+  "id": "lru_cache",
+  "language": "python",
+  "prompt": "Write a Python class `LRUCache` with a constructor `__init__(self, capacity: int)`, a method `get(self, key) -> int` returning the value or -1 if not present, and a method `put(self, key, value) -> None` that evicts the least-recently-used entry when inserting would exceed capacity. Accessing a key via get() or put() counts as a use. Return ONLY a single Python code fence with the class definition, no explanation.",
+  "solution_filename": "solution.py",
+  "test_filename": "test_solution.py",
+  "test_code": "from solution import LRUCache\n\ndef test_basic_get_put():\n    cache = LRUCache(2)\n    cache.put(1, 100)\n    cache.put(2, 200)\n    assert cache.get(1) == 100\n\ndef test_eviction_of_least_recently_used():\n    cache = LRUCache(2)\n    cache.put(1, 100)\n    cache.put(2, 200)\n    cache.get(1)          # 1 is now most-recently-used\n    cache.put(3, 300)     # evicts 2, not 1\n    assert cache.get(2) == -1\n    assert cache.get(1) == 100\n    assert cache.get(3) == 300\n\ndef test_put_updates_existing_key_and_recency():\n    cache = LRUCache(2)\n    cache.put(1, 100)\n    cache.put(2, 200)\n    cache.put(1, 999)     # updates value, 1 is now most-recently-used\n    cache.put(3, 300)     # evicts 2\n    assert cache.get(1) == 999\n    assert cache.get(2) == -1\n\ndef test_missing_key_returns_negative_one():\n    cache = LRUCache(1)\n    assert cache.get(42) == -1\n",
+  "test_command": "python -m pytest test_solution.py -v --tb=short"
+}

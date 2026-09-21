@@ -1,0 +1,54 @@
+name: Bug report
+description: Something in Keystone isn't working as expected
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please do **not** use this template for security vulnerabilities — see [SECURITY.md](../../SECURITY.md) instead.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the bug and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment tier
+      options:
+        - Single-box dev (docker-compose)
+        - RunPod test/staging
+        - Client VPC production (Helm/Kubernetes)
+        - Air-gapped
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Keystone version / commit
+      placeholder: v1.0.0 or a commit SHA
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Output of the failing command, `keystone doctor`, or relevant service logs. This will be rendered as a code block — no need for backticks.
+      render: shell
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      placeholder: OS, Docker/Kubernetes version, GPU (if any), air-gapped or connected

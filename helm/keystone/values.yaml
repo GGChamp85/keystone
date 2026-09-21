@@ -1,0 +1,227 @@
+# Copyright 2024-2026 Gaurav Gupta / Keystone — Apache 2.0
+# Default values for the Keystone chart. Override per environment with
+# values-runpod-test.yaml / values-client-vpc.yaml (helm install -f ...).
+
+global:
+  imageRegistry: "" # set to your internal Harbor registry in air-gapped deployments, e.g. registry.internal.keystone.local
+  imagePullSecrets: []
+  environment: production
+
+image:
+  app:
+    repository: keystone-app
+    tag: latest
+    pullPolicy: IfNotPresent
+  sandboxDaemon:
+    repository: keystone-sandbox-daemon
+    tag: latest
+    pullPolicy: IfNotPresent
+  vllm:
+    repository: vllm/vllm-openai
+    tag: v0.29.0
+    pullPolicy: IfNotPresent
+
+app:
+  replicaCount: 2
+  port: 8080
+  resources:
+    requests: { cpu: "500m", memory: "512Mi" }
+    limits: { cpu: "2", memory: "2Gi" }
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+
+worker:
+  replicaCount: 2
+  resources:
+    requests: { cpu: "500m", memory: "512Mi" }
+    limits: { cpu: "2", memory: "2Gi" }
+
+sandboxDaemon:
+  # Runs as a DaemonSet so every node that can host sandboxes has a local
+  # daemon instance — a sandbox never crosses the network to reach its
+  # execution backend. Needs privileged access (Docker socket or /dev/kvm).
+  resources:
+    requests: { cpu: "250m", memory: "256Mi" }
+    limits: { cpu: "1", memory: "1Gi" }
+  backend: gvisor # gvisor | firecracker — firecracker requires KVM-capable nodes (see nodeSelector below)
+  nodeSelector: {}
+  # nodeSelector:
+  #   keystone.io/sandbox-capable: "true"
+
+postgres:
+  enabled: true
+  storage: 20Gi
+  storageClassName: ""
+  resources:
+    requests: { cpu: "500m", memory: "1Gi" }
+    limits: { cpu: "2", memory: "4Gi" }
+
+redis:
+  enabled: true
+  storage: 5Gi
+  storageClassName: ""
+  resources:
+    requests: { cpu: "250m", memory: "512Mi" }
+    limits: { cpu: "1", memory: "1Gi" }
+
+qdrant:
+  enabled: true
+  storage: 20Gi
+  storageClassName: ""
+  resources:
+    requests: { cpu: "500m", memory: "1Gi" }
+    limits: { cpu: "2", memory: "4Gi" }
+
+temporal:
+  enabled: true
+  image:
+    server: { repository: temporalio/auto-setup, tag: "1.24" }
+    ui: { repository: temporalio/ui, tag: "2.27.0" }
+  namespace: keystone
+  resources:
+    requests: { cpu: "500m", memory: "1Gi" }
+    limits: { cpu: "2", memory: "2Gi" }
+
+openbao:
+  enabled: true
+  image: { repository: openbao/openbao, tag: "2.1" }
+  storage: 5Gi
+  storageClassName: ""
+  resources:
+    requests: { cpu: "250m", memory: "256Mi" }
+    limits: { cpu: "1", memory: "1Gi" }
+
+# GPU node pools — one pool per model role (coding / coding fallback /
+# reasoning-critic each get their own GPU nodes). Left disabled by default
+# so this chart deploys cleanly on non-GPU clusters (e.g. for CI/lint/
+# template testing) — a client VPC install sets these true.
+vllm:
+  # GLM-5.3-Flash (zai-org, MIT) — primary coding model. Its glm5_next
+  # architecture (hybrid MLA + gated-linear-attention + sparse indexer,
+  # 288-expert MoE, natively FP8 on disk) is new enough that vLLM ships a
+  # dedicated pre-built image for it rather than a generic version tag —
+  # hence the per-role `image` override below (every other role uses the
+  # chart-wide `image.vllm` tag). See src/inference/config.py's
+  # coding_model_config() docstring for the verified footprint details.
+  coding:
+    enabled: false
+    gpuCount: 8
+    model: "zai-org/GLM-5.3-Flash"
+    servedModelName: glm-5.3-flash
+    maxModelLen: 131072
+    # No dedicated "glm5"/"glm53" tool-parser exists in vLLM — GLM-5.3's
+    # chat template emits the same <tool_call> XML format as GLM-4.5/4.7
+    # MoE (verified against the model's real chat_template.jinja), which
+    # is why "glm47" is the correct --tool-call-parser value.
+    toolParser: glm47
+    image:
+      repository: vllm/vllm-openai
+      tag: glm53-flash
+    nodeSelector:
+      nodepool: gpu-coding
+    resources:
+      requests: { cpu: "16", memory: "128Gi", nvidia.com/gpu: "8" }
+      limits: { cpu: "32", memory: "256Gi", nvidia.com/gpu: "8" }
+  # Qwen2.5-Coder-32B-Instruct — coding fallback, used when the `coding`
+  # role (GLM-5.3-Flash) is unhealthy (src/inference/model_router.py's
+  # FALLBACK_CHAINS). A conventional dense model — uses the chart-wide
+  # image.vllm tag, no per-role override needed.
+  coding-fallback:
+    enabled: false
+    gpuCount: 4
+    model: "Qwen/Qwen2.5-Coder-32B-Instruct"
+    servedModelName: qwen-coder-32b
+    maxModelLen: 131072
+    toolParser: hermes
+    nodeSelector:
+      nodepool: gpu-coding
+    resources:
+      requests: { cpu: "8", memory: "64Gi", nvidia.com/gpu: "4" }
+      limits: { cpu: "16", memory: "128Gi", nvidia.com/gpu: "4" }
+  reasoning:
+    enabled: false
+    gpuCount: 2
+    model: "deepseek-ai/DeepSeek-R1"
+    servedModelName: deepseek-r1
+    maxModelLen: 65536
+    # DeepSeek-R1 keeps Keystone's own text-protocol tool-calling fallback
+    # (src/orchestrator/tools/protocol.py's TextToolProtocol) rather than a
+    # vLLM-native tool-parser, so no toolParser is set here.
+    nodeSelector:
+      nodepool: gpu-reasoning
+    resources:
+      requests: { cpu: "4", memory: "32Gi", nvidia.com/gpu: "2" }
+      limits: { cpu: "8", memory: "64Gi", nvidia.com/gpu: "2" }
+
+modelCache:
+  storage: 500Gi
+  storageClassName: ""
+  # Air-gapped: pre-populated by airgap/import_bundle.sh, not downloaded at pod start.
+  hfOffline: true
+
+ingress:
+  enabled: true
+  className: nginx
+  tls:
+    enabled: true
+    secretName: keystone-tls # created by pki/issue_cert.sh (internal CA) or cert-manager
+  host: keystone.local
+
+secrets:
+  # Client-VPC production: set useOpenBao=true and configure the
+  # SecretProviderClass in openbao-secretproviderclass.yaml instead — this
+  # dev/test path stores secrets as a plain (auto-generated, stable-across-
+  # upgrades) Kubernetes Secret, which is fine for a kind cluster or the
+  # RunPod test tier but not the real client deployment.
+  useOpenBao: false
+  postgresPassword: ""
+  redisPassword: ""
+  qdrantApiKey: ""
+  rootAdminToken: ""
+
+networkPolicy:
+  enabled: true
+
+training:
+  # Multi-node distributed fine-tuning (LoRA/SFT/DPO) via Kubeflow Trainer's
+  # TrainJob/ClusterTrainingRuntime CRDs (trainer.kubeflow.org/v1alpha1).
+  # The Trainer controller itself is cluster-scoped shared infrastructure
+  # installed separately — see docs/deployment/KUBERNETES_CLIENT_VPC.md.
+  enabled: false
+  defaultNumNodes: 2
+  gpusPerNode: 4
+  nodeSelector:
+    nodepool: gpu-coding
+  storage: 200Gi
+  storageClassName: ""
+  resourcesPerNode:
+    requests: { cpu: "8", memory: "64Gi", nvidia.com/gpu: "4" }
+    limits: { cpu: "16", memory: "128Gi", nvidia.com/gpu: "4" }
+
+observability:
+  enabled: true
+  prometheus:
+    resources:
+      requests: { cpu: "250m", memory: "512Mi" }
+      limits: { cpu: "1", memory: "2Gi" }
+    storage: 20Gi
+  grafana:
+    resources:
+      requests: { cpu: "100m", memory: "256Mi" }
+      limits: { cpu: "500m", memory: "512Mi" }
+  alertmanager:
+    resources:
+      requests: { cpu: "100m", memory: "128Mi" }
+      limits: { cpu: "500m", memory: "256Mi" }
+  loki:
+    resources:
+      requests: { cpu: "250m", memory: "512Mi" }
+      limits: { cpu: "1", memory: "1Gi" }
+    storage: 20Gi
+  promtail:
+    resources:
+      requests: { cpu: "100m", memory: "128Mi" }
+      limits: { cpu: "500m", memory: "256Mi" }

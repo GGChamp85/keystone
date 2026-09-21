@@ -1,0 +1,12 @@
+# Copyright 2024-2026 Gaurav Gupta / Keystone — Apache 2.0
+apiVersion: 1
+
+providers:
+  - name: Keystone
+    orgId: 1
+    folder: Keystone
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/provisioning/dashboards/json

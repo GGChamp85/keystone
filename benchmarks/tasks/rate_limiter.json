@@ -1,0 +1,9 @@
+{
+  "id": "rate_limiter",
+  "language": "python",
+  "prompt": "Write a Python class `SlidingWindowRateLimiter` with a constructor `__init__(self, max_requests: int, window_seconds: float)` and a method `allow(self, now: float) -> bool` that returns True if a request at time `now` (a float, unix-seconds-like) is allowed under a sliding window of `window_seconds`, and False otherwise, tracking request timestamps internally. Return ONLY a single Python code fence with the class definition, no explanation.",
+  "solution_filename": "solution.py",
+  "test_filename": "test_solution.py",
+  "test_code": "from solution import SlidingWindowRateLimiter\n\ndef test_allows_up_to_max_requests_in_window():\n    limiter = SlidingWindowRateLimiter(max_requests=3, window_seconds=10)\n    assert limiter.allow(0.0) is True\n    assert limiter.allow(1.0) is True\n    assert limiter.allow(2.0) is True\n    assert limiter.allow(3.0) is False\n\ndef test_old_requests_fall_out_of_window():\n    limiter = SlidingWindowRateLimiter(max_requests=2, window_seconds=5)\n    assert limiter.allow(0.0) is True\n    assert limiter.allow(1.0) is True\n    assert limiter.allow(2.0) is False   # still within window of both\n    assert limiter.allow(6.0) is True    # the t=0.0 request has aged out\n",
+  "test_command": "python -m pytest test_solution.py -v --tb=short"
+}

@@ -1,0 +1,95 @@
+# Copyright 2024-2026 Gaurav Gupta / Keystone — Apache 2.0
+{{- if .Values.temporal.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "keystone.fullname" . }}-temporal
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+    app.kubernetes.io/component: temporal
+spec:
+  ports:
+    - port: 7233
+      name: grpc
+  selector:
+    {{- include "keystone.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: temporal
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "keystone.fullname" . }}-temporal
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+    app.kubernetes.io/component: temporal
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "keystone.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: temporal
+  template:
+    metadata:
+      labels:
+        {{- include "keystone.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: temporal
+    spec:
+      containers:
+        - name: temporal
+          image: "{{ .Values.temporal.image.server.repository }}:{{ .Values.temporal.image.server.tag }}"
+          ports:
+            - containerPort: 7233
+          env:
+            - name: DB
+              value: postgres12
+            - name: DB_PORT
+              value: "5432"
+            - name: POSTGRES_SEEDS
+              value: {{ include "keystone.fullname" . }}-postgres
+            - name: POSTGRES_USER
+              value: keystone
+            - name: POSTGRES_PWD
+              valueFrom: { secretKeyRef: { name: {{ include "keystone.fullname" . }}-secrets, key: POSTGRES_PASSWORD } }
+            - name: DEFAULT_NAMESPACE
+              value: {{ .Values.temporal.namespace | quote }}
+          resources: {{- toYaml .Values.temporal.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "keystone.fullname" . }}-temporal-ui
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+    app.kubernetes.io/component: temporal-ui
+spec:
+  ports:
+    - port: 8080
+      name: http
+  selector:
+    {{- include "keystone.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: temporal-ui
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "keystone.fullname" . }}-temporal-ui
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+    app.kubernetes.io/component: temporal-ui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "keystone.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: temporal-ui
+  template:
+    metadata:
+      labels:
+        {{- include "keystone.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: temporal-ui
+    spec:
+      containers:
+        - name: temporal-ui
+          image: "{{ .Values.temporal.image.ui.repository }}:{{ .Values.temporal.image.ui.tag }}"
+          ports:
+            - containerPort: 8080
+          env:
+            - name: TEMPORAL_ADDRESS
+              value: "{{ include "keystone.fullname" . }}-temporal:7233"
+{{- end }}

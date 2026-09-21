@@ -1,0 +1,48 @@
+# Copyright 2024-2026 Gaurav Gupta / Keystone — Apache 2.0
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "keystone.fullname" . }}-worker
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.worker.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "keystone.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        {{- include "keystone.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: worker
+          image: {{ include "keystone.image" (dict "root" $ "image" .Values.image.app) }}
+          imagePullPolicy: {{ .Values.image.app.pullPolicy }}
+          command: ["python", "-m", "src.temporal.worker"]
+          envFrom:
+            - configMapRef: { name: {{ include "keystone.fullname" . }}-config }
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ include "keystone.fullname" . }}-secrets, key: POSTGRES_PASSWORD } }
+            - name: REDIS_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ include "keystone.fullname" . }}-secrets, key: REDIS_PASSWORD } }
+            - name: QDRANT_API_KEY
+              valueFrom: { secretKeyRef: { name: {{ include "keystone.fullname" . }}-secrets, key: QDRANT_API_KEY } }
+            - name: VS_SECRET_KEY
+              valueFrom: { secretKeyRef: { name: {{ include "keystone.fullname" . }}-secrets, key: VS_SECRET_KEY } }
+            - name: DATABASE_URL
+              value: "postgresql+asyncpg://keystone:$(POSTGRES_PASSWORD)@{{ include "keystone.fullname" . }}-postgres:5432/keystone"
+            - name: REDIS_URL
+              value: "redis://:$(REDIS_PASSWORD)@{{ include "keystone.fullname" . }}-redis:6379/0"
+          resources: {{- toYaml .Values.worker.resources | nindent 12 }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }

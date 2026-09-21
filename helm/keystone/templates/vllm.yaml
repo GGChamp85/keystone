@@ -1,0 +1,112 @@
+# Copyright 2024-2026 Gaurav Gupta / Keystone — Apache 2.0
+#
+# One StatefulSet per model role, each pinned to its own GPU node pool via
+# nodeSelector — this is what makes the "separate GPU nodes for coding vs.
+# reasoning" architecture actually portable across cluster sizes, instead of
+# docker-compose's hardcoded --device-ids assuming one specific host.
+{{- range $role, $cfg := .Values.vllm }}
+{{- if $cfg.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "keystone.fullname" $ }}-vllm-{{ $role }}
+  labels: {{- include "keystone.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: vllm-{{ $role }}
+spec:
+  clusterIP: None
+  ports:
+    - port: 8000
+      name: http
+  selector:
+    {{- include "keystone.selectorLabels" $ | nindent 4 }}
+    app.kubernetes.io/component: vllm-{{ $role }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "keystone.fullname" $ }}-vllm-{{ $role }}
+  labels: {{- include "keystone.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: vllm-{{ $role }}
+spec:
+  serviceName: {{ include "keystone.fullname" $ }}-vllm-{{ $role }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "keystone.selectorLabels" $ | nindent 6 }}
+      app.kubernetes.io/component: vllm-{{ $role }}
+  template:
+    metadata:
+      labels:
+        {{- include "keystone.selectorLabels" $ | nindent 8 }}
+        app.kubernetes.io/component: vllm-{{ $role }}
+    spec:
+      {{- with $cfg.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: vllm
+          image: {{ include "keystone.image" (dict "root" $ "image" ($cfg.image | default $.Values.image.vllm)) }}
+          imagePullPolicy: {{ $.Values.image.vllm.pullPolicy }}
+          command:
+            - python3
+            - "-m"
+            - vllm.entrypoints.openai.api_server
+          args:
+            - "--model={{ $cfg.model }}"
+            - "--served-model-name={{ $cfg.servedModelName }}"
+            - "--tensor-parallel-size={{ $cfg.gpuCount }}"
+            - "--max-model-len={{ $cfg.maxModelLen }}"
+            - "--gpu-memory-utilization=0.92"
+            - "--enable-prefix-caching"
+            - "--enable-chunked-prefill"
+            - "--trust-remote-code"
+            {{- if $cfg.toolParser }}
+            - "--enable-auto-tool-choice"
+            - "--tool-call-parser={{ $cfg.toolParser }}"
+            {{- end }}
+            - "--port=8000"
+          env:
+            - name: VLLM_NO_USAGE_STATS
+              value: "1"
+            - name: HF_HUB_DISABLE_TELEMETRY
+              value: "1"
+            {{- if $.Values.modelCache.hfOffline }}
+            - name: HF_HUB_OFFLINE
+              value: "1"
+            - name: TRANSFORMERS_OFFLINE
+              value: "1"
+            {{- end }}
+          ports:
+            - containerPort: 8000
+          volumeMounts:
+            - name: model-cache
+              mountPath: /root/.cache/huggingface
+          resources: {{- toYaml $cfg.resources | nindent 12 }}
+          readinessProbe:
+            httpGet: { path: /health, port: 8000 }
+            initialDelaySeconds: 120 # model load can take minutes
+            periodSeconds: 15
+            failureThreshold: 20
+      volumes:
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: {{ include "keystone.fullname" $ }}-model-cache
+{{- end }}
+{{- end }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "keystone.fullname" . }}-model-cache
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteMany"] # shared across GPU nodes; needs an RWX-capable StorageClass (e.g. NFS/EFS)
+  {{- if .Values.modelCache.storageClassName }}
+  storageClassName: {{ .Values.modelCache.storageClassName }}
+  {{- end }}
+  resources:
+    requests: { storage: {{ .Values.modelCache.storage }} }

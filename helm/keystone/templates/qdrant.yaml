@@ -1,0 +1,64 @@
+# Copyright 2024-2026 Gaurav Gupta / Keystone — Apache 2.0
+{{- if .Values.qdrant.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "keystone.fullname" . }}-qdrant
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+    app.kubernetes.io/component: qdrant
+spec:
+  clusterIP: None
+  ports:
+    - port: 6333
+      name: http
+    - port: 6334
+      name: grpc
+  selector:
+    {{- include "keystone.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: qdrant
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "keystone.fullname" . }}-qdrant
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+    app.kubernetes.io/component: qdrant
+spec:
+  serviceName: {{ include "keystone.fullname" . }}-qdrant
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "keystone.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: qdrant
+  template:
+    metadata:
+      labels:
+        {{- include "keystone.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: qdrant
+    spec:
+      containers:
+        - name: qdrant
+          image: qdrant/qdrant:v1.11.0
+          env:
+            - name: QDRANT__SERVICE__API_KEY
+              valueFrom:
+                secretKeyRef: { name: {{ include "keystone.fullname" . }}-secrets, key: QDRANT_API_KEY }
+            - name: QDRANT__TELEMETRY_DISABLED
+              value: "true"
+          ports:
+            - containerPort: 6333
+            - containerPort: 6334
+          volumeMounts:
+            - name: data
+              mountPath: /qdrant/storage
+          resources: {{- toYaml .Values.qdrant.resources | nindent 12 }}
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.qdrant.storageClassName }}
+        storageClassName: {{ .Values.qdrant.storageClassName }}
+        {{- end }}
+        resources:
+          requests: { storage: {{ .Values.qdrant.storage }} }
+{{- end }}

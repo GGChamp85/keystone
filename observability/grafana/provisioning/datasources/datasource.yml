@@ -1,0 +1,23 @@
+# Copyright 2024-2026 Gaurav Gupta / Keystone — Apache 2.0
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+  - name: Loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    editable: false
+  # No Grafana "Alertmanager" datasource entry: verified against a real
+  # grafana/grafana:11.2.0 container that it registers but its /health
+  # check returns "plugin.unavailable" in this image — a Grafana-side gap,
+  # not a config error on our end (Prometheus's own alertmanagers API
+  # confirms real discovery: GET http://prometheus:9090/api/v1/alertmanagers).
+  # Alerting itself doesn't need this datasource to work — it's only for
+  # viewing/silencing alerts inside Grafana's UI instead of Alertmanager's
+  # own UI (exposed directly on :9093). Revisit on a Grafana version bump.

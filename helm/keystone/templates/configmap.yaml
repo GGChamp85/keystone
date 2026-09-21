@@ -1,0 +1,28 @@
+# Copyright 2024-2026 Gaurav Gupta / Keystone — Apache 2.0
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "keystone.fullname" . }}-config
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+data:
+  VS_ENV: {{ .Values.global.environment | quote }}
+  VS_PLATFORM_NAME: "Keystone"
+  POSTGRES_HOST: {{ include "keystone.fullname" . }}-postgres
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "keystone"
+  POSTGRES_USER: "keystone"
+  REDIS_HOST: {{ include "keystone.fullname" . }}-redis
+  QDRANT_HOST: {{ include "keystone.fullname" . }}-qdrant
+  QDRANT_PORT: "6333"
+  SANDBOX_DAEMON_URL: "http://{{ include "keystone.fullname" . }}-sandbox-daemon:9000"
+  SANDBOX_BACKEND: {{ .Values.sandboxDaemon.backend | quote }}
+  TEMPORAL_HOST: {{ include "keystone.fullname" . }}-temporal:7233
+  TEMPORAL_NAMESPACE: {{ .Values.temporal.namespace | quote }}
+  VLLM_CODING_URL: "http://{{ include "keystone.fullname" . }}-vllm-coding:8000/v1"
+  VLLM_CODING_FALLBACK_URL: "http://{{ include "keystone.fullname" . }}-vllm-coding-fallback:8000/v1"
+  VLLM_REASONING_URL: "http://{{ include "keystone.fullname" . }}-vllm-reasoning:8000/v1"
+  {{- if .Values.modelCache.hfOffline }}
+  HF_HUB_OFFLINE: "1"
+  TRANSFORMERS_OFFLINE: "1"
+  HF_HUB_DISABLE_TELEMETRY: "1"
+  {{- end }}

@@ -1,0 +1,68 @@
+# Copyright 2024-2026 Gaurav Gupta / Keystone — Apache 2.0
+#
+# Real alerting rules against the metric names this project actually
+# exposes (src/observability.py, and vLLM's real v0.6.3 metrics —
+# see docs/architecture — not invented names). Loaded by Prometheus via
+# `rule_files` in prometheus.yml; fired alerts route to Alertmanager,
+# which by default has a null receiver (observability/alertmanager/
+# alertmanager.yml) until a client-specific notification channel is
+# configured.
+groups:
+  - name: keystone-api
+    rules:
+      - alert: KeystoneHighErrorRate
+        expr: |
+          sum(rate(keystone_http_requests_total{status=~"5.."}[5m]))
+          / sum(rate(keystone_http_requests_total[5m])) > 0.01
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "Keystone API 5xx rate above 1%"
+          description: "{{ $value | humanizePercentage }} of requests are failing with 5xx over the last 5m."
+
+      - alert: KeystoneHighLatencyP95
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(keystone_http_request_duration_seconds_bucket[5m]))) > 5
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Keystone API p95 latency above 5s"
+          description: "p95 request latency has been above 5s for 10m — check vLLM queue depth and GPU cache usage."
+
+  - name: keystone-agents
+    rules:
+      - alert: KeystoneSandboxFailureRateHigh
+        expr: |
+          sum(rate(keystone_sandbox_executions_total{status=~"error|timeout"}[10m]))
+          / sum(rate(keystone_sandbox_executions_total[10m])) > 0.10
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Sandbox execution failure rate above 10%"
+          description: "{{ $value | humanizePercentage }} of sandbox executions are failing (error/timeout) over 10m — check keystoned health and backend availability."
+
+      - alert: KeystoneCircuitBreakerTripping
+        expr: sum(increase(keystone_circuit_breaker_trips_total[15m])) > 3
+        for: 0m
+        labels: { severity: warning }
+        annotations:
+          summary: "Agent circuit breaker tripping repeatedly"
+          description: "More than 3 circuit breaker trips in 15m ({{ $value }}) — a model/task loop may be stuck."
+
+  - name: keystone-infra
+    rules:
+      - alert: KeystoneTargetDown
+        expr: up{job=~"keystone-.*|vllm-.*"} == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.job }} is down"
+          description: "Prometheus has not been able to scrape {{ $labels.job }} for 2m."
+
+      - alert: KeystoneVLLMKVCacheNearCapacity
+        expr: vllm:kv_cache_usage_perc{job=~"vllm-.*"} > 0.95
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.job }} GPU KV-cache above 95%"
+          description: "Sustained high KV-cache usage risks request preemption/latency spikes — consider adding capacity or lowering max concurrent sequences."

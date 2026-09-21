@@ -1,0 +1,75 @@
+# Copyright 2024-2026 Gaurav Gupta / Keystone — Apache 2.0
+#
+# Runs as a DaemonSet, not a Deployment: a sandbox must be created on the
+# same node the daemon controlling it runs on (the gVisor backend drives the
+# node's local Docker/containerd socket; the Firecracker backend needs the
+# node's local /dev/kvm) — there's no way to "call a sandbox daemon on
+# another node" that would make sense.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "keystone.fullname" . }}-sandbox-daemon
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sandbox-daemon
+spec:
+  clusterIP: None
+  ports:
+    - port: 9000
+      name: http
+  selector:
+    {{- include "keystone.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: sandbox-daemon
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "keystone.fullname" . }}-sandbox-daemon
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sandbox-daemon
+spec:
+  selector:
+    matchLabels:
+      {{- include "keystone.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: sandbox-daemon
+  template:
+    metadata:
+      labels:
+        {{- include "keystone.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: sandbox-daemon
+    spec:
+      {{- with .Values.sandboxDaemon.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: sandbox-daemon
+          image: {{ include "keystone.image" (dict "root" $ "image" .Values.image.sandboxDaemon) }}
+          imagePullPolicy: {{ .Values.image.sandboxDaemon.pullPolicy }}
+          ports:
+            - containerPort: 9000
+          env:
+            - name: SANDBOX_BACKEND
+              value: {{ .Values.sandboxDaemon.backend | quote }}
+          resources: {{- toYaml .Values.sandboxDaemon.resources | nindent 12 }}
+          securityContext:
+            privileged: true # required for the Docker socket (gVisor) / /dev/kvm (Firecracker)
+          volumeMounts:
+            - name: docker-socket
+              mountPath: /var/run/docker.sock
+            {{- if eq .Values.sandboxDaemon.backend "firecracker" }}
+            - name: kvm
+              mountPath: /dev/kvm
+            {{- end }}
+          readinessProbe:
+            httpGet: { path: /health, port: 9000 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: docker-socket
+          hostPath: { path: /var/run/docker.sock, type: Socket }
+        {{- if eq .Values.sandboxDaemon.backend "firecracker" }}
+        - name: kvm
+          hostPath: { path: /dev/kvm, type: CharDevice }
+        {{- end }}

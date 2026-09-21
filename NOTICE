@@ -1,0 +1,42 @@
+Keystone
+Copyright 2024-2026 Gaurav Gupta
+
+This product includes software developed by Gaurav Gupta.
+
+Licensed under the Apache License, Version 2.0.
+
+================================================================================
+
+This project uses the following open-source components. This list covers the
+major runtime dependencies; the full, verified inventory — including exact
+licenses checked against each project's real upstream source, and two real
+findings this project caught and fixed (a Redis relicensing issue, Grafana/
+Loki's AGPL-3.0 status) — lives in docs/LICENSES_AND_COMPLIANCE.md.
+
+  - FastAPI (MIT) — https://github.com/tiangolo/fastapi
+  - LangGraph (MIT) — https://github.com/langchain-ai/langgraph
+  - Pydantic (MIT) — https://github.com/pydantic/pydantic
+  - vLLM (Apache-2.0) — https://github.com/vllm-project/vllm
+  - Qdrant (Apache-2.0) — https://github.com/qdrant/qdrant
+  - Firecracker (Apache-2.0) — https://github.com/firecracker-microvm/firecracker
+  - gVisor (Apache-2.0) — https://github.com/google/gvisor
+  - DeepSeek-R1 (MIT) — https://github.com/deepseek-ai/DeepSeek-R1
+  - Qwen2.5-Coder (Apache-2.0) — https://github.com/QwenLM/Qwen2.5-Coder
+  - SQLAlchemy (MIT) — https://github.com/sqlalchemy/sqlalchemy
+  - Temporal (MIT) — https://github.com/temporalio/temporal
+  - Valkey (BSD-3-Clause) — https://github.com/valkey-io/valkey
+  - PostgreSQL (PostgreSQL License) — https://www.postgresql.org/
+  - Nginx (BSD-2-Clause) — https://github.com/nginx/nginx
+  - OpenBao (MPL-2.0) — https://github.com/openbao/openbao
+  - OpenTofu (MPL-2.0) — https://github.com/opentofu/opentofu
+  - Helm (Apache-2.0) — https://github.com/helm/helm
+  - Prometheus (Apache-2.0) — https://github.com/prometheus/prometheus
+  - Alertmanager (Apache-2.0) — https://github.com/prometheus/alertmanager
+  - Grafana (AGPL-3.0) — https://github.com/grafana/grafana
+  - Loki / Promtail (AGPL-3.0) — https://github.com/grafana/loki
+  - Kubeflow Trainer (Apache-2.0) — https://github.com/kubeflow/trainer
+  - OpenCode (MIT) — https://github.com/sst/opencode
+  - Sentence-Transformers (Apache-2.0) — https://github.com/UKPLab/sentence-transformers
+  - PEFT (Apache-2.0) — https://github.com/huggingface/peft
+  - TRL (Apache-2.0) — https://github.com/huggingface/trl
+  - React (MIT) — https://github.com/facebook/react

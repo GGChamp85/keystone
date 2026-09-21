@@ -1,0 +1,72 @@
+# Copyright 2024-2026 Gaurav Gupta / Keystone — Apache 2.0
+{{- if .Values.openbao.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "keystone.fullname" . }}-openbao
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+    app.kubernetes.io/component: openbao
+spec:
+  clusterIP: None
+  ports:
+    - port: 8200
+      name: http
+  selector:
+    {{- include "keystone.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: openbao
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "keystone.fullname" . }}-openbao
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+    app.kubernetes.io/component: openbao
+spec:
+  serviceName: {{ include "keystone.fullname" . }}-openbao
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "keystone.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: openbao
+  template:
+    metadata:
+      labels:
+        {{- include "keystone.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: openbao
+    spec:
+      containers:
+        - name: openbao
+          image: "{{ .Values.openbao.image.repository }}:{{ .Values.openbao.image.tag }}"
+          args: ["server"]
+          env:
+            - name: BAO_LOCAL_CONFIG
+              value: |
+                {
+                  "listener": [{"tcp": {"address": "0.0.0.0:8200", "tls_disable": true}}],
+                  "storage": {"file": {"path": "/openbao/data"}},
+                  "default_lease_ttl": "1h",
+                  "max_lease_ttl": "24h",
+                  "ui": true
+                }
+          ports:
+            - containerPort: 8200
+          volumeMounts:
+            - name: data
+              mountPath: /openbao/data
+          resources: {{- toYaml .Values.openbao.resources | nindent 12 }}
+          securityContext:
+            capabilities: { add: ["IPC_LOCK"] }
+          readinessProbe:
+            httpGet: { path: "/v1/sys/health?standbyok=true", port: 8200 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.openbao.storageClassName }}
+        storageClassName: {{ .Values.openbao.storageClassName }}
+        {{- end }}
+        resources:
+          requests: { storage: {{ .Values.openbao.storage }} }
+{{- end }}

@@ -1,0 +1,94 @@
+{
+  "title": "Keystone Inference — vLLM / GPU Throughput",
+  "uid": "keystone-vllm-inference",
+  "description": "Metric names verified against the real vllm/engine/metrics.py source for the pinned v0.6.3 release (github.com/vllm-project/vllm), not assumed.",
+  "tags": ["keystone", "inference", "vllm", "gpu"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Running vs. waiting requests",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "vllm:num_requests_running{job=~\"vllm-.*\"}", "legendFormat": "{{job}} running", "refId": "A" },
+        { "expr": "vllm:num_requests_waiting{job=~\"vllm-.*\"}", "legendFormat": "{{job}} waiting", "refId": "B" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 2,
+      "title": "GPU KV-cache usage %",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "vllm:kv_cache_usage_perc{job=~\"vllm-.*\"}", "legendFormat": "{{job}}", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "max": 1, "min": 0 }, "overrides": [] }
+    },
+    {
+      "id": 3,
+      "title": "Prompt + generation token throughput",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum by (job) (rate(vllm:prompt_tokens_total{job=~\"vllm-.*\"}[5m]))", "legendFormat": "{{job}} prompt tok/s", "refId": "A" },
+        { "expr": "sum by (job) (rate(vllm:generation_tokens_total{job=~\"vllm-.*\"}[5m]))", "legendFormat": "{{job}} generation tok/s", "refId": "B" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "cps" }, "overrides": [] }
+    },
+    {
+      "id": 4,
+      "title": "Time to first token (p50/p95)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum by (le, job) (rate(vllm:time_to_first_token_seconds_bucket{job=~\"vllm-.*\"}[5m])))", "legendFormat": "{{job}} p50", "refId": "A" },
+        { "expr": "histogram_quantile(0.95, sum by (le, job) (rate(vllm:time_to_first_token_seconds_bucket{job=~\"vllm-.*\"}[5m])))", "legendFormat": "{{job}} p95", "refId": "B" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 5,
+      "title": "End-to-end request latency (p50/p95)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum by (le, job) (rate(vllm:e2e_request_latency_seconds_bucket{job=~\"vllm-.*\"}[5m])))", "legendFormat": "{{job}} p50", "refId": "A" },
+        { "expr": "histogram_quantile(0.95, sum by (le, job) (rate(vllm:e2e_request_latency_seconds_bucket{job=~\"vllm-.*\"}[5m])))", "legendFormat": "{{job}} p95", "refId": "B" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 6,
+      "title": "Requests by finish reason",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum by (job, finished_reason) (rate(vllm:request_success_total{job=~\"vllm-.*\"}[5m]))", "legendFormat": "{{job}} / {{finished_reason}}", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] }
+    },
+    {
+      "id": 7,
+      "title": "Requests preempted (memory pressure)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum by (job) (rate(vllm:num_preemptions_total{job=~\"vllm-.*\"}[5m]))", "legendFormat": "{{job}}", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    }
+  ]
+}
