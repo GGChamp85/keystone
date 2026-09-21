@@ -102,6 +102,7 @@ Qwen2.5-Coder-32B-Instruct (fallback) cover the same ground.
 | Sandbox (fallback) | gVisor (`runsc`) | Apache-2.0 |
 | Sandbox (primary) | Firecracker | Apache-2.0 |
 | Multi-node training | Kubeflow Trainer | Apache-2.0 |
+| Autoscaling (optional, vLLM roles) | KEDA | Apache-2.0 (verified against the real upstream `LICENSE` at github.com/kedacore/keda) |
 | Infra tooling | OpenTofu | MPL-2.0 |
 | Infra tooling | Helm | Apache-2.0 |
 | Local dev cluster | kind | Apache-2.0 |

@@ -26,6 +26,16 @@
   own `ClusterTrainingRuntime` (our fine-tuning image + GPU placement) on
   top of that shared controller — it does not install the controller
   itself.
+- (Optional, for any `vllm.*.autoscaling.enabled=true`) [KEDA](https://keda.sh)
+  installed cluster-wide — same shared-infrastructure reasoning as the
+  Kubeflow Trainer controller above, so this chart's `ScaledObject`
+  resources (`templates/vllm.yaml`) assume it's already there rather than
+  installing it themselves:
+
+  ```bash
+  helm repo add kedacore https://kedacore.github.io/charts
+  helm install keda kedacore/keda --namespace keda --create-namespace
+  ```
 
 ## Install
 
@@ -113,7 +123,12 @@ built in) — the manifests are believed correct (checked against the real
 upstream schemas, not guessed) but should be smoke-tested before a client
 handoff:
 
-- `vllm.*.enabled=true` StatefulSets (need real GPU nodes to schedule).
+- `vllm.*.enabled=true` StatefulSets (need real GPU nodes to schedule),
+  including the newer `nodeCount > 1` multi-node Ray bootstrap and the
+  `autoscaling.enabled=true` KEDA `ScaledObject` — all three
+  (single-node, multi-node, autoscaling) render correctly through `helm
+  lint`/`helm template` in CI, but none has been scheduled onto a real
+  GPU node or multi-node cluster.
 - `training.enabled=true` (`ClusterTrainingRuntime` + submitting a real
   `TrainJob` — needs both GPU nodes and the Trainer controller installed).
 - Multi-node NCCL/Infiniband networking for the training node pool.

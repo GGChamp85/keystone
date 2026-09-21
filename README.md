@@ -198,25 +198,30 @@ Production deployments are built to run fully air-gapped: zero internet egress a
 
 ## Fine-tune on your code
 
-Single-node LoRA/SFT/DPO, or multi-node gang-scheduled training via the Kubeflow Training Operator:
+The full pipeline is real and wired end to end: real training-data sources, a real adapter registry, real LoRA serving, and a real web wizard — not just standalone trainer scripts.
 
-```python
-from src.finetuning.lora_train import LoRATrainingConfig, run_lora_training
-from src.finetuning.sft_train import SFTTrainingConfig, run_sft_training
-from src.finetuning.dpo_train import DPOTrainingConfig, run_dpo_training
+**From the web UI** (the easiest path — `http://localhost:8080/app/`, "Fine-tune" tab): pick a job type and base model, point it at a real training-data JSONL, watch live progress stream in, see the real metrics and a dataset preview, then promote or roll back the resulting adapter with one click.
 
-lora_result = run_lora_training(LoRATrainingConfig(training_data="/data/pretraining.jsonl"))
-sft_result = run_sft_training(SFTTrainingConfig(
-    adapter_path=lora_result["adapter_path"], training_data="/data/sft.jsonl",
-))
-dpo_result = run_dpo_training(DPOTrainingConfig(
-    sft_adapter_path=sft_result["adapter_path"], training_data="/data/dpo.jsonl",
-))
+**From the CLI**:
+
+```bash
+keystone finetune start lora Qwen/Qwen2.5-Coder-32B-Instruct /data/finetune/train.jsonl --set num_epochs=3
+keystone finetune watch <job-id>       # live progress until it reaches a terminal status
+keystone finetune promote <job-id>     # register as the tenant's default adapter for its base model
+keystone finetune rollback <job-id>    # retire it — routing falls back to the base model
 ```
 
-`src/rl/` drives RL rollouts against the same self-hosted sandbox pool as episode environments, for reward signals grounded in real test execution rather than a learned reward model alone.
+**Real data sources** (`src/finetuning/sources/`) turn what your team already has into training data — no separate labeling effort:
 
-> **Where this stands today**: the trainers above run and produce real adapters; an end-to-end pipeline that turns your git history and accepted-task trajectories into training data automatically, an adapter registry, and one-click LoRA serving through vLLM are still on the roadmap — see `ROADMAP.md`.
+- `git_history.py` — merged commits/PR title+body → instruction, real diff → response, filtered for size, generated paths, and secrets.
+- `trajectories.py` — your team's own accepted/merged Keystone Agents tasks → SFT examples in the exact prompt/tool format the agent itself uses; accepted-vs-rejected and tests-passed-vs-failed pairs → DPO.
+- `repo_pretrain.py` — continued-pretraining text from your indexed repositories, deduped by content hash.
+
+`src/finetuning/manifest.py` splits every dataset into train/holdout **stratified by repository** (never leaking one repo's examples across the split) and writes a `manifest.json` with real sha256 hashes of every file, shown to you before training starts. Trainers (`lora_train.py`/`sft_train.py`/`dpo_train.py`) track real `eval_loss` against the holdout split and keep the best checkpoint, not just the last one.
+
+Once a job completes, promoting it writes a real row to the adapter registry (`ModelAdapter` — tenant, base model, path, status, one `is_default` per tenant+base-model) and every real inference call site — chat completions, the coding/review/planning nodes, extraction — resolves and routes to it automatically (`src/inference/model_router.py`), with the matching `--enable-lora --lora-modules ...` flags emitted for vLLM to actually serve it (`src/inference/config.py`).
+
+> **Where this genuinely stands today**: all of the above is real and covered by tests against real Postgres/Redis — including a CPU LoRA smoke run with a 0.5B model proving the trainer→registry→router path end to end in this GPU-less dev environment. Two things are still open, honestly: no adapter has been trained on real GPU hardware yet (the trainers use `bitsandbytes` 4-bit quantization, which needs one), and promotion is currently a manual human decision — the plan's "only promote if it measurably beats base+RAG on held-out tasks" auto-verdict gate isn't wired up yet. See `ROADMAP.md`'s Phase 5.
 
 ---
 
@@ -228,7 +233,17 @@ python -m benchmarks.run_benchmark --with-frontier     # + any frontier models y
 python -m benchmarks.run_benchmark --gpu-count 4 --gpu-hourly-cost 1.89 --gpu-tokens-per-second 4000
 ```
 
-Each task in `benchmarks/tasks/` is scored by actually executing the model's completion in a real self-hosted sandbox — not a heuristic string match — and the runner reports pass rate alongside a real token-cost comparison (self-hosted GPU-time vs. any frontier model you included). Requires `SANDBOX_DAEMON_URL` reachable and either `VLLM_CODING_URL` reachable or `--with-frontier` with a key set; with neither, it reports "no models available" rather than fabricating a result.
+Each task in `benchmarks/tasks/` is scored by actually executing the model's completion in a real self-hosted sandbox (gVisor) — no LLM-as-judge, no heuristic string match, just the real test command's real exit code — and the runner reports pass rate alongside a real token-cost comparison (self-hosted GPU-time vs. any frontier model you included). Requires `SANDBOX_DAEMON_URL` reachable and either `VLLM_CODING_URL` reachable or `--with-frontier` with a key set; with neither, it reports "no models available" rather than fabricating a result.
+
+**A real run, from this repo's own development environment** (no GPU available here, so `keystone-inference` fails honestly rather than being skipped or faked; `--with-frontier` was set with a real `ANTHROPIC_API_KEY`):
+
+| Model | Pass rate | Notes |
+|---|---|---|
+| `keystone-inference` | 0/3 | Real, honest failure — no vLLM endpoint reachable in this dev environment (no GPU). Not a fabricated 0; the harness reports "no models available" style errors per-task rather than a silent skip. |
+| `claude-opus` | 3/3 | Real Anthropic API call, real sandboxed test execution. |
+| `claude-sonnet` | 3/3 | Same. |
+
+**Read this result for what it is, not more**: this is a 3-task single-function smoke suite that exists to prove the harness itself — sandboxed execution, real cost accounting, gated frontier clients — is genuinely wired end to end, not a claim that Keystone's self-hosted models match or beat frontier models. The repo-scale, multi-file, SWE-bench-lite-style benchmark suite that would actually support a quality comparison (real repos, real failing tests, run through the full agent loop) is still on the roadmap — see `ROADMAP.md`'s Phase 6. No number in this README is invented; where a real measurement doesn't exist yet, the roadmap says so instead of guessing.
 
 ---
 
@@ -241,6 +256,8 @@ Each task in `benchmarks/tasks/` is scored by actually executing the model's com
 | Reasoning (critic) | DeepSeek-R1 (MIT) | 2× A100 80GB | 64K |
 
 Swapping in a different model is a config change, not a code change — see `src/inference/config.py` and `src/inference/model_router.py`.
+
+**Distributed serving** (`helm/keystone/templates/vllm.yaml`): each role scales along two independent, real axes — `replicas` runs N independent full model instances behind a load-balanced Service for horizontal throughput, and `nodeCount` pipeline-parallels a single instance across that many physical nodes for a model too large for one node's GPU pool (vLLM's real Ray-backed multi-node executor). Optional KEDA-based autoscaling scales `replicas` on the real `vllm:num_requests_waiting` queue-depth metric, not a CPU percentage that would never trigger on a GPU-bound workload. All three paths (single-node, multi-node, autoscaling) render through `helm lint`/`helm template` in CI on every PR; the multi-node Ray bootstrap itself hasn't been verified against real multi-node GPU hardware yet — this dev environment has none.
 
 ---
 
@@ -260,6 +277,7 @@ Every row is an actual service this repo deploys, with its license verified agai
 | Secrets | OpenBao | MPL-2.0 |
 | IaC | OpenTofu + Helm | MPL-2.0 / Apache-2.0 |
 | Distributed training | Kubeflow Trainer | Apache-2.0 |
+| Autoscaling (optional, `vllm.*.autoscaling.enabled`) | [KEDA](https://keda.sh) | Apache-2.0 (verified against the real upstream `LICENSE`) |
 | Metrics + dashboards | Prometheus + Grafana | Apache-2.0 / **AGPL-3.0** (Grafana — see `docs/LICENSES_AND_COMPLIANCE.md` finding #2) |
 | Log aggregation + alerting | Loki + Promtail + Alertmanager | AGPL-3.0 (Loki/Promtail, same caveat as Grafana) / Apache-2.0 |
 | Database | PostgreSQL 16 | PostgreSQL License |
@@ -278,27 +296,30 @@ keystone/
 │   ├── main.py                    # FastAPI app entry point
 │   ├── config.py                  # Pydantic settings
 │   ├── api/
-│   │   ├── routes/                # health, completions, keys (admin), agents
-│   │   ├── middleware/            # Bearer API key auth, Valkey rate limiter/budgets
+│   │   ├── routes/                # health, completions, keys (admin), agents, memory, finetune, mcp
+│   │   ├── middleware/            # Bearer API key auth + RBAC, Valkey rate limiter/budgets
 │   │   └── models/                # Pydantic request/response schemas
 │   ├── db/                        # SQLAlchemy models + Alembic migrations
-│   ├── inference/                 # vLLM client, model router (role → endpoint + fallback), config builder
+│   ├── inference/                 # vLLM client, model router (role/tenant → endpoint + adapter + fallback), config builder
 │   ├── orchestrator/
 │   │   ├── engine.py              # Task lifecycle manager (Temporal-backed)
 │   │   ├── graph.py               # LangGraph state graph
 │   │   ├── circuit_breaker.py     # Runaway loop protection
+│   │   ├── concurrency.py         # Per-tenant/per-user Redis semaphore
 │   │   ├── context.py             # Token-budgeted prompt/turn trimming
 │   │   ├── events.py              # Live task event stream (Redis Streams -> SSE, powers web/)
+│   │   ├── pr_polling.py          # Automatic PR-status -> task_feedback recording
 │   │   ├── tools/                 # Tool schemas, real implementations, native/text protocol
 │   │   └── nodes/                 # planning / coding / quality / review / testing / tool_execution
 │   ├── sandbox/                   # Sandbox daemon + Firecracker/gVisor backends, egress policy
 │   ├── git/                       # GitHost protocol + Gitea implementation
 │   ├── rl/                        # RL rollout coordinator (reuses the sandbox pool)
-│   ├── temporal/                  # worker.py, workflows.py, activities.py
-│   ├── memory/                    # Qdrant vector store, embeddings, git ingestion
-│   └── finetuning/                # LoRA / SFT / DPO, single- and multi-node
+│   ├── temporal/                  # worker.py, workflows.py, activities.py, finetune_workflow.py, finetune_activities.py
+│   ├── memory/                    # Per-tenant Qdrant vector store, embeddings, incremental git ingestion
+│   ├── finetuning/                # LoRA/SFT/DPO trainers, runner, events, sources/ (git history, trajectories, repo pretrain), manifest
+│   └── cli/                       # `keystone` CLI (memory, finetune) — a real HTTP client against the API
 ├── cli/                           # OpenCode config for the interactive agent
-├── web/                           # Live plan/execution-trace UI (React + Vite, served at /app)
+├── web/                           # Live plan/execution-trace + memory + fine-tune UI (React + Vite, served at /app)
 ├── helm/keystone/                 # Kubernetes chart (client VPC production)
 ├── infra/opentofu/                # RunPod test tier (assembled environment) + reusable modules (incl. client-vpc-network)
 ├── airgap/                        # Offline bundle build/import scripts
