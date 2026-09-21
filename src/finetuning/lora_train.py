@@ -20,6 +20,10 @@ logger = structlog.get_logger(__name__)
 class LoRATrainingConfig:
     base_model: str = "Qwen/Qwen2.5-Coder-32B-Instruct"
     training_data: str = ""
+    eval_data: str | None = None  # held-out split (src/finetuning/manifest.py) — without it, a run has no
+    # way to tell "training loss went down" from "the model actually got better," and no way to compare
+    # against a promotion baseline (base+RAG) on the exact same held-out tasks.
+    eval_steps: int = 50
     output_dir: str = "/data/finetuning/output/lora"
     lora_r: int = 64
     lora_alpha: int = 128
@@ -135,6 +139,12 @@ def run_lora_training(config: LoRATrainingConfig) -> dict:
 
     tokenized = dataset.map(tokenize_fn, batched=True, remove_columns=dataset.column_names)
 
+    eval_dataset = None
+    if config.eval_data:
+        logger.info("lora.loading_eval_data", path=config.eval_data)
+        eval_raw = load_dataset("json", data_files=config.eval_data, split="train")
+        eval_dataset = eval_raw.map(tokenize_fn, batched=True, remove_columns=eval_raw.column_names)
+
     training_args = TrainingArguments(
         output_dir=config.output_dir,
         num_train_epochs=config.num_epochs,
@@ -151,6 +161,10 @@ def run_lora_training(config: LoRATrainingConfig) -> dict:
         seed=config.seed,
         report_to="wandb" if config.wandb_project else "none",
         run_name=f"vs-lora-{config.base_model.split('/')[-1]}",
+        eval_strategy="steps" if eval_dataset is not None else "no",
+        eval_steps=config.eval_steps if eval_dataset is not None else None,
+        load_best_model_at_end=eval_dataset is not None,
+        metric_for_best_model="eval_loss" if eval_dataset is not None else None,
     )
 
     data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
@@ -159,11 +173,14 @@ def run_lora_training(config: LoRATrainingConfig) -> dict:
         model=model,
         args=training_args,
         train_dataset=tokenized,
+        eval_dataset=eval_dataset,
         data_collator=data_collator,
     )
 
     logger.info("lora.training_start")
     train_result = trainer.train()
+
+    eval_metrics = trainer.evaluate() if eval_dataset is not None else {}
 
     # Save adapter
     adapter_path = os.path.join(config.output_dir, "adapter")
@@ -174,6 +191,7 @@ def run_lora_training(config: LoRATrainingConfig) -> dict:
         "train_loss": train_result.metrics.get("train_loss", 0),
         "train_runtime": train_result.metrics.get("train_runtime", 0),
         "train_samples_per_second": train_result.metrics.get("train_samples_per_second", 0),
+        "eval_loss": eval_metrics.get("eval_loss"),
         "adapter_path": adapter_path,
     }
     logger.info("lora.training_complete", **metrics)

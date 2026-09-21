@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.rl.rollout import RLTask, RolloutCoordinator, RolloutEnvironment, trajectories_to_dpo_pairs
+from src.rl.rollout import RLTask, RolloutCoordinator, RolloutEnvironment, Trajectory, trajectories_to_dpo_pairs
 
 pytestmark = pytest.mark.integration
 
@@ -103,6 +103,26 @@ async def test_full_trajectory_with_retry_succeeds_and_produces_dpo_pair():
     assert len(pairs) == 1
     assert pairs[0]["chosen"] == "def add(a, b):\n    return a + b\n"
     assert pairs[0]["rejected"] == "def add(a, b):\n    return a - b\n"
+    # Regression: the DPO "prompt" must be the real rendered instruction, not
+    # the bare task id (src/rl/rollout.py's trajectories_to_dpo_pairs bug,
+    # fixed by Trajectory.initial_prompt) — a trainer conditioning on an
+    # opaque id string instead of real content would learn nothing useful.
+    assert pairs[0]["prompt"] != task.id
+    assert task.instruction in pairs[0]["prompt"]
+
+
+def test_trajectories_to_dpo_pairs_skips_a_trajectory_with_no_initial_prompt():
+    """A hand-built Trajectory that never went through RolloutCoordinator
+    (so initial_prompt was never set) must be skipped, not silently fall
+    back to task_id — that fallback is exactly the bug this fixed."""
+    from src.rl.rollout import RolloutStep
+
+    traj = Trajectory(task_id="orphan-task")  # initial_prompt left at its "" default
+    traj.steps = [
+        RolloutStep(action="bad", observation="fail", reward=-0.1, done=False, exit_code=1),
+        RolloutStep(action="good", observation="pass", reward=1.0, done=True, exit_code=0),
+    ]
+    assert trajectories_to_dpo_pairs([traj]) == []
 
 
 async def test_task_exhausting_max_steps_without_success_is_not_succeeded():

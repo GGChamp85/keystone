@@ -64,6 +64,7 @@ class RolloutStep:
 @dataclass
 class Trajectory:
     task_id: str
+    initial_prompt: str = ""  # the real rendered instruction shown at reset() — see trajectories_to_dpo_pairs
     steps: list[RolloutStep] = field(default_factory=list)
 
     @property
@@ -161,9 +162,17 @@ class RolloutCoordinator:
     async def run_episode(self, task: RLTask, policy_fn: PolicyFn) -> Trajectory:
         async with self._semaphore:
             env = RolloutEnvironment(self._manager, task)
-            trajectory = Trajectory(task_id=task.id)
             try:
                 observation = await env.reset()
+                # Every non-probe action in step() is a full replacement of
+                # solution_filename's contents — a fresh attempt at the task
+                # from the same starting instruction, not a continuation of
+                # the previous step's own observation. So the real DPO
+                # "prompt" for every attempt in this trajectory is this one
+                # initial render, captured once here, not each step's own
+                # (post-action) result observation and never the bare task
+                # id trajectories_to_dpo_pairs used before this fix.
+                trajectory = Trajectory(task_id=task.id, initial_prompt=observation)
                 for _ in range(task.max_steps):
                     action = await policy_fn(observation)
                     step = await env.step(action)
@@ -190,14 +199,25 @@ def trajectories_to_dpo_pairs(trajectories: list[Trajectory]) -> list[dict]:
     highest-reward attempt against the lowest-reward attempt within each
     trajectory (skips trajectories with only one distinct outcome — no
     preference signal to learn from).
+
+    `prompt` is the trajectory's real initial rendered instruction
+    (`Trajectory.initial_prompt`, set once by RolloutCoordinator.run_episode
+    at reset() time) — not the bare `task_id` this returned before the fix,
+    which fed a DPO trainer preference pairs conditioned on an opaque id
+    string instead of real prompt content. A hand-built Trajectory with no
+    `initial_prompt` set (e.g. in a test) is skipped rather than silently
+    reintroducing that same bug.
     """
     pairs: list[dict] = []
     for traj in trajectories:
+        if not traj.initial_prompt:
+            logger.warning("rl.dpo_pair_skipped_no_prompt", task_id=traj.task_id)
+            continue
         if len(traj.steps) < 2:
             continue
         best = max(traj.steps, key=lambda s: s.reward)
         worst = min(traj.steps, key=lambda s: s.reward)
         if best.reward <= worst.reward:
             continue
-        pairs.append({"prompt": traj.task_id, "chosen": best.action, "rejected": worst.action})
+        pairs.append({"prompt": traj.initial_prompt, "chosen": best.action, "rejected": worst.action})
     return pairs

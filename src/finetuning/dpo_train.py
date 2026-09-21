@@ -21,6 +21,8 @@ class DPOTrainingConfig:
     base_model: str = "Qwen/Qwen2.5-Coder-32B-Instruct"
     sft_adapter_path: str | None = None  # Previous SFT adapter
     training_data: str = ""
+    eval_data: str | None = None  # held-out split (src/finetuning/manifest.py)
+    eval_steps: int = 50
     output_dir: str = "/data/finetuning/output/dpo"
     lora_r: int = 32
     lora_alpha: int = 64
@@ -116,6 +118,12 @@ def run_dpo_training(config: DPOTrainingConfig) -> dict:
 
     dataset = dataset.map(format_dpo, remove_columns=dataset.column_names)
 
+    eval_dataset = None
+    if config.eval_data:
+        logger.info("dpo.loading_eval_data", path=config.eval_data)
+        eval_dataset = load_dataset("json", data_files=config.eval_data, split="train")
+        eval_dataset = eval_dataset.map(format_dpo, remove_columns=eval_dataset.column_names)
+
     dpo_config = DPOConfig(
         output_dir=config.output_dir,
         num_train_epochs=config.num_epochs,
@@ -134,6 +142,10 @@ def run_dpo_training(config: DPOTrainingConfig) -> dict:
         max_prompt_length=config.max_prompt_length,
         report_to="wandb" if config.wandb_project else "none",
         run_name=f"vs-dpo-{config.base_model.split('/')[-1]}",
+        eval_strategy="steps" if eval_dataset is not None else "no",
+        eval_steps=config.eval_steps if eval_dataset is not None else None,
+        load_best_model_at_end=eval_dataset is not None,
+        metric_for_best_model="eval_loss" if eval_dataset is not None else None,
     )
 
     trainer = DPOTrainer(
@@ -141,12 +153,15 @@ def run_dpo_training(config: DPOTrainingConfig) -> dict:
         ref_model=ref_model,
         args=dpo_config,
         train_dataset=dataset,
+        eval_dataset=eval_dataset,
         tokenizer=tokenizer,
         peft_config=lora_config,
     )
 
     logger.info("dpo.training_start")
     train_result = trainer.train()
+
+    eval_metrics = trainer.evaluate() if eval_dataset is not None else {}
 
     adapter_path = os.path.join(config.output_dir, "adapter")
     trainer.model.save_pretrained(adapter_path)
@@ -158,6 +173,7 @@ def run_dpo_training(config: DPOTrainingConfig) -> dict:
         "dpo_rewards_chosen": train_result.metrics.get("rewards/chosen", 0),
         "dpo_rewards_rejected": train_result.metrics.get("rewards/rejected", 0),
         "dpo_rewards_margins": train_result.metrics.get("rewards/margins", 0),
+        "eval_loss": eval_metrics.get("eval_loss"),
         "adapter_path": adapter_path,
     }
     logger.info("dpo.training_complete", **metrics)
