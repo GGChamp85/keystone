@@ -17,6 +17,8 @@ from src.api.middleware.rate_limiter import get_budget_status
 from src.api.models.requests import (
     CreateAPIKeyRequest,
     CreateTenantRequest,
+    CreateUserRequest,
+    LinkAPIKeyToUserRequest,
     RevokeAPIKeyRequest,
 )
 from src.api.models.responses import (
@@ -24,10 +26,11 @@ from src.api.models.responses import (
     APIKeyInfoResponse,
     TenantResponse,
     TokenBudgetResponse,
+    UserResponse,
 )
 from src.config import get_settings
 from src.db.connection import get_db
-from src.db.models import APIKey, APIKeyStatus, AuditLog, Tenant, TenantTier
+from src.db.models import APIKey, APIKeyStatus, AuditLog, Tenant, TenantTier, User, UserRole
 
 router = APIRouter(prefix="/v1/admin", tags=["admin"], dependencies=[Depends(require_root_admin)])
 
@@ -127,12 +130,95 @@ async def list_api_keys(tenant_id: UUID, db: AsyncSession = Depends(get_db)):
             key_prefix=k.key_prefix,
             status=k.status.value,
             scopes=k.scopes or [],
+            user_id=k.user_id,
             last_used_at=k.last_used_at,
             expires_at=k.expires_at,
             created_at=k.created_at,
         )
         for k in keys
     ]
+
+
+@router.post("/tenants/{tenant_id}/users", response_model=UserResponse, status_code=201)
+async def create_user(
+    tenant_id: UUID,
+    req: CreateUserRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    tenant = await db.get(Tenant, tenant_id)
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    existing = await db.execute(select(User).where(User.email == req.email))
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="A user with this email already exists")
+
+    user = User(tenant_id=tenant_id, name=req.name, email=req.email, role=UserRole(req.role))
+    db.add(user)
+    await db.flush()
+    await _audit(db, request, "user.create", "user", user.id, tenant_id=str(tenant_id), role=user.role.value)
+    return UserResponse(
+        id=user.id,
+        tenant_id=user.tenant_id,
+        name=user.name,
+        email=user.email,
+        role=user.role.value,
+        is_active=user.is_active,
+        created_at=user.created_at,
+    )
+
+
+@router.get("/tenants/{tenant_id}/users", response_model=list[UserResponse])
+async def list_users(tenant_id: UUID, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(User).where(User.tenant_id == tenant_id).order_by(User.created_at.desc()))
+    return [
+        UserResponse(
+            id=u.id,
+            tenant_id=u.tenant_id,
+            name=u.name,
+            email=u.email,
+            role=u.role.value,
+            is_active=u.is_active,
+            created_at=u.created_at,
+        )
+        for u in result.scalars().all()
+    ]
+
+
+@router.post("/tenants/{tenant_id}/keys/{key_id}/link-user", response_model=APIKeyInfoResponse)
+async def link_api_key_to_user(
+    tenant_id: UUID,
+    key_id: UUID,
+    req: LinkAPIKeyToUserRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Link an existing API key to a real user, so tasks/memories it creates
+    are attributed to that person and role-gated actions (e.g. approving a
+    tenant-wide memory) become available to it."""
+    key = await db.get(APIKey, key_id)
+    if not key or key.tenant_id != tenant_id:
+        raise HTTPException(status_code=404, detail="API key not found for this tenant")
+
+    user = await db.get(User, UUID(req.user_id))
+    if not user or user.tenant_id != tenant_id:
+        raise HTTPException(status_code=404, detail="User not found for this tenant")
+
+    key.user_id = user.id
+    await _audit(db, request, "api_key.link_user", "api_key", key.id, tenant_id=str(tenant_id), user_id=str(user.id))
+
+    return APIKeyInfoResponse(
+        id=key.id,
+        name=key.name,
+        key_prefix=key.key_prefix,
+        status=key.status.value,
+        scopes=key.scopes or [],
+        user_id=key.user_id,
+        last_used_at=key.last_used_at,
+        expires_at=key.expires_at,
+        created_at=key.created_at,
+    )
 
 
 @router.post("/tenants/{tenant_id}/keys/revoke")

@@ -108,8 +108,19 @@ class APIKeyInfoResponse(BaseModel):
     key_prefix: str
     status: str
     scopes: list[str]
+    user_id: UUID | None = None
     last_used_at: datetime | None
     expires_at: datetime | None
+    created_at: datetime
+
+
+class UserResponse(BaseModel):
+    id: UUID
+    tenant_id: UUID
+    name: str
+    email: str
+    role: str
+    is_active: bool
     created_at: datetime
 
 
@@ -143,6 +154,7 @@ class UsageRecordResponse(BaseModel):
 
 class AgentTaskResponse(BaseModel):
     id: UUID
+    user_id: UUID | None = None
     status: str
     task_description: str
     current_step: int
@@ -158,6 +170,27 @@ class AgentTaskResponse(BaseModel):
     execution_trace: list[dict[str, Any]]
     sandbox_id: str | None
     temporal_workflow_id: str | None
+    started_at: datetime | None
+    completed_at: datetime | None
+    created_at: datetime
+
+
+class AgentTaskSummaryResponse(BaseModel):
+    """Lean per-row shape for GET /v1/keystone/tasks — the team task list.
+    Omits execution_trace/output_diff (can be large) that AgentTaskResponse
+    carries for a single task's detail view."""
+
+    id: UUID
+    user_id: UUID | None
+    status: str
+    task_description: str
+    repository_url: str | None
+    branch: str
+    branch_name: str | None
+    pr_url: str | None
+    pr_number: int | None
+    model_role: str
+    error_message: str | None
     started_at: datetime | None
     completed_at: datetime | None
     created_at: datetime

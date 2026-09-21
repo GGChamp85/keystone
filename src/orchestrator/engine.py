@@ -90,6 +90,7 @@ class KeystoneEngine:
         enable_reasoning_review: bool = True,
         enable_sandbox_testing: bool = True,
         context_files: dict[str, str] | None = None,
+        user_id: UUID | None = None,
     ) -> UUID:
         """
         Create a new agent task and start execution.
@@ -104,6 +105,7 @@ class KeystoneEngine:
                 id=task_id,
                 tenant_id=tenant_id,
                 api_key_id=api_key_id,
+                user_id=user_id,
                 task_description=task_description,
                 repository_url=repository_url,
                 branch=branch,
@@ -472,6 +474,7 @@ class KeystoneEngine:
                 return None
             return {
                 "id": task.id,
+                "user_id": task.user_id,
                 "status": task.status.value,
                 "task_description": task.task_description,
                 "current_step": task.current_step,
@@ -491,6 +494,46 @@ class KeystoneEngine:
                 "completed_at": task.completed_at,
                 "created_at": task.created_at,
             }
+
+    async def list_tasks(
+        self,
+        tenant_id: UUID,
+        user_id: UUID | None = None,
+        repository_url: str | None = None,
+        limit: int = 50,
+    ) -> list[dict]:
+        """Team task list — who's working on what, and its PR status —
+        backing the web UI's team view and `GET /v1/keystone/tasks`."""
+        from sqlalchemy import select
+
+        async with get_db_context() as db:
+            stmt = select(AgentTask).where(AgentTask.tenant_id == tenant_id)
+            if user_id is not None:
+                stmt = stmt.where(AgentTask.user_id == user_id)
+            if repository_url is not None:
+                stmt = stmt.where(AgentTask.repository_url == repository_url)
+            stmt = stmt.order_by(AgentTask.created_at.desc()).limit(limit)
+            result = await db.execute(stmt)
+            tasks = result.scalars().all()
+            return [
+                {
+                    "id": t.id,
+                    "user_id": t.user_id,
+                    "status": t.status.value,
+                    "task_description": t.task_description,
+                    "repository_url": t.repository_url,
+                    "branch": t.branch,
+                    "branch_name": t.branch_name,
+                    "pr_url": t.pr_url,
+                    "pr_number": t.pr_number,
+                    "model_role": t.model_role.value if t.model_role else "coding",
+                    "error_message": t.error_message,
+                    "started_at": t.started_at,
+                    "completed_at": t.completed_at,
+                    "created_at": t.created_at,
+                }
+                for t in tasks
+            ]
 
     async def cancel_task(self, task_id: UUID) -> bool:
         """Cancel a running task — propagates real cancellation to the Temporal

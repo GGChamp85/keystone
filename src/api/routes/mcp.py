@@ -46,7 +46,7 @@ from starlette.applications import Starlette
 from src.api.middleware.auth import _resolve_api_key
 from src.config import get_settings
 from src.db.connection import get_db_context
-from src.db.models import APIKey, Tenant
+from src.db.models import APIKey, Tenant, User
 from src.memory.store import MemoryRecord, create_memory, recall
 
 mcp_server: MCPServer = MCPServer(
@@ -62,7 +62,7 @@ mcp_server: MCPServer = MCPServer(
 )
 
 
-async def _authenticate(ctx: Context) -> tuple[APIKey, Tenant]:
+async def _authenticate(ctx: Context) -> tuple[APIKey, Tenant, User | None]:
     headers = ctx.headers or {}
     raw = headers.get("authorization") or headers.get("Authorization")
     raw_key = raw[len("Bearer ") :].strip() if raw and raw.lower().startswith("bearer ") else raw
@@ -102,7 +102,7 @@ async def memory_search(
     recency, trimmed to `budget_tokens`. Pass `repository` (a git clone URL)
     to include that repo's own memories alongside team-wide ones.
     """
-    _api_key, tenant = await _authenticate(ctx)
+    _api_key, tenant, _user = await _authenticate(ctx)
     records = await recall(tenant.id, repository, query, budget_tokens=budget_tokens)
     return [_record_to_dict(r) for r in records]
 
@@ -122,7 +122,7 @@ async def memory_add(
     to one repo. `pinned` memories are always recalled regardless of query
     relevance (e.g. "never touch the legacy billing module").
     """
-    api_key, tenant = await _authenticate(ctx)
+    api_key, tenant, user = await _authenticate(ctx)
     record = await create_memory(
         tenant.id,
         content,
@@ -131,7 +131,7 @@ async def memory_add(
         source="user",
         status="approved",
         pinned=pinned,
-        created_by=str(api_key.id),
+        created_by=str(user.id) if user else str(api_key.id),
     )
     return _record_to_dict(record)
 

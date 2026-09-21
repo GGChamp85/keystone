@@ -99,6 +99,12 @@ class FeedbackVerdict(enum.StrEnum):
     REVERTED = "reverted"
 
 
+class UserRole(enum.StrEnum):
+    ADMIN = "admin"
+    LEAD = "lead"
+    DEVELOPER = "developer"
+
+
 # ── Tenant ────────────────────────────────────────────────────
 
 
@@ -126,6 +132,35 @@ class Tenant(Base):
     api_keys = relationship("APIKey", back_populates="tenant", cascade="all, delete-orphan")
     usage_records = relationship("UsageRecord", back_populates="tenant", cascade="all, delete-orphan")
     agent_tasks = relationship("AgentTask", back_populates="tenant", cascade="all, delete-orphan")
+    users = relationship("User", back_populates="tenant", cascade="all, delete-orphan")
+
+
+# ── User ──────────────────────────────────────────────────────
+
+
+class User(Base):
+    """A real person on a tenant's team — distinct from an APIKey, which is a
+    credential a user (or a service) authenticates with. Role gates
+    tenant-scope memory approval, adapter promotion, and admin routes
+    (src/api/middleware/auth.py's require_role)."""
+
+    __tablename__ = "users"
+    __table_args__ = (Index("ix_users_tenant", "tenant_id"),)
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String(255), nullable=False)
+    email = Column(String(255), nullable=False, unique=True)
+    role = Column(SAEnum(UserRole), default=UserRole.DEVELOPER, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    tenant = relationship("Tenant", back_populates="users")
 
 
 # ── API Key ───────────────────────────────────────────────────
@@ -140,6 +175,7 @@ class APIKey(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     name = Column(String(255), nullable=False)
     key_prefix = Column(String(12), nullable=False)  # "ks-xxxx" shown to user
     key_hash = Column(String(128), nullable=False, unique=True)
@@ -152,6 +188,7 @@ class APIKey(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
     tenant = relationship("Tenant", back_populates="api_keys")
+    user = relationship("User")
 
 
 # ── Usage Tracking ────────────────────────────────────────────
@@ -188,6 +225,7 @@ class AgentTask(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
     api_key_id = Column(UUID(as_uuid=True), ForeignKey("api_keys.id", ondelete="SET NULL"), nullable=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     # Task definition
     task_description = Column(Text, nullable=False)
@@ -236,6 +274,7 @@ class AgentTask(Base):
     execution_trace = Column(JSONB, default=list)
 
     tenant = relationship("Tenant", back_populates="agent_tasks")
+    user = relationship("User")
 
 
 # ── Codebase Index ────────────────────────────────────────────

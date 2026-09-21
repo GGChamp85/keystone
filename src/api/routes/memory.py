@@ -6,10 +6,13 @@ Keystone Agents — Memory management routes.
 
 Lets a user see and control what the agent has learned and will recall
 into its own context — the thing every previous iteration of this
-platform left entirely opaque. Every write here is attributed
-(`created_by` = the calling API key's tenant, and — once real per-user
-identity exists, Phase 4 — the actual user) and every read shows the
-same fields the agent's own prompt would see, not a summary of them.
+platform left entirely opaque. Every write here is attributed to the
+real user behind the calling key when one exists (Phase 4's `User`
+model), falling back to the API key's own id for keys not yet linked to
+a person. Approving a tenant-wide (as opposed to repo-scoped) proposed
+memory requires the lead or admin role — a tenant-wide convention affects
+every repo the team touches, so it needs a team-level sign-off, per the
+same governance the plan calls for on adapter promotion.
 """
 
 from __future__ import annotations
@@ -21,7 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from src.api.middleware.auth import require_scope
 from src.api.models.requests import CreateMemoryRequest, RecallMemoryRequest
 from src.api.models.responses import MemoryResponse
-from src.db.models import APIKey, Tenant
+from src.db.models import APIKey, Tenant, User, UserRole
 from src.memory.store import (
     MemoryRecord,
     create_memory,
@@ -33,6 +36,18 @@ from src.memory.store import (
 )
 
 router = APIRouter(prefix="/v1/keystone/memory", tags=["memory"])
+
+_ROLE_RANK = {UserRole.DEVELOPER: 0, UserRole.LEAD: 1, UserRole.ADMIN: 2}
+
+
+def _require_lead_for_tenant_scope(record: MemoryRecord, user: User | None) -> None:
+    if record.scope != "tenant":
+        return
+    if user is None or _ROLE_RANK[user.role] < _ROLE_RANK[UserRole.LEAD]:
+        raise HTTPException(
+            status_code=403,
+            detail="Approving a tenant-wide memory requires the lead or admin role",
+        )
 
 
 def _to_response(record: MemoryRecord) -> MemoryResponse:
@@ -70,6 +85,7 @@ async def add_memory(
 ):
     api_key: APIKey = auth[0]
     tenant: Tenant = auth[1]
+    user: User | None = auth[2]
     record = await create_memory(
         tenant.id,
         req.content,
@@ -78,7 +94,7 @@ async def add_memory(
         source="user",
         status="approved",
         pinned=req.pinned,
-        created_by=str(api_key.id),
+        created_by=str(user.id) if user else str(api_key.id),
     )
     return _to_response(record)
 
@@ -100,6 +116,11 @@ async def approve_memory(
     memory_id: UUID,
     auth: tuple = Depends(require_scope("agent")),
 ):
+    user: User | None = auth[2]
+    existing = await get_memory(memory_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    _require_lead_for_tenant_scope(existing, user)
     record = await set_status(memory_id, "approved")
     if record is None:
         raise HTTPException(status_code=404, detail="Memory not found")

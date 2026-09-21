@@ -62,6 +62,16 @@ class RevokeAPIKeyRequest(BaseModel):
     key_prefix: str = Field(..., description="The vs-xxxx prefix shown at creation time")
 
 
+class CreateUserRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    email: str = Field(..., min_length=5, max_length=255)
+    role: Literal["admin", "lead", "developer"] = "developer"
+
+
+class LinkAPIKeyToUserRequest(BaseModel):
+    user_id: str = Field(..., description="A user id from POST /v1/admin/tenants/{id}/users")
+
+
 # ── Agent Task Requests ───────────────────────────────────────
 
 

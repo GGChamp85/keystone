@@ -10,13 +10,13 @@ from __future__ import annotations
 import json
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from src.api.middleware.auth import require_scope
 from src.api.models.requests import AgentTaskRequest, IngestRepositoryRequest
-from src.api.models.responses import AgentTaskResponse, AgentTaskSubmittedResponse
-from src.db.models import APIKey, Tenant
+from src.api.models.responses import AgentTaskResponse, AgentTaskSubmittedResponse, AgentTaskSummaryResponse
+from src.db.models import APIKey, Tenant, User
 from src.memory.ingestion import CodeIngestionPipeline
 from src.orchestrator.engine import get_keystone_engine
 from src.orchestrator.events import TERMINAL_PHASES, block_for_next_event, read_task_events_from
@@ -31,11 +31,13 @@ async def submit_task(
 ):
     api_key: APIKey = auth[0]
     tenant: Tenant = auth[1]
+    user: User | None = auth[2]
     engine = get_keystone_engine()
 
     task_id = await engine.submit_task(
         tenant_id=tenant.id,
         api_key_id=api_key.id,
+        user_id=user.id if user else None,
         task_description=req.task,
         repository_url=req.repository_url,
         branch=req.branch,
@@ -48,6 +50,23 @@ async def submit_task(
     )
 
     return AgentTaskSubmittedResponse(task_id=task_id, status="pending")
+
+
+@router.get("/tasks", response_model=list[AgentTaskSummaryResponse])
+async def list_tasks(
+    user_id: UUID | None = Query(default=None, description="Filter to one team member's tasks"),
+    repository_url: str | None = Query(default=None, description="Filter to one repository"),
+    limit: int = Query(default=50, ge=1, le=200),
+    auth: tuple = Depends(require_scope("agent")),
+):
+    """Team task list — who's working on what, and its PR status. Backs the
+    web UI's team view; any valid tenant key can see the whole tenant's
+    tasks (not just its own), matching the plan's "task list across the
+    team" requirement rather than a narrower per-key view."""
+    tenant: Tenant = auth[1]
+    engine = get_keystone_engine()
+    tasks = await engine.list_tasks(tenant.id, user_id=user_id, repository_url=repository_url, limit=limit)
+    return [AgentTaskSummaryResponse(**t) for t in tasks]
 
 
 @router.get("/tasks/{task_id}", response_model=AgentTaskResponse)
