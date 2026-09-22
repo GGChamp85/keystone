@@ -1,6 +1,6 @@
 # Keystone
 
-**Self-hosted LLM inference gateway and autonomous coding agents — open source, air-gap-capable, zero managed SaaS.**
+**Self-hosted, open source, air-gap-capable. Two things, one platform: open-weight model inference, and a deterministic coding agent that verifies its own work before it ever opens a PR.**
 
 [![CI](https://github.com/GGChamp85/keystone/actions/workflows/ci.yml/badge.svg)](https://github.com/GGChamp85/keystone/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/GGChamp85/keystone/actions/workflows/codeql.yml/badge.svg)](https://github.com/GGChamp85/keystone/actions/workflows/codeql.yml)
@@ -8,37 +8,42 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](pyproject.toml)
 [![Node 22](https://img.shields.io/badge/node-22-339933)](web/package.json)
 
-Keystone runs entirely on infrastructure you own: an OpenAI-compatible inference gateway in front of open-weight models (GLM-5.3-Flash, Qwen2.5-Coder, DeepSeek-R1), and an autonomous coding agent that explores your real repository with tools — reading, grepping, editing, running tests — instead of guessing at full-file rewrites from memory. No model weights, code, or telemetry ever leave your network unless you choose to send them.
+Keystone runs entirely on infrastructure you own. No model weights, code, or telemetry ever leave your network unless you choose to send them.
+
+---
+
+## Two features, both self-hosted
+
+| | **Open weights model inference** | **Deterministic coding agents** |
+|---|---|---|
+| What it is | An OpenAI-compatible gateway in front of open-weight models (GLM-5.3-Flash, Qwen2.5-Coder, DeepSeek-R1) served by vLLM — swap the base model with a config change, not a code change. | A background agent that clones your real repo into a sandbox and edits it with actual tools (`read_file`, `grep`, `apply_patch`, `run_command`) — the same way a human contributor would, not a single full-file rewrite guessed from a prompt. |
+| Why "open weights" / "deterministic" | Every model is open-weight and self-hosted — no vendor API required, no weights ever leave your network. Point the same gateway at a frontier model instead when you want to (`benchmarks/frontier_proxy.py`), but nothing here depends on one. | "Done" is decided by real, deterministic checks — your actual lint/typecheck/security scanners and your actual test suite's actual exit code — never an LLM's self-assessment of its own work ("LLM-as-judge"). Any gate that can't run blocks the task instead of silently passing it. |
+| Where to read more | [Open-weight model inference](#open-weight-model-inference) | [Deterministic coding agents](#deterministic-coding-agents) |
 
 ---
 
 ## Contents
 
-- [Why Keystone](#why-keystone)
 - [Architecture](#architecture)
 - [What you need](#what-you-need)
-- [Watch it write code](#watch-it-write-code)
 - [Run it locally in 10 minutes](#run-it-locally-in-10-minutes)
-- [Use it](#use-it)
-- [Connect your own git server](#connect-your-own-git-server)
+- [Open-weight model inference](#open-weight-model-inference)
+  - [Chat completions](#chat-completions-openai-compatible)
+  - [Models](#models)
+  - [Distributed serving](#distributed-serving)
+  - [Fine-tune on your code](#fine-tune-on-your-code)
+- [Deterministic coding agents](#deterministic-coding-agents)
+  - [Watch it write code](#watch-it-write-code)
+  - [Submit a background task](#submit-a-background-task)
+  - [Interactive terminal session](#interactive-terminal-session)
+  - [Connect your own git server](#connect-your-own-git-server)
+  - [Run the benchmark suite](#run-the-benchmark-suite)
 - [Deploy air-gapped](#deploy-air-gapped)
-- [Fine-tune on your code](#fine-tune-on-your-code)
-- [Run the benchmark suite](#run-the-benchmark-suite)
-- [Models](#models)
 - [Tech stack](#tech-stack--open-source-only-no-managed-saas)
 - [Project structure](#project-structure)
 - [Documentation](#documentation)
 - [Contributing](#contributing)
 - [License](#license)
-
----
-
-## Why Keystone
-
-- **Self-hosted, not a wrapper around someone else's API.** Every model, every sandbox, every database runs on infrastructure you control. The [tech stack](#tech-stack--open-source-only-no-managed-saas) table below lists every dependency and its verified license — nothing here is "open core" with a managed cloud upsell.
-- **A real agentic coding loop, not a JSON-envelope rewrite.** The coding agent reads and edits your repository with actual tools (`read_file`, `grep`, `apply_patch`, `run_command`) against a real sandboxed git clone, the same way a human contributor would — not by generating a full replacement file from a prompt and hoping it's still correct.
-- **Fails closed, not open.** A code review the model couldn't complete, a quality gate that couldn't run, a test the sandbox couldn't execute — every one of these blocks the task rather than silently waving it through. Nothing gets labeled "reviewed" or "tested" that wasn't.
-- **Air-gap-capable by construction.** The offline bundle scripts (`airgap/`) package every container image, Python wheel, npm package, and model weight your deployment needs, so a fully network-isolated environment can run the whole platform with zero internet egress after import.
 
 ---
 
@@ -79,7 +84,7 @@ flowchart LR
     GW --> Q
 ```
 
-A background agent task moves through the graph above — `PLANNING → CODING → QUALITY → REVIEW → TESTING → COMPLETE`, with a `FIXING` node that every gate can route back to on failure (including a root-cause step that decides whether to re-plan entirely after repeated failures, not just retry blindly). Temporal makes this durable: a task survives an API pod crash or restart because Temporal owns the execution, not an in-process task.
+The gateway (`VLLM` in the diagram) is feature 1 — it also serves plain chat completions with no agent involved. The agent graph, sandbox, and git integration together are feature 2: a background task moves through `PLANNING → CODING → QUALITY → REVIEW → TESTING → COMPLETE`, with a `FIXING` node every gate can route back to on failure (including a root-cause step that decides whether to re-plan entirely after repeated failures, not just retry blindly). Temporal makes this durable: a task survives an API pod crash or restart because Temporal owns the execution, not an in-process task.
 
 ---
 
@@ -89,58 +94,17 @@ A background agent task moves through the graph above — `PLANNING → CODING �
 |---|---|---|
 | Docker + Compose v2, `make` | Everything | The whole stack is `docker-compose.yml` |
 | Postgres, Redis/Valkey, Qdrant | Everything | Started for you by `make up` — nothing to install separately |
-| Sandbox daemon (`keystoned`) | Any agentic coding task (not plain chat completions) | Runs sandboxed git clones/tool calls/tests; gVisor by default, no KVM needed. `make sandbox-images` builds its runtime image — required before the first task |
-| **A git host** | Agentic coding tasks (chat-only use doesn't need one) | Keystone never invents a repo to work in — point it at your own git server, or run [Gitea](https://gitea.io) (MIT) in five minutes for a local/test one. See [Connect your own git server](#connect-your-own-git-server) |
-| **A coding model** | Everything model-related | Either (a) GPUs running vLLM — see [Models](#models) for real VRAM numbers, or (b) **no GPU at all**: `benchmarks/frontier_proxy.py` puts a real frontier model (Claude, today) behind the same OpenAI-compatible interface — this is what [Watch it write code](#watch-it-write-code) below uses |
+| Sandbox daemon (`keystoned`) | Deterministic coding agents (not plain chat completions) | Runs sandboxed git clones/tool calls/tests; gVisor by default, no KVM needed. `make sandbox-images` builds its runtime image — required before the first task |
+| **A git host** | Deterministic coding agents (chat-only use doesn't need one) | Keystone never invents a repo to work in — point it at your own git server, or run [Gitea](https://gitea.io) (MIT) in five minutes for a local/test one. See [Connect your own git server](#connect-your-own-git-server) |
+| **A coding model** | Both features | Either (a) GPUs running vLLM — see [Models](#models) for real VRAM numbers, or (b) **no GPU at all**: `benchmarks/frontier_proxy.py` puts a real frontier model (Claude, today) behind the same OpenAI-compatible interface — this is what [Watch it write code](#watch-it-write-code) below uses |
 
 That's the complete list — no managed SaaS dependency anywhere in it (see [Tech stack](#tech-stack--open-source-only-no-managed-saas)).
 
 ---
 
-## Watch it write code
-
-The fastest path to seeing Keystone actually fix a bug — no GPU required, using a real frontier model as the coding backend via `benchmarks/frontier_proxy.py` (real translation layer, not a mock — see [Run the benchmark suite](#run-the-benchmark-suite) for the proof this genuinely works: a real bug, solved end to end, independently verified).
-
-```bash
-# 1. Clone, configure, and point the coding role at a real frontier model
-#    instead of a GPU — all *before* bringing the stack up, since the app
-#    container reads VLLM_CODING_URL from .env at startup, not your shell.
-git clone https://github.com/GGChamp85/keystone.git && cd keystone
-cp .env.example .env
-# Edit .env: set POSTGRES_PASSWORD, REDIS_PASSWORD, QDRANT_API_KEY,
-# KEYSTONE_ROOT_ADMIN_TOKEN, and GIT_ALLOWED_HOSTS/GIT_HOST_API_URL/
-# GIT_HOST_TOKEN for a real git host it can clone/push/PR against (see
-# "Connect your own git server" below — Keystone never invents a repo).
-# Set VLLM_CODING_URL=http://host.docker.internal:8090/v1 (Docker Desktop;
-# on Linux see the comment above that line in .env.example).
-
-# 2. Bring up the stack (Postgres, Redis, Qdrant, the app, the sandbox daemon)
-make certs && make build && make up && make db-migrate
-make sandbox-images     # sandbox runtime image — required before any task can run
-
-# 3. Start the real frontier-model proxy the .env above points at
-export ANTHROPIC_API_KEY=sk-ant-...
-FRONTIER_PROXY_MODEL=claude-opus-4-6 python -m benchmarks.frontier_proxy &   # serves on :8090
-
-# 4. Create an API key and submit a real task
-make api-key
-curl -X POST http://localhost:8080/v1/keystone/tasks \
-  -H "Authorization: Bearer ks-XXXX-XXXXXXXX" -H "Content-Type: application/json" \
-  -d '{"task": "Fix the bug where ...", "repository_url": "https://<your-git-host>/you/your-repo", "model": "coding"}'
-
-# 5. Watch it work
-open http://localhost:8080/app/    # live plan → tool calls → quality gates → review → tests, streaming in
-```
-
-What happens next is the real agent loop, not a canned response: it clones the repo into a sandbox, reads and greps the real code, writes a patch with real tools, runs lint/typecheck/security scanners, gets reviewed by a second model pass, runs the repo's real test suite, and — only if every one of those actually passed — commits, pushes a branch, and opens a real pull request for you to read like any other contributor's PR.
-
-Prefer a terminal session over a background task, the way you'd use Claude Code or the Codex CLI interactively? See [Work from the terminal](#use-it) below — [OpenCode](https://github.com/sst/opencode) pre-configured against Keystone gives you exactly that, same real tools, same models.
-
----
-
 ## Run it locally in 10 minutes
 
-This brings up the full stack (no model backend chosen yet — see [What you need](#what-you-need) for the two real options, and [Watch it write code](#watch-it-write-code) if you want to skip straight to a working agentic task with no GPU).
+This brings up the full stack (no model backend chosen yet — see [What you need](#what-you-need) for the two real options, and [Watch it write code](#watch-it-write-code) if you want to skip straight to a working coding-agent task with no GPU).
 
 ```bash
 # 1. Clone and configure
@@ -188,9 +152,9 @@ open http://localhost:8080/app/   # paste your API key, submit a task, watch the
 
 ---
 
-## Use it
+## Open-weight model inference
 
-Three ways in, depending on what you want — a raw completion, an autonomous background task, or an interactive terminal session:
+An OpenAI-compatible gateway (`/v1/chat/completions`, `/v1/models`) in front of vLLM, serving open-weight models end to end on your own GPUs — API key management, rate limiting, token budgets, and multi-model routing with health-aware fallback, all self-hosted.
 
 ### Chat completions (OpenAI-compatible)
 
@@ -207,69 +171,21 @@ curl -X POST http://localhost:8080/v1/chat/completions \
   }'
 ```
 
-### Background coding task (the agentic path — see [Watch it write code](#watch-it-write-code) for the full walkthrough)
+### Models
 
-The agent clones the repo into a sandbox, explores it with real tools, edits it, runs quality gates and the real test suite, and opens a PR — you submit it and come back to a review, like assigning a task to a contributor:
+| Role | Model | GPUs | Context |
+|------|-------|------|---------|
+| Coding (primary) | [GLM-5.3-Flash](https://huggingface.co/zai-org/GLM-5.3-Flash) (zai-org, MIT) — 288-expert MoE, natively FP8, real max context 1,048,576 | 8× A100/H100 80GB | 128K default (raise once real KV-cache headroom is confirmed) |
+| Coding (fallback) | Qwen2.5-Coder-32B-Instruct (Apache-2.0) — used when the primary endpoint is unhealthy | 4× A100 80GB | 128K |
+| Reasoning (critic) | DeepSeek-R1 (MIT) | 2× A100 80GB | 64K |
 
-```bash
-curl -X POST http://localhost:8080/v1/keystone/tasks \
-  -H "Authorization: Bearer ks-XXXX-XXXXXXXX" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "task": "Add pagination to the /users endpoint with cursor-based navigation",
-    "repository_url": "https://<your-git-server>/myorg/myapi",
-    "model": "coding",
-    "max_iterations": 10
-  }'
-```
+Swapping in a different open-weight model is a config change, not a code change — see `src/inference/config.py` and `src/inference/model_router.py`. No GPU at all? `benchmarks/frontier_proxy.py` puts a real frontier model behind this same interface, so the gateway (and the coding agent below) work identically either way.
 
-### Interactive terminal session
+### Distributed serving
 
-[OpenCode](https://github.com/sst/opencode), pre-configured against Keystone (`cli/opencode.config.json`), gives a Claude-Code-style interactive agent — the same real tools and models, but you drive it turn by turn instead of submitting a task and walking away:
+Each role scales along two independent, real axes (`helm/keystone/templates/vllm.yaml`): `replicas` runs N independent full model instances behind a load-balanced Service for horizontal throughput, and `nodeCount` pipeline-parallels a single instance across that many physical nodes for a model too large for one node's GPU pool (vLLM's real Ray-backed multi-node executor). Optional KEDA-based autoscaling scales `replicas` on the real `vllm:num_requests_waiting` queue-depth metric, not a CPU percentage that would never trigger on a GPU-bound workload. All three paths (single-node, multi-node, autoscaling) render through `helm lint`/`helm template` in CI on every PR; the multi-node Ray bootstrap itself hasn't been verified against real multi-node GPU hardware yet — this dev environment has none.
 
-```bash
-opencode
-# Provider "Keystone Inference" is pre-registered; Shift+Tab cycles manual/auto-mode.
-```
-
-See `docs/deployment/OPENCODE_SETUP.md` for wiring OpenCode to a non-local Keystone deployment.
-
----
-
-## Connect your own git server
-
-The agent's repo-mode tasks (clone → branch → commit → push → PR) only ever talk to git hosts you explicitly allow — `GIT_ALLOWED_HOSTS` in `.env` (default: a placeholder `gitea.internal.keystone.local`, since Gitea is the reference internal git host used throughout the air-gap tooling and dev-tier `docker-compose.yml`). Point it at whatever your org already runs:
-
-```bash
-# .env
-GIT_ALLOWED_HOSTS=git.yourcompany.internal
-GIT_HOST_API_URL=https://git.yourcompany.internal/api/v1
-GIT_HOST_TOKEN=<a bot account token with push + PR permissions>
-```
-
-`src/git/host.py` defines the `GitHost` protocol; `src/git/gitea.py` is the current real implementation. A repository URL outside the allowlist is rejected before the agent ever clones it — this is an allowlist, not a warning.
-
----
-
-## Deploy air-gapped
-
-Production deployments are built to run fully air-gapped: zero internet egress after the offline bundle is transferred in.
-
-```bash
-# On a machine WITH internet access:
-./airgap/download_models.sh ./airgap/models        # model weights — DeepSeek-R1 (~688GB) and GLM-5.3-Flash (~328GB) dominate the size, budget accordingly
-./airgap/build_image_bundle.sh ./airgap/output/images   # every container image, re-tagged for your internal registry
-# then the Python wheelhouse / npm mirror scripts, per docs/airgap/OFFLINE_INSTALL_RUNBOOK.md
-
-# Transfer ./airgap/output (and the model bundle) into the isolated environment, then:
-./airgap/import_bundle.sh
-```
-
-`docs/airgap/OFFLINE_INSTALL_RUNBOOK.md` walks the full build → bundle → transfer → import → bring-up sequence step by step, and states plainly what's been verified end-to-end on a real network-isolated environment versus what still needs a smoke test before a production handoff — it doesn't paper over the gap.
-
----
-
-## Fine-tune on your code
+### Fine-tune on your code
 
 The full pipeline is real and wired end to end: real training-data sources, a real adapter registry, real LoRA serving, and a real web wizard — not just standalone trainer scripts.
 
@@ -298,7 +214,93 @@ Once a job completes, promoting it writes a real row to the adapter registry (`M
 
 ---
 
-## Run the benchmark suite
+## Deterministic coding agents
+
+A background agent that treats your repository the way a contributor would: it clones it into a real sandbox, reads and greps the actual code, edits it with real tools, and only calls a task "done" once real, deterministic checks say so.
+
+- **Real tools, not a JSON-envelope rewrite.** The agent reads and edits your repository with actual tool calls (`read_file`, `grep`, `apply_patch`, `run_command`) against a real sandboxed git clone — not a full replacement file generated from a prompt and hoped to still be correct.
+- **Fails closed, not open.** A code review the model couldn't complete, a quality gate that couldn't run, a test the sandbox couldn't execute — every one of these blocks the task rather than silently waving it through. Nothing gets labeled "reviewed" or "tested" that wasn't.
+- **Verified, not asserted.** Pass/fail comes from the real exit code of your real lint/typecheck/security scanners and your real test suite running inside a real sandbox (gVisor/Firecracker) — never an LLM grading its own work.
+- **A real git workflow.** Clone → branch → commit → push → PR against your real git host, with a fresh sandbox re-clone of the pushed branch to independently re-verify before anything is called complete.
+
+### Watch it write code
+
+The fastest path to seeing Keystone actually fix a bug — no GPU required, using a real frontier model as the coding backend via `benchmarks/frontier_proxy.py` (real translation layer, not a mock — see [Run the benchmark suite](#run-the-benchmark-suite) for the proof this genuinely works: a real bug, solved end to end, independently verified).
+
+```bash
+# 1. Clone, configure, and point the coding role at a real frontier model
+#    instead of a GPU — all *before* bringing the stack up, since the app
+#    container reads VLLM_CODING_URL from .env at startup, not your shell.
+git clone https://github.com/GGChamp85/keystone.git && cd keystone
+cp .env.example .env
+# Edit .env: set POSTGRES_PASSWORD, REDIS_PASSWORD, QDRANT_API_KEY,
+# KEYSTONE_ROOT_ADMIN_TOKEN, and GIT_ALLOWED_HOSTS/GIT_HOST_API_URL/
+# GIT_HOST_TOKEN for a real git host it can clone/push/PR against (see
+# "Connect your own git server" below — Keystone never invents a repo).
+# Set VLLM_CODING_URL=http://host.docker.internal:8090/v1 (Docker Desktop;
+# on Linux see the comment above that line in .env.example).
+
+# 2. Bring up the stack (Postgres, Redis, Qdrant, the app, the sandbox daemon)
+make certs && make build && make up && make db-migrate
+make sandbox-images     # sandbox runtime image — required before any task can run
+
+# 3. Start the real frontier-model proxy the .env above points at
+export ANTHROPIC_API_KEY=sk-ant-...
+FRONTIER_PROXY_MODEL=claude-opus-4-6 python -m benchmarks.frontier_proxy &   # serves on :8090
+
+# 4. Create an API key and submit a real task
+make api-key
+curl -X POST http://localhost:8080/v1/keystone/tasks \
+  -H "Authorization: Bearer ks-XXXX-XXXXXXXX" -H "Content-Type: application/json" \
+  -d '{"task": "Fix the bug where ...", "repository_url": "https://<your-git-host>/you/your-repo", "model": "coding"}'
+
+# 5. Watch it work
+open http://localhost:8080/app/    # live plan → tool calls → quality gates → review → tests, streaming in
+```
+
+What happens next is the real agent loop, not a canned response: it clones the repo into a sandbox, reads and greps the real code, writes a patch with real tools, runs lint/typecheck/security scanners, gets reviewed by a second model pass, runs the repo's real test suite, and — only if every one of those actually passed — commits, pushes a branch, and opens a real pull request for you to read like any other contributor's PR.
+
+### Submit a background task
+
+The agent clones the repo into a sandbox, explores it with real tools, edits it, runs quality gates and the real test suite, and opens a PR — you submit it and come back to a review, like assigning a task to a contributor:
+
+```bash
+curl -X POST http://localhost:8080/v1/keystone/tasks \
+  -H "Authorization: Bearer ks-XXXX-XXXXXXXX" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "task": "Add pagination to the /users endpoint with cursor-based navigation",
+    "repository_url": "https://<your-git-server>/myorg/myapi",
+    "model": "coding",
+    "max_iterations": 10
+  }'
+```
+
+### Interactive terminal session
+
+Prefer a terminal session over a background task — the way you'd use Claude Code or the Codex CLI interactively? [OpenCode](https://github.com/sst/opencode), pre-configured against Keystone (`cli/opencode.config.json`), gives you exactly that: the same real tools and models, but you drive it turn by turn instead of submitting a task and walking away.
+
+```bash
+opencode
+# Provider "Keystone Inference" is pre-registered; Shift+Tab cycles manual/auto-mode.
+```
+
+See `docs/deployment/OPENCODE_SETUP.md` for wiring OpenCode to a non-local Keystone deployment.
+
+### Connect your own git server
+
+The agent's repo-mode tasks (clone → branch → commit → push → PR) only ever talk to git hosts you explicitly allow — `GIT_ALLOWED_HOSTS` in `.env` (default: a placeholder `gitea.internal.keystone.local`, since Gitea is the reference internal git host used throughout the air-gap tooling and dev-tier `docker-compose.yml`). Point it at whatever your org already runs:
+
+```bash
+# .env
+GIT_ALLOWED_HOSTS=git.yourcompany.internal
+GIT_HOST_API_URL=https://git.yourcompany.internal/api/v1
+GIT_HOST_TOKEN=<a bot account token with push + PR permissions>
+```
+
+`src/git/host.py` defines the `GitHost` protocol; `src/git/gitea.py` is the current real implementation. A repository URL outside the allowlist is rejected before the agent ever clones it — this is an allowlist, not a warning.
+
+### Run the benchmark suite
 
 ```bash
 python -m benchmarks.run_benchmark                    # Keystone Inference only
@@ -318,7 +320,7 @@ Each task in `benchmarks/tasks/` is scored by actually executing the model's com
 
 **Read this result for what it is, not more**: this is a 3-task single-function smoke suite that exists to prove the harness itself — sandboxed execution, real cost accounting, gated frontier clients — is genuinely wired end to end, not a claim that Keystone's self-hosted models match or beat frontier models. No number in this README is invented; where a real measurement doesn't exist yet, the roadmap says so instead of guessing.
 
-### The real repo-scale benchmark
+#### The real repo-scale benchmark
 
 `benchmarks/agent_runner.py` is the actual thing a quality comparison needs: a repo-scale task run through the *real* agent loop (`src/orchestrator/engine.py`'s real engine, real tools, real quality gates, a real git workflow) against a seeded repository with a genuine bug and a real failing test — not a single free-standing completion.
 
@@ -339,17 +341,21 @@ export VLLM_CODING_URL=http://localhost:8090/v1
 
 ---
 
-## Models
+## Deploy air-gapped
 
-| Role | Model | GPUs | Context |
-|------|-------|------|---------|
-| Coding (primary) | [GLM-5.3-Flash](https://huggingface.co/zai-org/GLM-5.3-Flash) (zai-org, MIT) — 288-expert MoE, natively FP8, real max context 1,048,576 | 8× A100/H100 80GB | 128K default (raise once real KV-cache headroom is confirmed) |
-| Coding (fallback) | Qwen2.5-Coder-32B-Instruct (Apache-2.0) — used when the primary endpoint is unhealthy | 4× A100 80GB | 128K |
-| Reasoning (critic) | DeepSeek-R1 (MIT) | 2× A100 80GB | 64K |
+Production deployments are built to run fully air-gapped: zero internet egress after the offline bundle is transferred in. This applies to both features — model weights and every container image are bundled the same way.
 
-Swapping in a different model is a config change, not a code change — see `src/inference/config.py` and `src/inference/model_router.py`.
+```bash
+# On a machine WITH internet access:
+./airgap/download_models.sh ./airgap/models        # model weights — DeepSeek-R1 (~688GB) and GLM-5.3-Flash (~328GB) dominate the size, budget accordingly
+./airgap/build_image_bundle.sh ./airgap/output/images   # every container image, re-tagged for your internal registry
+# then the Python wheelhouse / npm mirror scripts, per docs/airgap/OFFLINE_INSTALL_RUNBOOK.md
 
-**Distributed serving** (`helm/keystone/templates/vllm.yaml`): each role scales along two independent, real axes — `replicas` runs N independent full model instances behind a load-balanced Service for horizontal throughput, and `nodeCount` pipeline-parallels a single instance across that many physical nodes for a model too large for one node's GPU pool (vLLM's real Ray-backed multi-node executor). Optional KEDA-based autoscaling scales `replicas` on the real `vllm:num_requests_waiting` queue-depth metric, not a CPU percentage that would never trigger on a GPU-bound workload. All three paths (single-node, multi-node, autoscaling) render through `helm lint`/`helm template` in CI on every PR; the multi-node Ray bootstrap itself hasn't been verified against real multi-node GPU hardware yet — this dev environment has none.
+# Transfer ./airgap/output (and the model bundle) into the isolated environment, then:
+./airgap/import_bundle.sh
+```
+
+`docs/airgap/OFFLINE_INSTALL_RUNBOOK.md` walks the full build → bundle → transfer → import → bring-up sequence step by step, and states plainly what's been verified end-to-end on a real network-isolated environment versus what still needs a smoke test before a production handoff — it doesn't paper over the gap.
 
 ---
 
@@ -409,7 +415,7 @@ keystone/
 │   ├── temporal/                  # worker.py, workflows.py, activities.py, finetune_workflow.py, finetune_activities.py
 │   ├── memory/                    # Per-tenant Qdrant vector store, embeddings, incremental git ingestion
 │   ├── finetuning/                # LoRA/SFT/DPO trainers, runner, events, sources/ (git history, trajectories, repo pretrain), manifest
-│   └── cli/                       # `keystone` CLI (memory, finetune) — a real HTTP client against the API
+│   └── cli/                       # `keystone` CLI (memory, finetune, ingest, ops, admin) — a real HTTP client against the API
 ├── cli/                           # OpenCode config for the interactive agent
 ├── web/                           # Live plan/execution-trace + memory + fine-tune UI (React + Vite, served at /app)
 ├── helm/keystone/                 # Kubernetes chart (client VPC production)
