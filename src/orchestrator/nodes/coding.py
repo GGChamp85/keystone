@@ -39,9 +39,10 @@ from src.orchestrator.state import (
     FileChange,
     IterationRecord,
 )
-from src.orchestrator.tools.impl import dispatch_tool_call, touched_path
+from src.orchestrator.tools.impl import ToolResult, dispatch_tool_call, touched_path
 from src.orchestrator.tools.protocol import ToolCallError, get_tool_protocol
 from src.orchestrator.workspace import Workspace
+from src.security.prompt_injection import wrap_tool_output
 
 logger = structlog.get_logger(__name__)
 
@@ -147,6 +148,31 @@ def _build_agentic_user_context(state: AgentState) -> str:
     return "\n".join(parts)
 
 
+_TOOL_DETAIL_ARG: dict[str, str] = {
+    "read_file": "path",
+    "list_dir": "path",
+    "apply_patch": "path",
+    "grep": "pattern",
+    "run_command": "command",
+}
+
+
+def _wrapped_tool_content(name: str, arguments: dict, result: ToolResult) -> str:
+    """
+    Every successful tool result reflects content Keystone doesn't control
+    the origin of (a file, a grep match, command output) — wrapped in a
+    real untrusted-data delimiter (src/security/prompt_injection.py)
+    before it becomes part of the model's context, real defense-in-depth
+    against a repository that tries to smuggle instructions through
+    exactly this channel. Error messages are Keystone's own generated
+    text, not repository content, so they pass through unwrapped.
+    """
+    if not result.ok:
+        return result.to_content()
+    detail = str(arguments.get(_TOOL_DETAIL_ARG.get(name, ""), ""))
+    return wrap_tool_output(result.output, tool=name, detail=detail)
+
+
 async def _run_agentic_loop(state: AgentState, ws: Workspace) -> tuple[bool, str, list[str]]:
     """Returns (model_signaled_done, final_summary_text, paths_touched_this_call)."""
     client = get_inference_client(state.primary_model)
@@ -193,7 +219,7 @@ async def _run_agentic_loop(state: AgentState, ws: Workspace) -> tuple[bool, str
                 turn.extend(protocol.format_tool_result(call, f"ERROR: {call.error}"))
                 continue
             result = await dispatch_tool_call(ws, call.name, call.arguments)
-            turn.extend(protocol.format_tool_result(call, result.to_content()))
+            turn.extend(protocol.format_tool_result(call, _wrapped_tool_content(call.name, call.arguments, result)))
             path = touched_path(call.name, call.arguments, result)
             if path:
                 touched.add(path)
