@@ -22,8 +22,42 @@ Keystone runs entirely on infrastructure you own. No model weights, code, or tel
 
 ---
 
+## Deploy anywhere — laptop, cloud GPUs, or fully air-gapped
+
+Every tier below runs the exact same code — `docker-compose.yml` for a single box, the same Helm chart scaled up for the rest. Move between them by changing config, not by re-platforming.
+
+| Tier | GPUs | Network | How |
+|---|---|---|---|
+| Laptop, no GPU | None — point the coding role at a real frontier model instead (`benchmarks/frontier_proxy.py`) | Normal internet | `docker-compose.yml` via `make up` — see [Run it locally in 10 minutes](#run-it-locally-in-10-minutes) |
+| Cloud GPUs (RunPod) | Real multi-GPU, rented by the hour — no upfront hardware purchase | Normal internet | `infra/opentofu/environments/runpod-test/` + `helm/keystone/values-runpod-test.yaml` |
+| Your own VPC / on-prem, air-gapped | Real multi-GPU/multi-node hardware you own, sized per [Models](#models) | **Zero internet egress** after the offline bundle is imported | `helm/keystone/` chart + `helm/keystone/values-client-vpc.yaml`, built via `airgap/*.sh` — see [Deploy air-gapped](#deploy-air-gapped) |
+
+Model serving itself scales the same way across every tier: from one GPU to real multi-node pipeline-parallel serving (`nodeCount` > 1) for a model too large for one node's GPU pool, and from one replica to KEDA-based autoscaling on real queue depth — see [Distributed serving](#distributed-serving). And because every container image, Python wheel, npm package, and model weight the platform needs bundles through the same `airgap/` scripts, the air-gapped tier isn't a stripped-down mode — it's the identical deployment with the network cable pulled.
+
+---
+
+## What you get that a frontier model API doesn't give you
+
+Keystone isn't a claim that its self-hosted open-weight models currently out-code Claude or GPT — they don't, not yet honestly measured at scale (see [Run the benchmark suite](#run-the-benchmark-suite) for the real, unfiltered numbers on that gap). The value is everything *around* the model, and it applies whether the model behind it is open-weight or a frontier one you've pointed Keystone at:
+
+| | Calling a frontier API / agent product directly | Keystone |
+|---|---|---|
+| Where your code and prompts go | The vendor's cloud, on every request | Nowhere, by default — self-hosted and air-gap-capable; only leaves your network if you explicitly wire a role to a frontier proxy |
+| What "done" means | The model's own claim, or a human re-reading the diff | Deterministic: your real lint/typecheck/security scanners and your real test suite's real exit code, run in a real sandbox — enforced by the platform, not requested of the model. See [Deterministic coding agents](#deterministic-coding-agents) |
+| Git workflow | You copy/paste output and do it yourself | Native: real clone → branch → commit → push → PR against your own git host, independently re-verified in a *fresh* sandbox clone before anything is called complete |
+| Cost as usage grows | Per-token, no ceiling, priced by the vendor | Self-hosted GPU cost is fixed regardless of volume — run `python -m benchmarks.run_benchmark --gpu-count N --gpu-hourly-cost X --gpu-tokens-per-second Y` against your own real deployment for your own real break-even point versus the published frontier rates in `benchmarks/cost_model.py` |
+| Gets better on your codebase | Only via prompting/context — the model itself never changes | A real fine-tuning pipeline (LoRA/SFT/DPO) trains on your own git history, accepted tasks, and repo text — see [Fine-tune on your code](#fine-tune-on-your-code) for where this genuinely stands (real end to end on CPU; not yet proven on real GPU hardware) |
+| Multi-tenant controls | Bring your own wrapper | Built in: tenants, per-user roles, per-tenant rate limits/token budgets, and an audit log on every task/memory/admin action |
+| Model lock-in | Whatever that product ships | Any open-weight model is a config change (`src/inference/model_router.py`), and the same gateway can front a frontier model instead (`benchmarks/frontier_proxy.py`) — the deterministic verification layer around it doesn't change either way |
+
+In short: if you want frontier-quality output, Keystone can still give it to you (point `benchmarks/frontier_proxy.py` at Claude, as [Watch it write code](#watch-it-write-code) does) — but wrapped in a deterministic, self-hosted, auditable pipeline that a raw API call doesn't give you, with a real path to running entirely on your own open-weight, fine-tuned model once that pipeline has proven itself on your repos.
+
+---
+
 ## Contents
 
+- [Deploy anywhere](#deploy-anywhere--laptop-cloud-gpus-or-fully-air-gapped)
+- [What you get that a frontier model API doesn't give you](#what-you-get-that-a-frontier-model-api-doesnt-give-you)
 - [Architecture](#architecture)
 - [What you need](#what-you-need)
 - [Run it locally in 10 minutes](#run-it-locally-in-10-minutes)
@@ -31,6 +65,7 @@ Keystone runs entirely on infrastructure you own. No model weights, code, or tel
   - [Chat completions](#chat-completions-openai-compatible)
   - [Models](#models)
   - [Distributed serving](#distributed-serving)
+  - [Bring your own repos and data](#bring-your-own-repos-and-data)
   - [Fine-tune on your code](#fine-tune-on-your-code)
 - [Deterministic coding agents](#deterministic-coding-agents)
   - [Watch it write code](#watch-it-write-code)
@@ -184,6 +219,24 @@ Swapping in a different open-weight model is a config change, not a code change 
 ### Distributed serving
 
 Each role scales along two independent, real axes (`helm/keystone/templates/vllm.yaml`): `replicas` runs N independent full model instances behind a load-balanced Service for horizontal throughput, and `nodeCount` pipeline-parallels a single instance across that many physical nodes for a model too large for one node's GPU pool (vLLM's real Ray-backed multi-node executor). Optional KEDA-based autoscaling scales `replicas` on the real `vllm:num_requests_waiting` queue-depth metric, not a CPU percentage that would never trigger on a GPU-bound workload. All three paths (single-node, multi-node, autoscaling) render through `helm lint`/`helm template` in CI on every PR; the multi-node Ray bootstrap itself hasn't been verified against real multi-node GPU hardware yet — this dev environment has none.
+
+### Bring your own repos and data
+
+Two real, complementary paths — use one or both, on your own code, from day one:
+
+**RAG (immediate, no training)**: `keystone ingest <repository_url>` clones a real allowlisted repo, chunks and embeds it into your tenant's own Qdrant collection, and makes it retrievable as context for every coding/review/planning turn. It's incremental — a file whose content hash hasn't changed is skipped entirely on the next run, and a file removed from the repo has its now-stale chunks deleted, not left behind forever.
+
+```bash
+keystone ingest https://your-git-host/yourorg/yourrepo --branch main
+# 23 file(s) processed, 0 unchanged, 0 skipped, 0 deleted
+#   61 chunk(s) created, 61 upserted, 0 stale chunk(s) removed
+
+keystone ingest https://your-git-host/yourorg/yourrepo --branch main   # run again — nothing changed
+# 0 file(s) processed, 23 unchanged, 0 skipped, 0 deleted
+#   0 chunk(s) created, 0 upserted, 0 stale chunk(s) removed
+```
+
+**Fine-tuning (deeper, trains the model itself)**: see [Fine-tune on your code](#fine-tune-on-your-code) directly below — your git history, accepted tasks, and repo text become real training data, not just retrieval context.
 
 ### Fine-tune on your code
 
