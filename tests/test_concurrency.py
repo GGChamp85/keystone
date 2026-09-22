@@ -78,6 +78,33 @@ async def _clean_redis_slots(tenant_id):
         await r.delete(key)
 
 
+@pytest.fixture(autouse=True)
+def _inference_endpoints_unreachable(monkeypatch):
+    """
+    The submit_task tests below assert what happens when a task's real
+    background execution fails at the inference endpoint: the concurrency
+    slot must still be released, and the task must reach a terminal state
+    quickly. They used to get that for free because no model endpoint was
+    reachable in any test environment. Now that CI runs a real model
+    backend for the whole job (VLLM_CODING_URL → the demo-model llama.cpp
+    server), a submitted task would genuinely run the agent loop instead,
+    outlive the test, and leak a background task across event loops. So
+    the assumption is enforced here explicitly rather than inherited from
+    the environment: every role points at a port nothing listens on, and
+    the client cache is cleared so no previously built client survives.
+    """
+    from src.config import get_settings
+    from src.inference import client as inference_client
+
+    for var in ("VLLM_CODING_URL", "VLLM_CODING_FALLBACK_URL", "VLLM_REASONING_URL"):
+        monkeypatch.setenv(var, "http://127.0.0.1:1/v1")
+    get_settings.cache_clear()
+    inference_client._clients.clear()
+    yield
+    get_settings.cache_clear()
+    inference_client._clients.clear()
+
+
 def test_slugify_for_branch_produces_a_git_ref_safe_slug():
     email_local_part = "Ada.Lovelace+work@x.com".partition("@")[0]
     assert slugify_for_branch(email_local_part) == "ada-lovelace-work"
@@ -151,11 +178,12 @@ async def test_submit_task_raises_when_a_slot_is_already_held(tenant_id, api_key
 
 
 async def test_submit_task_acquires_and_releases_a_real_slot_end_to_end(tenant_id, api_key_id):
-    """No repository_url -> the background execution fails at the (in this
-    test env, unreachable) inference endpoint and hits _execute_task's
-    `finally`, which must release the slot — proving the real acquire (in
-    submit_task) -> release (in _execute_task) wiring, not just the Redis
-    primitives in isolation above. When a real Qdrant is configured
+    """No repository_url -> the background execution fails at the inference
+    endpoint (made unreachable for every role by the autouse fixture above,
+    so this holds even when the environment has a real model backend) and
+    hits _execute_task's `finally`, which must release the slot — proving
+    the real acquire (in submit_task) -> release (in _execute_task) wiring,
+    not just the Redis primitives in isolation above. When a real Qdrant is configured
     (QDRANT_HOST), RAG retrieval runs for real first — including, on a cold
     process, loading the real embedding model — before the inference call
     fails, so the wait allows for that rather than assuming an instant
