@@ -120,3 +120,23 @@ async def test_chat_completions_falls_back_to_base_model_when_no_adapter_promote
             assert resp.status_code == 200, resp.text
 
     assert fake_client.calls[0]["model_override"] == "test-coding-model"
+
+
+async def test_chat_completions_rejects_max_tokens_above_the_deployment_ceiling(tenant_and_key):
+    """MAX_TOKENS_PER_REQUEST (default 32,768) is the deployment's ceiling;
+    the request model's own 131,072 bound is only the protocol maximum. A
+    request between the two must be rejected up front — before routing,
+    so the model is never called — not silently clamped or passed through."""
+    _tenant_id, api_key = tenant_and_key
+    fake_client = _ScriptedInferenceClient()
+    with patch("src.api.routes.completions.get_model_router", return_value=_ScriptedModelRouter(fake_client)):
+        async with running_client() as client:
+            resp = await client.post(
+                "/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={"model": "coding", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100_000},
+            )
+            assert resp.status_code == 422, resp.text
+            assert "exceeds this deployment's limit of 32768" in resp.text
+
+    assert fake_client.calls == []

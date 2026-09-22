@@ -58,6 +58,21 @@ async def test_trips_on_consecutive_review_failures():
         await breaker.check(_state(consecutive_review_failures=2))
 
 
+async def test_trips_on_consecutive_quality_failures():
+    """The quality node could otherwise loop CODING -> QUALITY -> FIXING
+    bounded only by the iteration/token limits — this is its own limit."""
+    breaker = CircuitBreaker(CircuitBreakerConfig(max_consecutive_quality_failures=2))
+    breaker.start()
+    with pytest.raises(CircuitBreakerTripped, match="consecutive quality-gate failures"):
+        await breaker.check(_state(consecutive_quality_failures=2))
+
+
+async def test_does_not_trip_below_quality_failure_limit():
+    breaker = CircuitBreaker(CircuitBreakerConfig(max_consecutive_quality_failures=3))
+    breaker.start()
+    await breaker.check(_state(consecutive_quality_failures=2))
+
+
 async def test_trips_on_wall_clock_timeout():
     import asyncio
 

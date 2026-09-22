@@ -316,6 +316,7 @@ class KeystoneEngine:
             max_tokens_per_task=2_000_000,
             max_consecutive_test_failures=3,
             max_consecutive_review_failures=3,
+            max_consecutive_quality_failures=3,
             max_wall_clock_seconds=1800,
             tenant_daily_limit=settings.default_daily_token_limit,
             tenant_monthly_limit=settings.default_monthly_token_limit,

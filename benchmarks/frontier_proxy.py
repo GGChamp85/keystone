@@ -20,7 +20,7 @@ loop* — the actual LangGraph nodes, actual tool-calling protocol, actual
 structured-output retries — runs against a real frontier model, not just
 the standalone single-completion benchmarks/model_clients.py path. This is
 what benchmarks/agent_runner.py uses to drive a real, full agentic task
-against Claude for Phase 6's repo-task suite.
+against a frontier model for Phase 6's repo-task suite.
 
 response_format (vLLM's guided JSON decoding) has no Anthropic equivalent,
 so it's implemented via the well-known "forced single tool call" technique:

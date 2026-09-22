@@ -4,7 +4,7 @@ Keystone Agents' interactive surface is [OpenCode](https://opencode.ai)
 (`opencode-ai` on npm, MIT-licensed — verified against the published
 package on 2026-09-20: `npm view opencode-ai`), configured to talk to
 Keystone Inference instead of a third-party API. We don't build or
-maintain a CLI ourselves — OpenCode already is a mature Claude-Code-style
+maintain a CLI ourselves — OpenCode already is a mature Codex-style
 terminal agent (tool-use loop, permission system, streaming TUI, plan
 mode), and re-implementing that would be pure duplicated effort.
 
@@ -150,7 +150,7 @@ package's own source) over the Streamable HTTP transport, mounted into
 the main FastAPI app at **`/v1/keystone/mcp`**. It exposes two tools —
 `memory_search` (the same ranked recall the CLI/plugin/background agent
 all use) and `memory_add` — to *any* MCP-speaking client, not just
-OpenCode: Claude Desktop, Claude Code, or another IDE can all add it as a
+OpenCode: any MCP-speaking desktop client or IDE can all add it as a
 remote MCP server the same way.
 
 `cli/opencode.config.json` already registers it:

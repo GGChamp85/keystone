@@ -41,6 +41,7 @@ class CircuitBreakerConfig:
     max_tokens_per_task: int = 2_000_000
     max_consecutive_test_failures: int = 3
     max_consecutive_review_failures: int = 3
+    max_consecutive_quality_failures: int = 3
     max_wall_clock_seconds: int = 1800  # 30 minutes
     tenant_daily_limit: int | None = None
     tenant_monthly_limit: int | None = None
@@ -105,7 +106,19 @@ class CircuitBreaker:
                 state,
             )
 
-        # 5. Wall-clock timeout
+        # 5. Consecutive quality-gate failures — without this the quality
+        # node (nodes/quality.py) could route CODING -> QUALITY -> FIXING
+        # indefinitely, bounded only by the iteration and token limits.
+        if state.consecutive_quality_failures >= self.config.max_consecutive_quality_failures:
+            raise self._trip(
+                "consecutive_quality_failures",
+                f"Too many consecutive quality-gate failures "
+                f"({state.consecutive_quality_failures}/{self.config.max_consecutive_quality_failures}). "
+                f"The agent cannot get the code past lint/typecheck/security scanning.",
+                state,
+            )
+
+        # 6. Wall-clock timeout
         if self._start_time is not None:
             elapsed = time.monotonic() - self._start_time
             if elapsed >= self.config.max_wall_clock_seconds:
@@ -116,7 +129,7 @@ class CircuitBreaker:
                     state,
                 )
 
-        # 6. Tenant daily budget (Redis check)
+        # 7. Tenant daily budget (Redis check)
         if state.tenant_id and self.config.tenant_daily_limit:
             await self._check_tenant_budget(state)
 

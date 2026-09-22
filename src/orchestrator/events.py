@@ -16,9 +16,8 @@ Server-Sent Event.
 Redis Streams (not plain pub/sub) deliberately: a client that connects
 *after* planning already finished still needs to see the plan — pub/sub
 has no history, a Stream does (XRANGE from the start, then XREAD BLOCK for
-what comes next). The batch inference queue (src/inference/batch.py)
-already established this Streams pattern in this codebase; reused here
-rather than introducing pub/sub as a second primitive.
+what comes next). Streams are the one Redis messaging primitive this
+codebase uses, deliberately — pub/sub is not introduced alongside it.
 """
 
 from __future__ import annotations

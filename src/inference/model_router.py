@@ -164,14 +164,14 @@ async def resolve_served_model_name(base_model_id: str, tenant_id: UUID, fallbac
     src/inference/config.py's VLLMConfig) if this tenant has one for
     `base_model_id`, else `fallback_served_name` (the base model itself).
 
-    Real, DB-backed, and independently tested — but not yet called from
-    any orchestrator node (src/orchestrator/nodes/*.py still always uses
-    the base model's own served name for every request). Wiring every
-    node's inference call to resolve and pass this per-tenant is later
-    work: it touches every call site that builds a chat completion
-    request, and there is no real promoted adapter to route to until a
-    real fine-tuning run (needs a GPU this dev environment doesn't have)
-    actually produces and promotes one.
+    Real, DB-backed, and independently tested, and wired into every real
+    call site via resolve_model_name_for_client below — the planning,
+    coding, review, and tool_execution nodes and the OpenAI-compatible
+    gateway (src/api/routes/completions.py) all resolve the served name
+    through it per request. What does not exist yet is a real promoted
+    adapter to route to: that needs a fine-tuning run on real GPU
+    hardware, which this dev environment doesn't have, so in practice
+    every request still resolves to the base model's own served name.
     """
     from src.db.connection import get_db_context
     from src.db.models import AdapterStatus, ModelAdapter

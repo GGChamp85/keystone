@@ -10,7 +10,7 @@
 
 ## Before asking
 
-Run `keystone doctor` (or, until that ships, check `docs/deployment/`) and include its output — most deployment questions turn out to be a missing env var, an unreachable service, or an air-gap egress rule, and `doctor`/the relevant runbook usually names the exact problem.
+Run `keystone doctor` and include its output — most deployment questions turn out to be a missing env var, an unreachable service, or an air-gap egress rule, and `doctor`/the relevant runbook usually names the exact problem.
 
 ## Commercial support
 

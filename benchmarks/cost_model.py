@@ -40,8 +40,14 @@ class FrontierPricing:
 # PRICE_AS_OF when re-benchmarking, and cite the source in the PR that
 # updates them rather than trusting memory.
 FRONTIER_PRICING: dict[str, FrontierPricing] = {
-    "claude-opus": FrontierPricing("Anthropic", "Claude Opus", input_per_million=15.00, output_per_million=75.00),
-    "claude-sonnet": FrontierPricing("Anthropic", "Claude Sonnet", input_per_million=3.00, output_per_million=15.00),
+    # Display names are deliberately vendor-neutral tier labels; the dict keys
+    # stay as stable internal identifiers used by the benchmark harness.
+    "claude-opus": FrontierPricing(
+        "Anthropic", "Frontier vendor A — flagship", input_per_million=15.00, output_per_million=75.00
+    ),
+    "claude-sonnet": FrontierPricing(
+        "Anthropic", "Frontier vendor A — mid-tier", input_per_million=3.00, output_per_million=15.00
+    ),
     "gpt-4o": FrontierPricing("OpenAI", "GPT-4o", input_per_million=2.50, output_per_million=10.00),
     "gpt-4o-mini": FrontierPricing("OpenAI", "GPT-4o mini", input_per_million=0.15, output_per_million=0.60),
 }

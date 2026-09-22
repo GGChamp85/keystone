@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import time
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from src.api.middleware.auth import require_scope
@@ -58,6 +58,16 @@ async def chat_completions(
 ):
     api_key: APIKey = auth[0]
     tenant: Tenant = auth[1]
+
+    # Deployment-wide ceiling (MAX_TOKENS_PER_REQUEST) — the request model's
+    # own bound is the protocol maximum, not what this deployment is willing
+    # to serve; rejected up front rather than silently clamped.
+    max_tokens_ceiling = get_settings().max_tokens_per_request
+    if req.max_tokens > max_tokens_ceiling:
+        raise HTTPException(
+            status_code=422,
+            detail=f"max_tokens={req.max_tokens} exceeds this deployment's limit of {max_tokens_ceiling}",
+        )
 
     # Rate limit
     rpm = api_key.rate_limit_override or 60

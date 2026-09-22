@@ -6,7 +6,7 @@ Keystone Agents — MCP server.
 
 Exposes the same memory surface as the `keystone` CLI (src/cli/main.py) and
 the OpenCode plugin (cli/opencode/plugins/keystone-memory.ts) to any
-MCP-speaking client (Claude Desktop, Claude Code, other IDEs, a remote
+MCP-speaking client (desktop clients, IDEs, a remote
 `opencode.json` `mcp` entry) over the real Streamable HTTP transport —
 mounted into the main FastAPI app (src/main.py) at /v1/keystone/mcp.
 

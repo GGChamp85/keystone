@@ -122,19 +122,18 @@ class AgentState:
 
     # ── Code changes ──────────────────────────────────────────
     file_changes: list[FileChange] = field(default_factory=list)
-    cumulative_diff: str = ""
 
     # ── Review ────────────────────────────────────────────────
+    # Retry limits live in CircuitBreakerConfig (circuit_breaker.py), the
+    # one place check() actually reads them — not duplicated here.
     review_comments: list[ReviewComment] = field(default_factory=list)
     review_passed: bool = False
     consecutive_review_failures: int = 0
-    max_review_retries: int = 3
 
     # ── Testing ───────────────────────────────────────────────
     test_results: list[TestResult] = field(default_factory=list)
     tests_passed: bool = False
     consecutive_test_failures: int = 0
-    max_test_retries: int = 3
 
     # ── Quality gates (nodes/quality.py) ─────────────────────────
     # Runs between CODING and REVIEW, repo-mode only: the repo's own real

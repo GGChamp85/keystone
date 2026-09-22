@@ -38,7 +38,7 @@ Model serving itself scales the same way across every tier: from one GPU to real
 
 ## What you get that a frontier model API doesn't give you
 
-Keystone isn't a claim that its self-hosted open-weight models currently out-code Claude or GPT — they don't, not yet honestly measured at scale (see [Run the benchmark suite](#run-the-benchmark-suite) for the real, unfiltered numbers on that gap). The value is everything *around* the model, and it applies whether the model behind it is open-weight or a frontier one you've pointed Keystone at:
+Keystone isn't a claim that its self-hosted open-weight models currently out-code the frontier models — they don't, not yet honestly measured at scale (see [Run the benchmark suite](#run-the-benchmark-suite) for the real, unfiltered numbers on that gap). The value is everything *around* the model, and it applies whether the model behind it is open-weight or a frontier one you've pointed Keystone at:
 
 | | Calling a frontier API / agent product directly | Keystone |
 |---|---|---|
@@ -50,7 +50,7 @@ Keystone isn't a claim that its self-hosted open-weight models currently out-cod
 | Multi-tenant controls | Bring your own wrapper | Built in: tenants, per-user roles, per-tenant rate limits/token budgets, and an audit log on every task/memory/admin action |
 | Model lock-in | Whatever that product ships | Any open-weight model is a config change (`src/inference/model_router.py`), and the same gateway can front a frontier model instead (`benchmarks/frontier_proxy.py`) — the deterministic verification layer around it doesn't change either way |
 
-In short: if you want frontier-quality output, Keystone can still give it to you (point `benchmarks/frontier_proxy.py` at Claude, as [Watch it write code](#watch-it-write-code) does) — but wrapped in a deterministic, self-hosted, auditable pipeline that a raw API call doesn't give you, with a real path to running entirely on your own open-weight, fine-tuned model once that pipeline has proven itself on your repos.
+In short: if you want frontier-quality output, Keystone can still give it to you (point `benchmarks/frontier_proxy.py` at a frontier model, as [Watch it write code](#watch-it-write-code) does) — but wrapped in a deterministic, self-hosted, auditable pipeline that a raw API call doesn't give you, with a real path to running entirely on your own open-weight, fine-tuned model once that pipeline has proven itself on your repos.
 
 ---
 
@@ -70,7 +70,7 @@ In short: if you want frontier-quality output, Keystone can still give it to you
   - [Fine-tune on your code](#fine-tune-on-your-code)
 - [Deterministic coding agents](#deterministic-coding-agents)
   - [Watch it write code](#watch-it-write-code)
-  - [Interactive terminal](#interactive-terminal--use-it-just-like-claude-code-or-the-codex-cli)
+  - [Interactive terminal](#interactive-terminal--use-it-just-like-the-codex-cli-and-similar-terminal-agents)
   - [Submit a background task](#submit-a-background-task)
   - [Connect your own git server](#connect-your-own-git-server)
   - [Redact PII before it reaches a frontier model](#redact-pii-before-it-reaches-a-frontier-model)
@@ -133,7 +133,7 @@ The gateway (`VLLM` in the diagram) is feature 1 — it also serves plain chat c
 | Postgres, Redis/Valkey, Qdrant | Everything | Started for you by `make up` — nothing to install separately |
 | Sandbox daemon (`keystoned`) | Deterministic coding agents (not plain chat completions) | Runs sandboxed git clones/tool calls/tests; gVisor by default, no KVM needed. `make sandbox-images` builds its runtime image — required before the first task |
 | **A git host** | Deterministic coding agents (chat-only use doesn't need one) | Keystone never invents a repo to work in — point it at your own git server, or run [Gitea](https://gitea.io) (MIT) in five minutes for a local/test one. See [Connect your own git server](#connect-your-own-git-server) |
-| **A coding model** | Both features | Either (a) GPUs running vLLM — see [Models](#models) for real VRAM numbers, or (b) **no GPU at all**: `benchmarks/frontier_proxy.py` puts a real frontier model (Claude, today) behind the same OpenAI-compatible interface — this is what [Watch it write code](#watch-it-write-code) below uses |
+| **A coding model** | Both features | Either (a) GPUs running vLLM — see [Models](#models) for real VRAM numbers, or (b) **no GPU at all**: `benchmarks/frontier_proxy.py` puts a real frontier model (one vendor's API, today) behind the same OpenAI-compatible interface — this is what [Watch it write code](#watch-it-write-code) below uses |
 
 That's the complete list — no managed SaaS dependency anywhere in it (see [Tech stack](#tech-stack--open-source-only-no-managed-saas)).
 
@@ -177,7 +177,7 @@ curl http://localhost:8080/health
 # or, for a fuller diagnostic (git host, package mirrors, secret strength too): keystone doctor
 ```
 
-Expected output from step 6 is a JSON body with `"status": "ok"` and a `components` map showing each backing service (`postgres`, `redis`, `qdrant`, `vllm_coding`, ...) as `healthy` or `unhealthy` — an `unhealthy` vLLM component just means no model endpoint is reachable yet, which is expected until you've pointed one at real GPUs or an external endpoint.
+Expected output from step 6 is a JSON body with `"status": "healthy"` (or `"degraded"` while any component is down) and a `components` map showing each backing service (`postgres`, `redis`, `qdrant`, `vllm_coding`, ...) as `healthy` or `unhealthy` — an `unhealthy` vLLM component just means no model endpoint is reachable yet, which is expected until you've pointed one at real GPUs or an external endpoint.
 
 Then open the live UI and watch an agent actually work:
 
@@ -238,7 +238,7 @@ FRONTIER_PROXY_MODEL=claude-sonnet-4-6 python -m benchmarks.frontier_proxy   # a
 export VLLM_CODING_URL=http://localhost:8090/v1   # or VLLM_CODING_FALLBACK_URL / VLLM_REASONING_URL
 ```
 
-`benchmarks/frontier_proxy.py` translates the exact OpenAI-compatible wire protocol every Keystone call site already speaks to and from the real Anthropic Messages API — one environment variable, no code change, and the model swap is exactly this simple whether you point it at Claude Opus, Sonnet, or a future Claude model. **Honestly, not there yet**: only Anthropic is wired up today — a different frontier vendor would mean writing a second translation module alongside `frontier_proxy.py` (real work, not a config flag), not something this repo currently supports out of the box.
+`benchmarks/frontier_proxy.py` translates the exact OpenAI-compatible wire protocol every Keystone call site already speaks to and from the real Anthropic Messages API — one environment variable, no code change, and the model swap is exactly this simple whichever of that vendor's models you point it at. **Honestly, not there yet**: only Anthropic is wired up today — a different frontier vendor would mean writing a second translation module alongside `frontier_proxy.py` (real work, not a config flag), not something this repo currently supports out of the box.
 
 ### Distributed serving
 
@@ -287,7 +287,7 @@ keystone finetune rollback <job-id>    # retire it — routing falls back to the
 
 Once a job completes, promoting it writes a real row to the adapter registry (`ModelAdapter` — tenant, base model, path, status, one `is_default` per tenant+base-model) and every real inference call site — chat completions, the coding/review/planning nodes, extraction — resolves and routes to it automatically (`src/inference/model_router.py`), with the matching `--enable-lora --lora-modules ...` flags emitted for vLLM to actually serve it (`src/inference/config.py`).
 
-> **Where this genuinely stands today**: all of the above is real and covered by tests against real Postgres/Redis — including a CPU LoRA smoke run with a 0.5B model proving the trainer→registry→router path end to end in this GPU-less dev environment. Two things are still open, honestly: no adapter has been trained on real GPU hardware yet (the trainers use `bitsandbytes` 4-bit quantization, which needs one), and promotion is currently a manual human decision — the plan's "only promote if it measurably beats base+RAG on held-out tasks" auto-verdict gate isn't wired up yet. See `ROADMAP.md`'s Phase 5.
+> **Where this genuinely stands today**: the adapter registry, promote/rollback, and per-tenant routing are real and covered by tests against real Postgres/Redis. The trainers themselves are real code but **no automated test executes one yet** — a CPU smoke run on a 0.5B model is the next step (and torch/peft/trl are not installed in this repo's default dev environment). Also still open, honestly: no adapter has been trained on real GPU hardware, the guided "describe → plan & cost → approve" path that wires the data sources into a job isn't built, and promotion is a manual human decision — the "only promote if it measurably beats base+RAG on held-out tasks" verdict gate isn't wired up. See `ROADMAP.md`'s Phase 5.
 
 ---
 
@@ -338,9 +338,9 @@ open http://localhost:8080/app/    # live plan → tool calls → quality gates 
 
 What happens next is the real agent loop, not a canned response: it clones the repo into a sandbox, reads and greps the real code, writes a patch with real tools, runs lint/typecheck/security scanners, gets reviewed by a second model pass, runs the repo's real test suite, and — only if every one of those actually passed — commits, pushes a branch, and opens a real pull request for you to read like any other contributor's PR.
 
-### Interactive terminal — use it just like Claude Code or the Codex CLI
+### Interactive terminal — use it just like the Codex CLI and similar terminal agents
 
-Prefer driving the agent turn by turn from your own terminal, in your own working copy of the repo, instead of submitting a task and walking away? [OpenCode](https://github.com/sst/opencode) ships pre-configured against Keystone (`cli/opencode.config.json`) — same interactive experience as Claude Code or the Codex CLI, same real tools underneath, just pointed at your self-hosted models instead of a vendor's:
+Prefer driving the agent turn by turn from your own terminal, in your own working copy of the repo, instead of submitting a task and walking away? [OpenCode](https://github.com/sst/opencode) ships pre-configured against Keystone (`cli/opencode.config.json`) — same interactive experience as the Codex CLI and similar terminal agents, same real tools underneath, just pointed at your self-hosted models instead of a vendor's:
 
 ```bash
 export KEYSTONE_INFERENCE_URL=http://localhost:8080
@@ -395,7 +395,7 @@ GIT_HOST_TOKEN=<a bot account token with push + PR permissions>
 export FRONTIER_PROXY_REDACT_PII=1
 ```
 
-`src/security/pii_redaction.py` is real, deterministic regex-based detection — not an ML/NER classifier, which is a deliberate trade-off (predictable, auditable, no extra model dependency to bundle air-gapped) at the honest cost of missing PII with no fixed format (names, addresses, free-text details). Off by default: redaction is a real content change, and a legitimate task can genuinely need the real value (a test fixture with a literal phone number, say) — this is an explicit opt-in, not a silent behavior change for every existing frontier-proxy user. Verified for real: with the flag on, a live request's real email/phone were confirmed redacted before the request reached Claude (`frontier_proxy.pii_redacted` in the proxy's own logs); with it off, the same request's real value round-tripped through the model unchanged.
+`src/security/pii_redaction.py` is real, deterministic regex-based detection — not an ML/NER classifier, which is a deliberate trade-off (predictable, auditable, no extra model dependency to bundle air-gapped) at the honest cost of missing PII with no fixed format (names, addresses, free-text details). Off by default: redaction is a real content change, and a legitimate task can genuinely need the real value (a test fixture with a literal phone number, say) — this is an explicit opt-in, not a silent behavior change for every existing frontier-proxy user. Verified for real: with the flag on, a live request's real email/phone were confirmed redacted before the request reached the frontier model (`frontier_proxy.pii_redacted` in the proxy's own logs); with it off, the same request's real value round-tripped through the model unchanged.
 
 ### Run the benchmark suite
 
@@ -436,14 +436,14 @@ python -m benchmarks.eval_prompt --prompt-file task_prompt.txt --language python
 python -m benchmarks.agent_runner --task token_bucket --max-iterations 8
 ```
 
-To use a real frontier model as the coding backend for this, `benchmarks/frontier_proxy.py` translates `src/inference/client.py`'s exact OpenAI-compatible wire protocol to and from the real Anthropic Messages API — point `VLLM_CODING_URL` at it and the unmodified orchestrator runs against Claude:
+To use a real frontier model as the coding backend for this, `benchmarks/frontier_proxy.py` translates `src/inference/client.py`'s exact OpenAI-compatible wire protocol to and from the real Anthropic Messages API — point `VLLM_CODING_URL` at it and the unmodified orchestrator runs against the frontier model:
 
 ```bash
 FRONTIER_PROXY_MODEL=claude-opus-4-6 python -m benchmarks.frontier_proxy   # serves on :8090
 export VLLM_CODING_URL=http://localhost:8090/v1
 ```
 
-**Run for real** against a live Gitea, a live sandbox, and Claude: the seeded `token_bucket` task (a token-bucket rate limiter whose `_refill()` doesn't cap tokens at capacity) was **solved in 67.6s across 5 iterations** — real planning, real tool-based coding, real quality gates, real review, real tests, a real push, and a real PR opened — independently confirmed by cloning the pushed branch in a *fresh* sandbox and re-running both the fail-to-pass and pass-to-pass tests, both passing. Requires `GIT_HOST_API_URL`/`GIT_HOST_TOKEN`/`GIT_ALLOWED_HOSTS` pointed at a real Gitea reachable from inside a sandbox (see `tests/test_git_workflow_integration.py`'s module docstring for how to stand one up).
+**Run for real** against a live Gitea, a live sandbox, and a frontier model: the seeded `token_bucket` task (a token-bucket rate limiter whose `_refill()` doesn't cap tokens at capacity) was **solved in 67.6s across 5 iterations** — real planning, real tool-based coding, real quality gates, real review, real tests, a real push, and a real PR opened — independently confirmed by cloning the pushed branch in a *fresh* sandbox and re-running both the fail-to-pass and pass-to-pass tests, both passing. Requires `GIT_HOST_API_URL`/`GIT_HOST_TOKEN`/`GIT_ALLOWED_HOSTS` pointed at a real Gitea reachable from inside a sandbox (see `tests/test_git_workflow_integration.py`'s module docstring for how to stand one up).
 
 **Still honestly incomplete**: only one repo task exists so far (the plan calls for 10–20), there's no persisted comparison sweep yet (base vs. base+RAG vs. fine-tuned vs. frontier, all through this same harness), and no web UI comparison panel — see `ROADMAP.md`'s Phase 6.
 

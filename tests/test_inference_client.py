@@ -56,11 +56,16 @@ async def fake_server():
     base_url = f"http://127.0.0.1:{port}"
     try:
         async with httpx.AsyncClient() as probe:
-            for _ in range(50):
+            # httpx.TransportError, not just ConnectError: while uvicorn is
+            # still binding, a probe can also fail with ConnectTimeout (seen
+            # for real on a slow CI runner), and that subclass is *not* a
+            # ConnectError — letting it escape here errors the whole test
+            # at fixture setup instead of simply retrying.
+            for _ in range(60):
                 try:
-                    await probe.get(f"{base_url}/last_payload", timeout=0.2)
+                    await probe.get(f"{base_url}/last_payload", timeout=1.0)
                     break
-                except httpx.ConnectError:
+                except httpx.TransportError:
                     await asyncio.sleep(0.1)
             else:
                 raise RuntimeError("fake_vllm_server did not start in time")
