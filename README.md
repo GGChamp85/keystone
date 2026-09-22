@@ -24,15 +24,15 @@ Keystone runs entirely on infrastructure you own. No model weights, code, or tel
 
 ## Deploy anywhere — laptop, cloud GPUs, or fully air-gapped
 
-Every tier below runs the exact same code — `docker-compose.yml` for a single box, the same Helm chart scaled up for the rest. Move between them by changing config, not by re-platforming.
+Every tier below runs the exact same code — `docker-compose.yml` for a single box, the same Helm chart scaled up for the rest. Move between them by changing config, not by re-platforming. Each has its own step-by-step guide:
 
-| Tier | GPUs | Network | How |
+| Tier | GPUs | Network | Step-by-step guide |
 |---|---|---|---|
-| Laptop, no GPU | None — point the coding role at a real frontier model instead (`benchmarks/frontier_proxy.py`) | Normal internet | `docker-compose.yml` via `make up` — see [Run it locally in 10 minutes](#run-it-locally-in-10-minutes) |
-| Cloud GPUs (RunPod) | Real multi-GPU, rented by the hour — no upfront hardware purchase | Normal internet | `infra/opentofu/environments/runpod-test/` + `helm/keystone/values-runpod-test.yaml` |
-| Your own VPC / on-prem, air-gapped | Real multi-GPU/multi-node hardware you own, sized per [Models](#models) | **Zero internet egress** after the offline bundle is imported | `helm/keystone/` chart + `helm/keystone/values-client-vpc.yaml`, built via `airgap/*.sh` — see [Deploy air-gapped](#deploy-air-gapped) |
+| **Locally** — laptop, no GPU required | None — point the coding role at a real frontier model instead (`benchmarks/frontier_proxy.py`) | Normal internet | [Run it locally in 10 minutes](#run-it-locally-in-10-minutes) |
+| **RunPod** — cloud GPUs, rented by the hour | Real GPU(s), no upfront hardware purchase | Normal internet | [`docs/deployment/RUNPOD_SETUP.md`](docs/deployment/RUNPOD_SETUP.md) |
+| **Cloud VPC or on-prem** — production, your own Kubernetes cluster | Real multi-GPU/multi-node hardware you own or rent, sized per [Models](#models) | Normal internet, or **zero egress** if you also follow the air-gap bundle steps | [`docs/deployment/KUBERNETES_CLIENT_VPC.md`](docs/deployment/KUBERNETES_CLIENT_VPC.md) — add [Deploy air-gapped](#deploy-air-gapped) on top for zero internet egress after bring-up |
 
-Model serving itself scales the same way across every tier: from one GPU to real multi-node pipeline-parallel serving (`nodeCount` > 1) for a model too large for one node's GPU pool, and from one replica to KEDA-based autoscaling on real queue depth — see [Distributed serving](#distributed-serving). And because every container image, Python wheel, npm package, and model weight the platform needs bundles through the same `airgap/` scripts, the air-gapped tier isn't a stripped-down mode — it's the identical deployment with the network cable pulled.
+Model serving itself scales the same way across every tier: from one GPU to real multi-node pipeline-parallel serving (`nodeCount` > 1) for a model too large for one node's GPU pool, and from one replica to KEDA-based autoscaling on real queue depth — see [Distributed serving](#distributed-serving). And because every container image, Python wheel, npm package, and model weight the platform needs bundles through the same `airgap/` scripts, the air-gapped path isn't a stripped-down mode — it's the identical Cloud VPC / on-prem deployment with the network cable pulled.
 
 ---
 
@@ -64,13 +64,14 @@ In short: if you want frontier-quality output, Keystone can still give it to you
 - [Open-weight model inference](#open-weight-model-inference)
   - [Chat completions](#chat-completions-openai-compatible)
   - [Models](#models)
+  - [Add a new model](#add-a-new-model)
   - [Distributed serving](#distributed-serving)
   - [Bring your own repos and data](#bring-your-own-repos-and-data)
   - [Fine-tune on your code](#fine-tune-on-your-code)
 - [Deterministic coding agents](#deterministic-coding-agents)
   - [Watch it write code](#watch-it-write-code)
+  - [Interactive terminal](#interactive-terminal--use-it-just-like-claude-code-or-the-codex-cli)
   - [Submit a background task](#submit-a-background-task)
-  - [Interactive terminal session](#interactive-terminal-session)
   - [Connect your own git server](#connect-your-own-git-server)
   - [Run the benchmark suite](#run-the-benchmark-suite)
 - [Deploy air-gapped](#deploy-air-gapped)
@@ -216,6 +217,28 @@ curl -X POST http://localhost:8080/v1/chat/completions \
 
 Swapping in a different open-weight model is a config change, not a code change — see `src/inference/config.py` and `src/inference/model_router.py`. No GPU at all? `benchmarks/frontier_proxy.py` puts a real frontier model behind this same interface, so the gateway (and the coding agent below) work identically either way.
 
+### Add a new model
+
+Every call site — the gateway, the router, the coding agent — resolves a model by **role** (`coding`, `coding_fallback`, `reasoning`), never by name. Swapping what's behind a role never touches the orchestrator, the agent loop, or the gateway code.
+
+**A different open-weight model, same self-hosted path:**
+
+| Deployment | What actually changes |
+|---|---|
+| Docker Compose (dev tier) | One line in `docker-compose.yml` — the `--model ...` / `--served-model-name ...` flags on the `vllm-coding` / `vllm-coding-fallback` / `vllm-reasoning` service's `command:`. |
+| Kubernetes / Helm (staging, production) | No file edit at all: `helm upgrade ... --set vllm.coding.model=<new-model> --set vllm.coding.servedModelName=<name> --set vllm.coding.toolParser=<parser> --set vllm.coding.image.tag=<tag>` — see `helm/keystone/values.yaml`'s `vllm.coding` block, and `helm/keystone/values-runpod-test.yaml` for a real, working example that does exactly this to run Qwen2.5-Coder-32B on a single test GPU instead of the 8-GPU GLM-5.3-Flash default. |
+
+Either way, set the matching `CODING_MODEL_ID` / `CODING_FALLBACK_MODEL_ID` / `REASONING_MODEL_ID` in `.env` so `/v1/models` and request labeling stay accurate — this is metadata only, `src/inference/model_router.py` never routes on it.
+
+**A frontier model instead, for a role with no self-hosted GPU:**
+
+```bash
+FRONTIER_PROXY_MODEL=claude-sonnet-4-6 python -m benchmarks.frontier_proxy   # any real Anthropic model string
+export VLLM_CODING_URL=http://localhost:8090/v1   # or VLLM_CODING_FALLBACK_URL / VLLM_REASONING_URL
+```
+
+`benchmarks/frontier_proxy.py` translates the exact OpenAI-compatible wire protocol every Keystone call site already speaks to and from the real Anthropic Messages API — one environment variable, no code change, and the model swap is exactly this simple whether you point it at Claude Opus, Sonnet, or a future Claude model. **Honestly, not there yet**: only Anthropic is wired up today — a different frontier vendor would mean writing a second translation module alongside `frontier_proxy.py` (real work, not a config flag), not something this repo currently supports out of the box.
+
 ### Distributed serving
 
 Each role scales along two independent, real axes (`helm/keystone/templates/vllm.yaml`): `replicas` runs N independent full model instances behind a load-balanced Service for horizontal throughput, and `nodeCount` pipeline-parallels a single instance across that many physical nodes for a model too large for one node's GPU pool (vLLM's real Ray-backed multi-node executor). Optional KEDA-based autoscaling scales `replicas` on the real `vllm:num_requests_waiting` queue-depth metric, not a CPU percentage that would never trigger on a GPU-bound workload. All three paths (single-node, multi-node, autoscaling) render through `helm lint`/`helm template` in CI on every PR; the multi-node Ray bootstrap itself hasn't been verified against real multi-node GPU hardware yet — this dev environment has none.
@@ -313,6 +336,24 @@ open http://localhost:8080/app/    # live plan → tool calls → quality gates 
 
 What happens next is the real agent loop, not a canned response: it clones the repo into a sandbox, reads and greps the real code, writes a patch with real tools, runs lint/typecheck/security scanners, gets reviewed by a second model pass, runs the repo's real test suite, and — only if every one of those actually passed — commits, pushes a branch, and opens a real pull request for you to read like any other contributor's PR.
 
+### Interactive terminal — use it just like Claude Code or the Codex CLI
+
+Prefer driving the agent turn by turn from your own terminal, in your own working copy of the repo, instead of submitting a task and walking away? [OpenCode](https://github.com/sst/opencode) ships pre-configured against Keystone (`cli/opencode.config.json`) — same interactive experience as Claude Code or the Codex CLI, same real tools underneath, just pointed at your self-hosted models instead of a vendor's:
+
+```bash
+export KEYSTONE_INFERENCE_URL=http://localhost:8080
+export KEYSTONE_API_KEY=ks-XXXX-XXXXXXXX
+opencode
+```
+
+What's actually wired up, not just a config stub:
+
+- **All three model roles pre-registered** (`cli/opencode.config.json`): `coding` (GLM-5.3-Flash) as the default model, `coding_fallback` (Qwen2.5-Coder-32B) as OpenCode's own small/fast model, `reasoning` (the critic) available to switch to — `Shift+Tab` cycles manual/auto-mode, same as any other OpenCode provider.
+- **Keystone's memory, live, over real MCP** — `mcp.keystone-memory` is a real Streamable-HTTP MCP server (`src/api/routes/mcp.py`) the session talks to over the network, not a local shell-out; `/memory` (`cli/opencode/commands/memory.md`) and the bundled plugin (`cli/opencode/plugins/keystone-memory.ts`) surface the same per-repo/per-tenant memory the background agent and the web UI's Memory panel read and write, so what a teammate's background task learned shows up in your terminal session too.
+- **Real permission gates, not "trust the model"** — `cli/opencode.config.json`'s `permission` block asks before every edit and every shell command by default, explicitly denies `rm -rf*` and `git push*`, and allowlists only read-only commands (`git status`, `git diff*`, `git log*`, `ls*`, `cat*`, `grep*`) to run without asking.
+
+See `docs/deployment/OPENCODE_SETUP.md` for wiring OpenCode to a non-local Keystone deployment.
+
 ### Submit a background task
 
 The agent clones the repo into a sandbox, explores it with real tools, edits it, runs quality gates and the real test suite, and opens a PR — you submit it and come back to a review, like assigning a task to a contributor:
@@ -328,17 +369,6 @@ curl -X POST http://localhost:8080/v1/keystone/tasks \
     "max_iterations": 10
   }'
 ```
-
-### Interactive terminal session
-
-Prefer a terminal session over a background task — the way you'd use Claude Code or the Codex CLI interactively? [OpenCode](https://github.com/sst/opencode), pre-configured against Keystone (`cli/opencode.config.json`), gives you exactly that: the same real tools and models, but you drive it turn by turn instead of submitting a task and walking away.
-
-```bash
-opencode
-# Provider "Keystone Inference" is pre-registered; Shift+Tab cycles manual/auto-mode.
-```
-
-See `docs/deployment/OPENCODE_SETUP.md` for wiring OpenCode to a non-local Keystone deployment.
 
 ### Connect your own git server
 
@@ -491,6 +521,7 @@ keystone/
 | `docs/airgap/OFFLINE_INSTALL_RUNBOOK.md` | Build → bundle → transfer → import → bring-up, step by step |
 | `docs/architecture/SANDBOX_ARCHITECTURE.md` | How the Firecracker/gVisor sandbox layer actually works |
 | `docs/deployment/KUBERNETES_CLIENT_VPC.md` | Helm install, and what's verified on a real cluster vs. not |
+| `docs/deployment/RUNPOD_SETUP.md` | Step-by-step: real GPU pods on RunPod, wired to the rest of the stack |
 | `docs/deployment/OPENCODE_SETUP.md` | Wiring the interactive CLI to Keystone |
 | `docs/LICENSES_AND_COMPLIANCE.md` | Full license inventory + every real finding that changed the build |
 | `docs/TELEMETRY_AUDIT.md` | Every telemetry-disabling setting, verified inert |
