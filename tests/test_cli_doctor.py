@@ -9,6 +9,8 @@ reporting is real too), no mocked clients.
 
 from __future__ import annotations
 
+import os
+
 import pytest
 from pydantic import SecretStr
 
@@ -21,6 +23,7 @@ from src.cli.doctor import (
     check_postgres,
     check_qdrant,
     check_redis,
+    check_runpod,
     check_sandbox_daemon,
     check_secrets,
 )
@@ -56,6 +59,47 @@ async def test_postgres_check_fails_honestly_against_an_unreachable_port():
     result = await check_postgres(_settings(database_url="postgresql+asyncpg://x:x@localhost:1/nope"))
     assert result.status == CheckStatus.FAIL
     assert "cannot connect" in result.message
+
+
+async def test_runpod_check_skips_when_unconfigured():
+    result = await check_runpod(_settings(runpod_api_key=None, runpod_endpoint_url=None))
+    assert result.status == CheckStatus.SKIP
+
+
+async def test_runpod_check_warns_when_only_the_key_is_set():
+    result = await check_runpod(_settings(runpod_api_key=SecretStr("rpa_not_real"), runpod_endpoint_url=None))
+    assert result.status == CheckStatus.WARN
+    assert "RUNPOD_ENDPOINT_URL is empty" in result.message
+
+
+async def test_runpod_check_warns_when_only_the_url_is_set():
+    result = await check_runpod(
+        _settings(runpod_api_key=None, runpod_endpoint_url="https://api.runpod.ai/v2/x/openai/v1")
+    )
+    assert result.status == CheckStatus.WARN
+    assert "RUNPOD_API_KEY is empty" in result.message
+
+
+async def test_runpod_check_fails_honestly_against_an_unreachable_endpoint():
+    result = await check_runpod(
+        _settings(runpod_api_key=SecretStr("rpa_not_real"), runpod_endpoint_url="http://localhost:1/openai/v1")
+    )
+    assert result.status == CheckStatus.FAIL
+    assert "cannot reach" in result.message
+
+
+@pytest.mark.skipif(
+    not (os.environ.get("RUNPOD_API_KEY") and os.environ.get("RUNPOD_ENDPOINT_URL")),
+    reason="Needs a real RunPod Serverless endpoint: RUNPOD_API_KEY + RUNPOD_ENDPOINT_URL",
+)
+async def test_runpod_check_succeeds_against_the_real_endpoint():
+    result = await check_runpod(
+        _settings(
+            runpod_api_key=SecretStr(os.environ["RUNPOD_API_KEY"]),
+            runpod_endpoint_url=os.environ["RUNPOD_ENDPOINT_URL"],
+        )
+    )
+    assert result.status == CheckStatus.OK, result.message
 
 
 async def test_redis_check_succeeds_against_the_real_test_redis():

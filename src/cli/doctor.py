@@ -125,6 +125,37 @@ async def check_model_endpoint(role: str, url: str) -> CheckResult:
         )
 
 
+async def check_runpod(settings: Settings) -> CheckResult:
+    """
+    RunPod Serverless is optional, so an unconfigured pair is SKIP, not a
+    failure. Half-configured (key without URL, or URL without key) is a
+    WARN naming the missing half — the most common real mistake. When
+    both are present this makes a real authenticated call to the
+    endpoint's OpenAI-compatible `/models` route, which is served by
+    RunPod's endpoint layer rather than a worker, so it answers even when
+    the endpoint has scaled to zero workers — a cold endpoint still
+    reports OK here, and rightly so.
+    """
+    key = settings.runpod_api_key.get_secret_value() if settings.runpod_api_key else ""
+    url = (settings.runpod_endpoint_url or "").rstrip("/")
+    if not key and not url:
+        return CheckResult("RunPod", CheckStatus.SKIP, "RUNPOD_API_KEY/RUNPOD_ENDPOINT_URL not set — fine if unused")
+    if key and not url:
+        return CheckResult("RunPod", CheckStatus.WARN, "RUNPOD_API_KEY is set but RUNPOD_ENDPOINT_URL is empty")
+    if url and not key:
+        return CheckResult("RunPod", CheckStatus.WARN, "RUNPOD_ENDPOINT_URL is set but RUNPOD_API_KEY is empty")
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"{url}/models", headers={"Authorization": f"Bearer {key}"})
+        if resp.status_code == 200:
+            return CheckResult("RunPod", CheckStatus.OK, f"endpoint reachable and authenticated at {url}")
+        if resp.status_code in (401, 403):
+            return CheckResult("RunPod", CheckStatus.FAIL, f"{url} rejected the key (HTTP {resp.status_code})")
+        return CheckResult("RunPod", CheckStatus.WARN, f"{url}/models returned HTTP {resp.status_code}")
+    except Exception as exc:
+        return CheckResult("RunPod", CheckStatus.FAIL, f"cannot reach {url} ({exc})")
+
+
 async def check_git_host(settings: Settings) -> CheckResult:
     if settings.git_host_api_url == "http://gitea.internal.keystone.local:3000/api/v1":
         return CheckResult(
@@ -258,6 +289,7 @@ async def run_all_checks(settings: Settings) -> list[CheckResult]:
         ("reasoning", settings.vllm_reasoning_url),
     ):
         results.append(await check_model_endpoint(role, url))
+    results.append(await check_runpod(settings))
     results.append(await check_git_host(settings))
     results.extend(await check_package_mirrors(settings))
     results.extend(check_secrets(settings))

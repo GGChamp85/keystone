@@ -91,6 +91,22 @@ class Settings(BaseSettings):
     vllm_coding_fallback_url: str = "http://vllm-coding-fallback:8000/v1"
     vllm_reasoning_url: str = "http://vllm-reasoning:8000/v1"
 
+    # Optional per-role bearer token, sent as `Authorization: Bearer ...` on
+    # every request to that role's endpoint. A self-hosted in-cluster vLLM
+    # needs none; a hosted OpenAI-compatible endpoint (RunPod Serverless's
+    # worker-vllm, for instance) requires one.
+    vllm_coding_api_key: SecretStr | None = None
+    vllm_coding_fallback_api_key: SecretStr | None = None
+    vllm_reasoning_api_key: SecretStr | None = None
+
+    # ── RunPod Serverless (see docs/deployment/RUNPOD_SETUP.md) ───────
+    # RUNPOD_API_KEY authenticates both the endpoint's OpenAI-compatible
+    # base URL (https://api.runpod.ai/v2/<ENDPOINT_ID>/openai/v1) and its
+    # management API. Point a role at the endpoint by setting that role's
+    # VLLM_*_URL to the base URL and VLLM_*_API_KEY to this same key.
+    runpod_api_key: SecretStr | None = None
+    runpod_endpoint_url: str | None = None
+
     # GLM-5.3-Flash (zai-org, MIT) — primary coding model as of the Phase 0
     # model refresh; Qwen2.5-Coder-32B-Instruct moved to coding_fallback_model_id
     # (src/inference/model_router.py's fallback chain), used when the primary
@@ -193,6 +209,19 @@ class Settings(BaseSettings):
             "coding": self.coding_model_id,
             "coding_fallback": self.coding_fallback_model_id,
             "reasoning": self.reasoning_model_id,
+        }
+
+    @property
+    def model_api_key_map(self) -> dict[str, str | None]:
+        """Map model role → bearer token for that role's endpoint (None when the endpoint needs none)."""
+
+        def _plain(value: SecretStr | None) -> str | None:
+            return value.get_secret_value() if value is not None else None
+
+        return {
+            "coding": _plain(self.vllm_coding_api_key),
+            "coding_fallback": _plain(self.vllm_coding_fallback_api_key),
+            "reasoning": _plain(self.vllm_reasoning_api_key),
         }
 
 

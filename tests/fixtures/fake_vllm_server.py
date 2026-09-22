@@ -14,7 +14,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 app = FastAPI()
-state = {"call_count": 0, "fail_with_429_times": 0, "last_payload": None}
+state = {"call_count": 0, "fail_with_429_times": 0, "last_payload": None, "last_headers": None}
 
 
 @app.post("/reset")
@@ -23,6 +23,7 @@ async def reset(req: Request):
     state["call_count"] = 0
     state["fail_with_429_times"] = body.get("fail_with_429_times", 0)
     state["last_payload"] = None
+    state["last_headers"] = None
     return {"ok": True}
 
 
@@ -31,11 +32,20 @@ async def last_payload():
     return state["last_payload"] or {}
 
 
+@app.get("/last_headers")
+async def last_headers():
+    """The real request headers the last /chat/completions call arrived
+    with — lets a test prove a bearer token actually reached the server
+    rather than trusting that the client set it."""
+    return state["last_headers"] or {}
+
+
 @app.post("/chat/completions")
 async def chat_completions(req: Request):
     payload = await req.json()
     state["call_count"] += 1
     state["last_payload"] = payload
+    state["last_headers"] = {k.lower(): v for k, v in req.headers.items()}
 
     if state["call_count"] <= state["fail_with_429_times"]:
         return JSONResponse(status_code=429, content={"error": "rate limited"})

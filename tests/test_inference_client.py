@@ -93,6 +93,36 @@ async def test_exhausted_retries_surface_the_real_exception_not_a_retry_wrapper(
         await client.close()
 
 
+async def test_bearer_token_reaches_the_server_when_api_key_is_set(fake_server):
+    """A hosted OpenAI-compatible endpoint (RunPod Serverless's worker-vllm)
+    authenticates with a bearer token — proven here by reading back the
+    real headers the server received, not by inspecting the client."""
+    async with httpx.AsyncClient() as h:
+        await h.post(f"{fake_server}/reset", json={})
+    client = InferenceClient(base_url=fake_server, model_id="test-model", api_key="rpa_test_token")
+    try:
+        await client.complete(messages=[{"role": "user", "content": "hi"}], max_tokens=8)
+        async with httpx.AsyncClient() as h:
+            seen = (await h.get(f"{fake_server}/last_headers")).json()
+        assert seen.get("authorization") == "Bearer rpa_test_token"
+    finally:
+        await client.close()
+
+
+async def test_no_authorization_header_is_sent_without_an_api_key(fake_server):
+    """An in-cluster vLLM needs no token, so none must be invented."""
+    async with httpx.AsyncClient() as h:
+        await h.post(f"{fake_server}/reset", json={})
+    client = InferenceClient(base_url=fake_server, model_id="test-model")
+    try:
+        await client.complete(messages=[{"role": "user", "content": "hi"}], max_tokens=8)
+        async with httpx.AsyncClient() as h:
+            seen = (await h.get(f"{fake_server}/last_headers")).json()
+        assert "authorization" not in seen
+    finally:
+        await client.close()
+
+
 async def test_tools_and_tool_choice_reach_the_server_and_tool_calls_parse(fake_server):
     async with httpx.AsyncClient() as h:
         await h.post(f"{fake_server}/reset", json={})

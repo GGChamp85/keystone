@@ -56,11 +56,16 @@ class InferenceClient:
     One instance per model endpoint.
     """
 
-    def __init__(self, base_url: str, model_id: str, timeout: float = 120.0):
+    def __init__(self, base_url: str, model_id: str, timeout: float = 120.0, api_key: str | None = None):
         self.base_url = base_url.rstrip("/")
         self.model_id = model_id
+        # A hosted OpenAI-compatible endpoint (RunPod Serverless's worker-vllm,
+        # for instance) authenticates every request with a bearer token; an
+        # in-cluster vLLM needs none, so the header is only set when given.
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else None
         self._client = httpx.AsyncClient(
             base_url=self.base_url,
+            headers=headers,
             timeout=httpx.Timeout(timeout, connect=10.0),
             limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
         )
@@ -300,6 +305,7 @@ def get_inference_client(role: str) -> InferenceClient:
         _clients[role] = InferenceClient(
             base_url=endpoints[role],
             model_id=model_ids[role],
+            api_key=settings.model_api_key_map[role],
         )
 
     return _clients[role]
