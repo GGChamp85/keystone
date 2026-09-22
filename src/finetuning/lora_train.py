@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 
 import structlog
 
+from src.finetuning._common import warmup_kwargs
+
 logger = structlog.get_logger(__name__)
 
 
@@ -41,6 +43,9 @@ class LoRATrainingConfig:
     )
     learning_rate: float = 2e-4
     num_epochs: int = 3
+    # When set, overrides num_epochs with a hard optimizer-step budget — what a
+    # bounded smoke run and a cost-estimated guided run both need.
+    max_steps: int | None = None
     per_device_batch_size: int = 4
     gradient_accumulation_steps: int = 4
     warmup_ratio: float = 0.03
@@ -107,7 +112,10 @@ def run_lora_training(config: LoRATrainingConfig) -> dict:
         device_map="auto",
         trust_remote_code=True,
         token=config.hf_token,
-        torch_dtype=torch.bfloat16 if config.bf16 else torch.float16,
+        # Match the weights dtype to the requested mixed-precision mode; with
+        # neither fp16 nor bf16 set (a CPU run, for instance) the weights must
+        # be float32 — forcing float16 there is what made CPU training fail.
+        torch_dtype=torch.bfloat16 if config.bf16 else (torch.float16 if config.fp16 else torch.float32),
     )
 
     if config.use_4bit:
@@ -148,10 +156,11 @@ def run_lora_training(config: LoRATrainingConfig) -> dict:
     training_args = TrainingArguments(
         output_dir=config.output_dir,
         num_train_epochs=config.num_epochs,
+        max_steps=config.max_steps if config.max_steps else -1,  # -1 = "use num_train_epochs"
         per_device_train_batch_size=config.per_device_batch_size,
         gradient_accumulation_steps=config.gradient_accumulation_steps,
         learning_rate=config.learning_rate,
-        warmup_ratio=config.warmup_ratio,
+        **warmup_kwargs(config.warmup_ratio, TrainingArguments),
         fp16=config.fp16,
         bf16=config.bf16,
         logging_steps=config.logging_steps,

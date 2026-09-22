@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 
 import structlog
 
+from src.finetuning._common import warmup_kwargs
+
 logger = structlog.get_logger(__name__)
 
 
@@ -130,7 +132,7 @@ def run_dpo_training(config: DPOTrainingConfig) -> dict:
         per_device_train_batch_size=config.per_device_batch_size,
         gradient_accumulation_steps=config.gradient_accumulation_steps,
         learning_rate=config.learning_rate,
-        warmup_ratio=config.warmup_ratio,
+        **warmup_kwargs(config.warmup_ratio, DPOConfig),
         bf16=config.bf16,
         logging_steps=config.logging_steps,
         save_steps=config.save_steps,

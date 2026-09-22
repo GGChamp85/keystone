@@ -107,6 +107,30 @@ jobs:
         if: failure()
         run: cat sandbox-daemon.log
 
+  train-smoke:
+    name: Trainer smoke (real LoRA run on a 0.5B model, CPU, Python 3.12)
+    runs-on: ubuntu-latest
+    env:
+      KEYSTONE_TRAINING_SMOKE: "1"
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      TOKENIZERS_PARALLELISM: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Cache the Hugging Face hub (the 0.5B base model, ~1 GB, downloaded once)
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-hub-Qwen2.5-Coder-0.5B-Instruct
+      - name: Install the training stack (CPU torch + the `finetuning` extra — the same set docker/training.Dockerfile installs)
+        run: |
+          pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[finetuning,dev]"
+      - name: Run the real trainer smoke
+        run: python -m pytest tests/test_trainer_smoke.py -v --tb=short
+
   helm:
     name: Helm lint + template
     runs-on: ubuntu-latest
