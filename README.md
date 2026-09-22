@@ -393,6 +393,17 @@ python -m benchmarks.run_benchmark --gpu-count 4 --gpu-hourly-cost 1.89 --gpu-to
 
 Each task in `benchmarks/tasks/` is scored by actually executing the model's completion in a real self-hosted sandbox (gVisor) — no LLM-as-judge, no heuristic string match, just the real test command's real exit code — and the runner reports pass rate alongside a real token-cost comparison (self-hosted GPU-time vs. any frontier model you included). Requires `SANDBOX_DAEMON_URL` reachable and either `VLLM_CODING_URL` reachable or `--with-frontier` with a key set; with neither, it reports "no models available" rather than fabricating a result.
 
+**Want to eval one specific prompt right now, instead of writing a task file first?** `benchmarks/eval_prompt.py` runs a single ad hoc prompt through Keystone Inference and any configured frontier models side by side — raw completions and real token cost with no test given, or real pass/fail if you hand it a real test too:
+
+```bash
+# Unscored — just compare completions and cost for one prompt
+python -m benchmarks.eval_prompt --prompt "Write a Python LRU cache with O(1) get/put" --with-frontier
+
+# Scored — real pass/fail via a real sandboxed test, same scoring path as the task suite above
+python -m benchmarks.eval_prompt --prompt-file task_prompt.txt --language python \
+  --test-code-file test_solution.py --test-command "pytest test_solution.py" --with-frontier
+```
+
 **A real run, from this repo's own development environment** (no GPU available here, so `keystone-inference` fails honestly rather than being skipped or faked; `--with-frontier` was set with a real `ANTHROPIC_API_KEY`):
 
 | Model | Pass rate | Notes |
