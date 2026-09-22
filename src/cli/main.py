@@ -40,8 +40,12 @@ from src.config import get_settings
 app = typer.Typer(add_completion=False, help="Keystone — self-hosted LLM inference & autonomous coding agents.")
 memory_app = typer.Typer(add_completion=False, help="Inspect and manage what the agent has learned.")
 finetune_app = typer.Typer(add_completion=False, help="Start and manage fine-tuning jobs.")
+tenants_app = typer.Typer(add_completion=False, help="Bootstrap tenants (KEYSTONE_ROOT_ADMIN_TOKEN required).")
+users_app = typer.Typer(add_completion=False, help="Manage tenant users (KEYSTONE_ROOT_ADMIN_TOKEN required).")
 app.add_typer(memory_app, name="memory")
 app.add_typer(finetune_app, name="finetune")
+app.add_typer(tenants_app, name="tenants")
+app.add_typer(users_app, name="users")
 
 console = Console()
 error_console = Console(stderr=True, style="bold red")
@@ -63,24 +67,39 @@ def _api_key() -> str:
     return key
 
 
-def _client() -> httpx.Client:
+def _admin_token() -> str:
+    token = os.environ.get("KEYSTONE_ROOT_ADMIN_TOKEN")
+    if not token:
+        error_console.print(
+            "KEYSTONE_ROOT_ADMIN_TOKEN is not set — this is the bootstrap token from .env, not a tenant API key."
+        )
+        raise typer.Exit(code=1)
+    return token
+
+
+def _client(*, admin: bool = False) -> httpx.Client:
+    token = _admin_token() if admin else _api_key()
     return httpx.Client(
         base_url=_base_url(),
-        headers={"Authorization": f"Bearer {_api_key()}"},
+        headers={"Authorization": f"Bearer {token}"},
         timeout=30.0,
     )
 
 
-def _request(method: str, path: str, **kwargs) -> httpx.Response:
+def _request(method: str, path: str, *, admin: bool = False, **kwargs) -> httpx.Response:
     try:
-        with _client() as client:
+        with _client(admin=admin) as client:
             resp = client.request(method, path, **kwargs)
     except httpx.ConnectError as exc:
         error_console.print(f"Could not reach {_base_url()}: {exc}")
         raise typer.Exit(code=1) from exc
 
     if resp.status_code == 401:
-        error_console.print("Unauthorized — check KEYSTONE_API_KEY.")
+        which = "KEYSTONE_ROOT_ADMIN_TOKEN" if admin else "KEYSTONE_API_KEY"
+        error_console.print(f"Unauthorized — check {which}.")
+        raise typer.Exit(code=1)
+    if resp.status_code == 409:
+        error_console.print(f"Conflict: {resp.text}")
         raise typer.Exit(code=1)
     if resp.status_code == 404:
         error_console.print("Not found.")
@@ -321,6 +340,83 @@ def finetune_watch(job_id: Annotated[str, typer.Argument()]):
     except httpx.ConnectError as exc:
         error_console.print(f"Could not reach {_base_url()}: {exc}")
         raise typer.Exit(code=1) from exc
+
+
+@tenants_app.command("create")
+def tenant_create(
+    name: Annotated[str, typer.Argument()],
+    email: Annotated[str, typer.Argument()],
+    tier: Annotated[str, typer.Option(help="free | pro | enterprise")] = "free",
+):
+    """Create a new tenant — the real bootstrap step every API key/user belongs to."""
+    body = {"name": name, "email": email, "tier": tier}
+    tenant = _request_one("POST", "/v1/admin/tenants", admin=True, json=body)
+    console.print(f"[green]Created tenant[/green] {tenant['id']}  ({tenant['name']}, {tenant['tier']})")
+
+
+@tenants_app.command("list")
+def tenant_list():
+    """List every tenant on this deployment."""
+    # No list-all-tenants route exists yet (only per-tenant sub-resources) —
+    # this is a real, honest gap, not a bug: say so instead of pretending.
+    error_console.print(
+        "No GET /v1/admin/tenants (list-all) route exists yet — only per-tenant "
+        "sub-resources (keys, users) are listable today. See ROADMAP.md's Phase 7."
+    )
+    raise typer.Exit(code=1)
+
+
+@app.command("keys-create")
+def keys_create(
+    tenant_id: Annotated[str, typer.Argument()],
+    name: Annotated[str, typer.Option()] = "default",
+    scopes: Annotated[str, typer.Option(help="Comma-separated, e.g. inference,agent,finetune")] = "inference,agent",
+    expires_in_days: Annotated[int | None, typer.Option()] = None,
+):
+    """Create a real API key for a tenant — prints the key exactly once, like every other real API-key flow."""
+    body = {
+        "name": name,
+        "scopes": [s.strip() for s in scopes.split(",") if s.strip()],
+        "expires_in_days": expires_in_days,
+    }
+    key = _request_one("POST", f"/v1/admin/tenants/{tenant_id}/keys", admin=True, json=body)
+    console.print(f"[green]Created key[/green] {key['name']} ({key['key_prefix']}...)")
+    console.print(f"[bold yellow]{key['key']}[/bold yellow]  [dim](save this — it will not be shown again)[/dim]")
+
+
+@users_app.command("add")
+def user_add(
+    tenant_id: Annotated[str, typer.Argument()],
+    name: Annotated[str, typer.Argument()],
+    email: Annotated[str, typer.Argument()],
+    role: Annotated[str, typer.Option(help="admin | lead | developer")] = "developer",
+):
+    """Add a user to a tenant — real identity attribution on every task/memory action they take."""
+    body = {"name": name, "email": email, "role": role}
+    user = _request_one("POST", f"/v1/admin/tenants/{tenant_id}/users", admin=True, json=body)
+    console.print(f"[green]Added user[/green] {user['id']}  ({user['name']} <{user['email']}>, {user['role']})")
+
+
+def _users_table(users: list[dict]) -> Table:
+    table = Table(show_lines=False)
+    table.add_column("ID", style="dim", no_wrap=True)
+    table.add_column("Name")
+    table.add_column("Email")
+    table.add_column("Role")
+    table.add_column("Active")
+    for u in users:
+        table.add_row(str(u["id"])[:8], u["name"], u["email"], u["role"], "yes" if u["is_active"] else "no")
+    return table
+
+
+@users_app.command("list")
+def user_list(tenant_id: Annotated[str, typer.Argument()]):
+    """List every user on a tenant."""
+    users = _request_many("GET", f"/v1/admin/tenants/{tenant_id}/users", admin=True)
+    if not users:
+        console.print("No users found.")
+        return
+    console.print(_users_table(users))
 
 
 @app.command("init")
