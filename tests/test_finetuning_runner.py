@@ -143,10 +143,14 @@ async def test_start_finetune_job_really_runs_in_the_background_via_the_asyncio_
 
     await start_finetune_job(jid)
 
+    # Real, previously-flaky race: breaking on "not pending" alone stops the
+    # loop the instant the job reaches the intermediate "running" state,
+    # before the background task has actually finished transitioning it to
+    # a real terminal status — wait for a terminal status specifically.
     for _ in range(50):
         async with get_db_context() as db:
             job = await db.get(FineTuneJob, jid)
-            if job.status != "pending":
+            if job.status in ("completed", "failed"):
                 break
         await asyncio.sleep(0.05)
 
