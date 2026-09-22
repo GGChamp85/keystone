@@ -34,6 +34,7 @@ from rich.console import Console
 from rich.table import Table
 
 from src.cli.doctor import CheckStatus, run_all_checks
+from src.cli.init import default_overrides, find_env_template, render_env_file
 from src.config import get_settings
 
 app = typer.Typer(add_completion=False, help="Keystone — self-hosted LLM inference & autonomous coding agents.")
@@ -320,6 +321,78 @@ def finetune_watch(job_id: Annotated[str, typer.Argument()]):
     except httpx.ConnectError as exc:
         error_console.print(f"Could not reach {_base_url()}: {exc}")
         raise typer.Exit(code=1) from exc
+
+
+@app.command("init")
+def init(
+    output: Annotated[str, typer.Option(help="Where to write the .env file")] = ".env",
+    yes: Annotated[
+        bool, typer.Option("--yes", help="Non-interactive: auto-generate all secrets, skip every other prompt")
+    ] = False,
+):
+    """Guided setup — writes a real .env file (from .env.example) for `make up` to use.
+    Run `keystone doctor` afterward to verify what's actually reachable."""
+    from pathlib import Path
+
+    from rich.prompt import Confirm, Prompt
+
+    output_path = Path(output)
+    if (
+        output_path.exists()
+        and not yes
+        and not Confirm.ask(f"{output_path} already exists — overwrite?", default=False)
+    ):
+        console.print("Aborted — nothing written.")
+        raise typer.Exit(code=1)
+
+    template = find_env_template()
+    if template is None:
+        error_console.print(
+            "Could not find .env.example — run `keystone init` from inside a Keystone repo checkout "
+            "(or a subdirectory of one)."
+        )
+        raise typer.Exit(code=1)
+
+    overrides = default_overrides(auto_secrets=True)
+    console.print(
+        "[green]Generated strong random secrets[/green] for Postgres/Redis/Qdrant/admin-token/app secret key."
+    )
+
+    if not yes:
+        configure_git = Confirm.ask(
+            "\nConfigure a git host now? (needed for agentic coding tasks that open PRs — "
+            "you can skip and do this later)",
+            default=False,
+        )
+        if configure_git:
+            host = Prompt.ask("Git host hostname (e.g. gitea.mycompany.com, or localhost for a local Gitea)")
+            api_url = Prompt.ask("Git host API base URL", default=f"https://{host}/api/v1")
+            token = Prompt.ask("Git host API token", password=True)
+            overrides["GIT_ALLOWED_HOSTS"] = json.dumps([host])
+            overrides["GIT_HOST_API_URL"] = api_url
+            overrides["GIT_HOST_TOKEN"] = token
+
+        backend = Prompt.ask(
+            "\nCoding model backend",
+            choices=["frontier-proxy", "self-hosted-gpu"],
+            default="frontier-proxy",
+        )
+        if backend == "frontier-proxy":
+            overrides["VLLM_CODING_URL"] = "http://host.docker.internal:8090/v1"
+            console.print(
+                "\n[dim]After `make up`, start the proxy with a real ANTHROPIC_API_KEY in your shell:\n"
+                "  FRONTIER_PROXY_MODEL=claude-opus-4-6 python -m benchmarks.frontier_proxy\n"
+                "(on Linux, not Docker Desktop, host.docker.internal needs an extra_hosts entry — "
+                "see the comment above VLLM_CODING_URL in the .env this writes.)[/dim]"
+            )
+
+    content = render_env_file(template.read_text(), overrides)
+    output_path.write_text(content)
+    console.print(f"\n[green]Wrote {output_path}[/green]")
+    console.print(
+        "\nNext: [bold]make certs && make build && make up && make db-migrate && make sandbox-images[/bold]"
+        "\nThen: [bold]keystone doctor[/bold] to confirm what's actually reachable."
+    )
 
 
 _STATUS_STYLE = {
