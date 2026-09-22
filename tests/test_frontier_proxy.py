@@ -22,6 +22,7 @@ from benchmarks.frontier_proxy import (
     _openai_messages_to_anthropic,
     _openai_tool_choice_to_anthropic,
     _openai_tools_to_anthropic,
+    _redact_pii_in_place,
 )
 
 pytestmark = pytest.mark.integration
@@ -169,6 +170,53 @@ def test_structured_output_tool_use_becomes_json_content_not_a_tool_call():
     message = result["choices"][0]["message"]
     assert "tool_calls" not in message
     assert message["content"] == '{"plan": "do the thing"}'
+
+
+def test_redact_pii_in_place_redacts_system_and_user_text():
+    system, messages = _openai_messages_to_anthropic(
+        [
+            {"role": "system", "content": "The user's email is admin@example.com."},
+            {"role": "user", "content": "Call me at 415-555-0132."},
+        ]
+    )
+    system, count = _redact_pii_in_place(system, messages)
+    assert "[EMAIL_REDACTED]" in system
+    assert "admin@example.com" not in system
+    assert "[PHONE_REDACTED]" in messages[0]["content"]
+    assert count == 2
+
+
+def test_redact_pii_in_place_redacts_tool_result_content_not_tool_use_input():
+    """tool_result content (real command/file output) is the highest-risk
+    spot and must be redacted; tool_use input (the model's own generated
+    arguments) must be left untouched so tool-call replay stays intact."""
+    _system, messages = _openai_messages_to_anthropic(
+        [
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {"id": "call_1", "function": {"name": "grep", "arguments": '{"query": "jane@example.com"}'}}
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "name": "grep", "content": "found: jane@example.com in db.py"},
+        ]
+    )
+    _system, count = _redact_pii_in_place(_system, messages)
+    tool_use_block = messages[0]["content"][0]
+    assert tool_use_block["input"] == {"query": "jane@example.com"}  # untouched
+
+    tool_result_block = messages[1]["content"][0]
+    assert "[EMAIL_REDACTED]" in tool_result_block["content"]
+    assert "jane@example.com" not in tool_result_block["content"]
+    assert count == 1
+
+
+def test_redact_pii_in_place_is_a_noop_on_text_with_no_pii():
+    _system, messages = _openai_messages_to_anthropic([{"role": "user", "content": "Add pagination to /users."}])
+    _system, count = _redact_pii_in_place(_system, messages)
+    assert messages[0]["content"] == "Add pagination to /users."
+    assert count == 0
 
 
 # ── Real end-to-end against a real running proxy + real Anthropic API ──

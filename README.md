@@ -73,6 +73,7 @@ In short: if you want frontier-quality output, Keystone can still give it to you
   - [Interactive terminal](#interactive-terminal--use-it-just-like-claude-code-or-the-codex-cli)
   - [Submit a background task](#submit-a-background-task)
   - [Connect your own git server](#connect-your-own-git-server)
+  - [Redact PII before it reaches a frontier model](#redact-pii-before-it-reaches-a-frontier-model)
   - [Run the benchmark suite](#run-the-benchmark-suite)
 - [Deploy air-gapped](#deploy-air-gapped)
 - [Tech stack](#tech-stack--open-source-only-no-managed-saas)
@@ -382,6 +383,16 @@ GIT_HOST_TOKEN=<a bot account token with push + PR permissions>
 ```
 
 `src/git/host.py` defines the `GitHost` protocol; `src/git/gitea.py` is the current real implementation. A repository URL outside the allowlist is rejected before the agent ever clones it — this is an allowlist, not a warning.
+
+### Redact PII before it reaches a frontier model
+
+`benchmarks/frontier_proxy.py` is the one real place in the whole platform where request content — task descriptions, file contents, command output — actually leaves your network for a third-party API. Set one environment variable and every real PII pattern (email, phone, SSN, credit card — with a real Luhn checksum, not just a digit-count guess — and IPv4 addresses) is redacted from the system prompt, user turns, assistant text, and tool output before the request goes out:
+
+```bash
+export FRONTIER_PROXY_REDACT_PII=1
+```
+
+`src/security/pii_redaction.py` is real, deterministic regex-based detection — not an ML/NER classifier, which is a deliberate trade-off (predictable, auditable, no extra model dependency to bundle air-gapped) at the honest cost of missing PII with no fixed format (names, addresses, free-text details). Off by default: redaction is a real content change, and a legitimate task can genuinely need the real value (a test fixture with a literal phone number, say) — this is an explicit opt-in, not a silent behavior change for every existing frontier-proxy user. Verified for real: with the flag on, a live request's real email/phone were confirmed redacted before the request reached Claude (`frontier_proxy.pii_redacted` in the proxy's own logs); with it off, the same request's real value round-tripped through the model unchanged.
 
 ### Run the benchmark suite
 

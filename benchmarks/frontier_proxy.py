@@ -48,6 +48,8 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from src.security.pii_redaction import redact_pii
+
 logger = structlog.get_logger(__name__)
 
 _STRUCTURED_TOOL_NAME = "emit_structured_response"
@@ -57,6 +59,17 @@ _STRUCTURED_TOOL_NAME = "emit_structured_response"
 # every request this proxy receives is served by this one real Anthropic
 # model, configured once for the whole process.
 _TARGET_MODEL = os.environ.get("FRONTIER_PROXY_MODEL", "claude-opus-4-6")
+
+# Off by default: this is the one real network-egress boundary in the
+# whole platform where request content leaves the self-hosted network for
+# a third-party API, so it's the highest-value real place to redact PII
+# before it crosses that boundary — but redaction is a real behavior
+# change (a matched span becomes a placeholder before the model ever sees
+# it), which can alter a legitimate task's outcome if the task genuinely
+# needs the real value (an email/phone/IP literal in a test fixture, for
+# instance). Left as an explicit opt-in rather than silently changing
+# what every existing frontier_proxy user's requests contain.
+_REDACT_PII = os.environ.get("FRONTIER_PROXY_REDACT_PII", "").lower() in ("1", "true", "yes")
 
 app = FastAPI(title="Keystone frontier proxy")
 _client = anthropic.AsyncAnthropic()
@@ -112,6 +125,42 @@ def _openai_messages_to_anthropic(messages: list[dict[str, Any]]) -> tuple[str, 
         raise ValueError(f"Unsupported message role for the frontier proxy: {role!r}")
 
     return "\n\n".join(p for p in system_parts if p), anthropic_messages
+
+
+def _redact_pii_in_place(system: str, anthropic_messages: list[dict[str, Any]]) -> tuple[str, int]:
+    """
+    Redacts real PII patterns (src/security/pii_redaction.py) out of every
+    text span actually leaving the network: the system prompt, each user
+    turn's content, each assistant text block, and each tool_result's
+    content (real file/grep/command output — the highest-risk spot, since
+    it's raw content from the caller's own repository). tool_use `input`
+    (structured tool-call arguments the model itself generated) is left
+    alone — mangling those would break tool-call replay, and they are the
+    model's own output, not raw source content. Returns the possibly
+    -redacted system string and a total match count for logging.
+    """
+    total = 0
+
+    def _redact(s: str) -> str:
+        nonlocal total
+        result = redact_pii(s)
+        total += len(result.matches)
+        return result.redacted_text
+
+    system = _redact(system) if system else system
+
+    for msg in anthropic_messages:
+        content = msg.get("content")
+        if isinstance(content, str):
+            msg["content"] = _redact(content)
+        elif isinstance(content, list):
+            for block in content:
+                if block.get("type") == "text" and isinstance(block.get("text"), str):
+                    block["text"] = _redact(block["text"])
+                elif block.get("type") == "tool_result" and isinstance(block.get("content"), str):
+                    block["content"] = _redact(block["content"])
+
+    return system, total
 
 
 def _openai_tools_to_anthropic(tools: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
@@ -200,6 +249,11 @@ async def chat_completions(request: Request):
     body = await request.json()
     requested_model = body.get("model", _TARGET_MODEL)
     system, anthropic_messages = _openai_messages_to_anthropic(body["messages"])
+
+    if _REDACT_PII:
+        system, redacted_count = _redact_pii_in_place(system, anthropic_messages)
+        if redacted_count:
+            logger.info("frontier_proxy.pii_redacted", count=redacted_count)
 
     # The installed anthropic SDK (1.x)'s AsyncMessages.create() has no
     # temperature/top_p parameter at all (confirmed via
