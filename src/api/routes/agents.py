@@ -23,7 +23,7 @@ from src.api.models.responses import (
 )
 from src.db.connection import get_db_context
 from src.db.models import AgentTask, APIKey, FeedbackVerdict, TaskFeedback, Tenant, User
-from src.memory.ingestion import CodeIngestionPipeline
+from src.memory.ingestion import CodeIngestionPipeline, InvalidRepositoryURLError
 from src.orchestrator.concurrency import ConcurrencyLimitExceeded
 from src.orchestrator.engine import get_keystone_engine
 from src.orchestrator.events import TERMINAL_PHASES, block_for_next_event, read_task_events_from
@@ -193,15 +193,22 @@ async def ingest_repository(
     req: IngestRepositoryRequest,
     auth: tuple = Depends(require_scope("agent")),
 ):
+    import git
+
     tenant: Tenant = auth[1]
     pipeline = CodeIngestionPipeline()
-    result = await pipeline.ingest_repository(
-        repository_url=req.repository_url,
-        tenant_id=str(tenant.id),
-        branch=req.branch,
-        file_extensions=req.file_extensions,
-        max_file_size_kb=req.max_file_size_kb,
-        chunk_size=req.chunk_size,
-        chunk_overlap=req.chunk_overlap,
-    )
+    try:
+        result = await pipeline.ingest_repository(
+            repository_url=req.repository_url,
+            tenant_id=str(tenant.id),
+            branch=req.branch,
+            file_extensions=req.file_extensions,
+            max_file_size_kb=req.max_file_size_kb,
+            chunk_size=req.chunk_size,
+            chunk_overlap=req.chunk_overlap,
+        )
+    except InvalidRepositoryURLError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except git.exc.GitCommandError as exc:
+        raise HTTPException(status_code=400, detail=f"git clone failed: {exc}") from exc
     return result

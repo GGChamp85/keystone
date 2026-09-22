@@ -517,6 +517,30 @@ def bundle_import(
     _run_streamed(build_bundle_import_command(root, bundle_dir, push=push), cwd=root)
 
 
+@app.command("ingest")
+def ingest(
+    repository_url: Annotated[str, typer.Argument(help="Git clone URL — must be on GIT_ALLOWED_HOSTS")],
+    branch: Annotated[str, typer.Option()] = "main",
+    max_file_size_kb: Annotated[int, typer.Option(help="Skip files larger than this")] = 500,
+):
+    """Ingest a repository into the memory system's RAG index — a real wrapper around the
+    existing POST /v1/keystone/ingest route (src/memory/ingestion.py's CodeIngestionPipeline).
+    Incremental: a second run only re-embeds files that actually changed."""
+    body = {"repository_url": repository_url, "branch": branch, "max_file_size_kb": max_file_size_kb}
+    result = _request_one("POST", "/v1/keystone/ingest", json=body)
+    console.print(
+        f"[green]Ingested[/green] {result['repository']} @ {result['commit_sha'][:8]} (branch={result['branch']})"
+    )
+    console.print(
+        f"  {result['files_processed']} file(s) processed, {result['files_unchanged']} unchanged, "
+        f"{result['files_skipped']} skipped, {result['files_deleted']} deleted"
+    )
+    console.print(
+        f"  {result['chunks_created']} chunk(s) created, {result['chunks_upserted']} upserted, "
+        f"{result['stale_chunks_deleted']} stale chunk(s) removed"
+    )
+
+
 @app.command("init")
 def init(
     output: Annotated[str, typer.Option(help="Where to write the .env file")] = ".env",
