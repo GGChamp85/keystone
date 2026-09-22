@@ -93,9 +93,12 @@ class AgentTaskRequest(BaseModel):
         default=[],
         description="Specific files the agent should focus on",
     )
-    model: Literal["coding", "coding_fallback", "reasoning"] = Field(
+    model: Literal["coding", "coding_fallback", "reasoning", "auto"] = Field(
         default="coding",
-        description="Which model to use as primary coder",
+        description="Which model to use as primary coder — 'auto' classifies the task "
+        "description (src/inference/model_router.py's classify_task_to_role/"
+        "classify_task_complexity) and resolves to a concrete role before the "
+        "task is persisted, rather than staying a live routing decision",
     )
     max_iterations: int = Field(
         default=15,

@@ -371,6 +371,8 @@ curl -X POST http://localhost:8080/v1/keystone/tasks \
   }'
 ```
 
+**Let Keystone pick the model**: set `"model": "auto"` instead of a fixed role, and `src/inference/model_router.py`'s real heuristics resolve it once, before the task is even persisted — `classify_task_to_role` picks reasoning vs. coding from the task description, and (opt-in — set `TASK_COMPLEXITY_ROUTING_ENABLED=1`) `classify_task_complexity` additionally routes a small, mechanical-sounding coding task ("fix a typo", "bump the version") to the cheaper `coding_fallback` model instead of the primary one. Never silent: the resolved role is what's actually written to the task's own `model_role` column, visible in every response and in the web UI, not a live decision hidden behind an "auto" label. Off by default (a wrong downgrade costs quality, not just money) — ties are deliberately broken toward the more capable model, not the cheaper one.
+
 ### Connect your own git server
 
 The agent's repo-mode tasks (clone → branch → commit → push → PR) only ever talk to git hosts you explicitly allow — `GIT_ALLOWED_HOSTS` in `.env` (default: a placeholder `gitea.internal.keystone.local`, since Gitea is the reference internal git host used throughout the air-gap tooling and dev-tier `docker-compose.yml`). Point it at whatever your org already runs:

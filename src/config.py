@@ -100,6 +100,14 @@ class Settings(BaseSettings):
     coding_fallback_model_id: str = "Qwen/Qwen2.5-Coder-32B-Instruct"
     reasoning_model_id: str = "deepseek-ai/DeepSeek-R1"
 
+    # When a task is submitted with model="auto" and classify_task_to_role
+    # resolves it to "coding", this additionally checks task complexity
+    # (src/inference/model_router.py's classify_task_complexity) and routes
+    # a "simple" task to coding_fallback instead of the primary model.
+    # Default off: this changes which model actually serves an "auto" task,
+    # so it's an explicit opt-in rather than a silent behavior change.
+    task_complexity_routing_enabled: bool = False
+
     # ── Qdrant ────────────────────────────────────────────────
     qdrant_host: str = "qdrant"
     qdrant_port: int = 6333

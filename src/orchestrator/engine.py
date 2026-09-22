@@ -28,6 +28,7 @@ from temporalio.client import Client, WorkflowHandle
 from src.config import get_settings
 from src.db.connection import get_db_context
 from src.db.models import AgentTask, TaskStatus, Tenant
+from src.inference.model_router import classify_task_complexity, classify_task_to_role
 from src.memory.vector_store import VectorStore
 from src.orchestrator.circuit_breaker import CircuitBreakerConfig, CircuitBreakerTripped
 from src.orchestrator.concurrency import (
@@ -115,6 +116,19 @@ class KeystoneEngine:
         """
         task_id = uuid4()
         settings = get_settings()
+
+        if model == "auto":
+            resolved_role = classify_task_to_role(task_description)
+            if resolved_role == "coding" and settings.task_complexity_routing_enabled:
+                complexity = classify_task_complexity(task_description)
+                if complexity == "simple":
+                    resolved_role = "coding_fallback"
+            logger.info(
+                "engine.auto_model_resolved",
+                task_id=str(task_id),
+                resolved_role=resolved_role,
+            )
+            model = resolved_role
 
         async with get_db_context() as db:
             tenant = await db.get(Tenant, tenant_id)

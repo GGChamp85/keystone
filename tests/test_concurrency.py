@@ -174,3 +174,58 @@ async def test_submit_task_acquires_and_releases_a_real_slot_end_to_end(tenant_i
             break
         await asyncio.sleep(0.1)
     assert await current_tenant_concurrency(tenant_id) == 0
+
+
+async def test_submit_task_with_auto_model_resolves_to_a_real_concrete_role_in_the_db(tenant_id, api_key_id):
+    """model="auto" must never reach the DB — AgentTask.model_role is a
+    real enum column (coding|coding_fallback|reasoning) that can't hold
+    "auto" at all, so this also proves engine.submit_task resolves it
+    before persisting, not just that the resolver function works in
+    isolation."""
+    from src.db.connection import get_db_context
+    from src.db.models import AgentTask
+
+    engine = get_keystone_engine()
+    task_id = await engine.submit_task(
+        tenant_id=tenant_id,
+        api_key_id=api_key_id,
+        task_description="Review this code for security issues before we ship it.",
+        model="auto",
+    )
+    async with get_db_context() as db:
+        task = await db.get(AgentTask, task_id)
+    assert task.model_role.value == "reasoning"  # classify_task_to_role's real reasoning-keyword match
+
+    for _ in range(300):
+        if await current_tenant_concurrency(tenant_id) == 0:
+            break
+        await asyncio.sleep(0.1)
+
+
+async def test_submit_task_with_auto_model_routes_a_simple_task_to_coding_fallback_when_enabled(
+    tenant_id, api_key_id, monkeypatch
+):
+    from src.config import get_settings
+    from src.db.connection import get_db_context
+    from src.db.models import AgentTask
+
+    monkeypatch.setenv("TASK_COMPLEXITY_ROUTING_ENABLED", "true")
+    get_settings.cache_clear()
+    try:
+        engine = get_keystone_engine()
+        task_id = await engine.submit_task(
+            tenant_id=tenant_id,
+            api_key_id=api_key_id,
+            task_description="Fix a typo in the README",
+            model="auto",
+        )
+        async with get_db_context() as db:
+            task = await db.get(AgentTask, task_id)
+        assert task.model_role.value == "coding_fallback"
+
+        for _ in range(300):
+            if await current_tenant_concurrency(tenant_id) == 0:
+                break
+            await asyncio.sleep(0.1)
+    finally:
+        get_settings.cache_clear()

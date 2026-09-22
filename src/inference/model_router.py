@@ -19,6 +19,7 @@ from uuid import UUID
 import structlog
 from sqlalchemy import select
 
+from src.config import get_settings
 from src.inference.client import InferenceClient, get_inference_client
 
 logger = structlog.get_logger(__name__)
@@ -95,6 +96,60 @@ def classify_task_to_role(task_description: str) -> str:
     if _CODING_PATTERNS.search(task_description):
         return "coding"
     return "coding"
+
+
+# Keywords that hint a coding task is small/mechanical enough for the
+# cheaper coding_fallback model — checked first, since a task naming one
+# of these should never be reclassified "complex" by a coincidental
+# keyword match elsewhere in a longer description.
+_SIMPLE_TASK_PATTERNS = re.compile(
+    r"(fix (a |the )?typo|rename \w+|update (a |the )?comment|bump (the )?version|"
+    r"fix (the )?formatting|add (a |an )?docstring|update (a |the )?dependency version|"
+    r"one[- ]line|trivial|minor (fix|change|update))",
+    re.IGNORECASE,
+)
+
+# Keywords that hint a coding task is genuinely substantial — checked
+# before falling back to the word-count heuristic, so a short but
+# high-stakes description ("fix the race condition") is never
+# misclassified as simple just because it's brief.
+_COMPLEX_TASK_PATTERNS = re.compile(
+    r"(refactor|migrate|redesign|architecture|rewrite|multi-file|across the codebase|"
+    # "new" and the noun don't have to be adjacent — "new payments endpoint",
+    # "new user authentication service" — so up to 3 words may sit between them.
+    r"new\s+(?:\w+\s+){0,3}(?:feature|endpoint|service)|"
+    r"database migration|concurrency|race condition|"
+    r"performance|security|breaking change|backward.compat)",
+    re.IGNORECASE,
+)
+
+# A task description at or under this word count, with no pattern match
+# either way, is presumptively simple — short enough that it's very
+# unlikely to be describing genuinely substantial work. Above it, an
+# unmatched description defaults to "complex" instead: the risk is
+# asymmetric (a wrong "simple" can silently ship a worse fix; a wrong
+# "complex" only costs more), and a long description naming no simple- or
+# complex-marker at all is the case with the least signal to trust either
+# way, so it's treated as the higher-risk outcome.
+_SIMPLE_TASK_MAX_WORDS = 12
+
+
+def classify_task_complexity(task_description: str) -> str:
+    """
+    Heuristic complexity tier for a coding task: "simple" or "complex".
+
+    A pattern match (either list) always wins; failing that, a short
+    description (<= _SIMPLE_TASK_MAX_WORDS) is presumed simple and a long
+    one is presumed complex — see _SIMPLE_TASK_MAX_WORDS's comment for why
+    that asymmetry is deliberate, not an oversight.
+    """
+    if _COMPLEX_TASK_PATTERNS.search(task_description):
+        return "complex"
+    if _SIMPLE_TASK_PATTERNS.search(task_description):
+        return "simple"
+    if len(task_description.split()) <= _SIMPLE_TASK_MAX_WORDS:
+        return "simple"
+    return "complex"
 
 
 # ── Adapter-aware routing ─────────────────────────────────────
@@ -185,6 +240,15 @@ class ModelRouter:
         """
         if task_description and model_input in ("auto", ""):
             role = classify_task_to_role(task_description)
+            if role == "coding" and get_settings().task_complexity_routing_enabled:
+                complexity = classify_task_complexity(task_description)
+                if complexity == "simple":
+                    logger.info(
+                        "model_router.complexity_routed",
+                        complexity=complexity,
+                        routed_to="coding_fallback",
+                    )
+                    role = "coding_fallback"
         else:
             role = resolve_model_role(model_input)
 
