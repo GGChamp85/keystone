@@ -1,17 +1,62 @@
 # RunPod deployment (cloud GPU test/staging tier)
 
-Rent real GPUs by the hour instead of buying hardware — the fastest way to run Keystone against a real vLLM-served model without owning a GPU. This is the dev/test tier: internet-connected, single GPU pod, no HA. For an air-gapped or multi-node production deployment, see `docs/deployment/KUBERNETES_CLIENT_VPC.md` instead.
+Rent real GPUs by the hour instead of buying hardware — the fastest way to run Keystone against a real vLLM-served model without owning a GPU. This is the dev/test tier: internet-connected, no HA. For an air-gapped or multi-node production deployment, see `docs/deployment/KUBERNETES_CLIENT_VPC.md` instead.
 
-## What this actually provisions
+Two ways to run a model on RunPod, and which to pick:
+
+| | Serverless endpoint (`keystone deploy runpod-serverless`) | On-demand pod (OpenTofu, below) |
+|---|---|---|
+| Idle cost | **$0** — scales to zero after `--idle-timeout` seconds | Billed every hour the pod exists |
+| First request after idle | Cold start (tens of seconds; FlashBoot revives a warm worker in a few seconds) | Always warm |
+| Sized for | A ≤7B SLM on one 24GB GPU (default: Qwen2.5-Coder-7B-Instruct), or one 80GB GPU with `--gpu-tier 80gb` | Anything one pod's GPUs can hold |
+| Provisioned with | RunPod's REST API — one command, idempotent by name | `tofu apply` |
+| Best for | Trying Keystone, CI-like verification runs, low-traffic teams | Sustained load, fine-tuning jobs |
+
+## Option A — Serverless endpoint, scale-to-zero (one command)
+
+Prerequisites: a [RunPod](https://runpod.io) account **with credit on it** (RunPod refuses to create an endpoint on an unfunded account — the CLI tells you so in plain words) and its API key in `.env` as `RUNPOD_API_KEY` (RunPod console → Settings → API Keys).
+
+```bash
+# 1. Create the endpoint — a vLLM worker serving Qwen2.5-Coder-7B-Instruct on the 24GB tier,
+#    0..2 workers, scale-to-zero after 60s idle. Re-running with the same --name reuses
+#    what exists instead of creating billable duplicates.
+keystone deploy runpod-serverless
+#   Template tk4d0rq5vc (created)  serving Qwen/Qwen2.5-Coder-7B-Instruct
+#   Endpoint <id> (created)  gpu tier 24gb, workers 0..2
+#   https://api.runpod.ai/v2/<id>/openai/v1
+
+# 2. Point the coding role at it — the command prints these exact lines; add them to .env
+RUNPOD_ENDPOINT_URL=https://api.runpod.ai/v2/<id>/openai/v1
+VLLM_CODING_URL=https://api.runpod.ai/v2/<id>/openai/v1
+VLLM_CODING_API_KEY=${RUNPOD_API_KEY}     # RunPod authenticates OpenAI-compatible calls with the account key
+CODING_MODEL_ID=keystone-coder            # the served name the worker answers to (--served-name)
+
+# 3. Prove it's reachable — a real authenticated round trip, before the app is even up
+keystone doctor        # RunPod: OK ... (the first call after idle is a cold start; doctor waits)
+
+# 4. Bring up the rest of the stack locally, exactly as in Option B steps 4–5
+make certs && make build && make up && make db-migrate && make sandbox-images && make api-key
+
+# Tear down — deletes the endpoint (all billing stops) and then its template
+keystone deploy runpod-serverless --destroy
+```
+
+Options: `--model` (any Hugging Face id vLLM can load), `--served-name`, `--gpu-tier 24gb|80gb`, `--max-model-len` (default 16384), `--workers-max` (the cost ceiling, default 2), `--idle-timeout` (default 60s; raise it during a long benchmark sweep to avoid repeated cold starts). A gated model needs `HF_TOKEN` — pass it via the template env; see `src/cli/runpod_serverless.py::build_template_payload`.
+
+What it does under the hood, so nothing is a black box: one `POST /v1/templates` (`runpod/worker-v1-vllm`, the env vars vLLM's worker reads — `MODEL_NAME`, `MAX_MODEL_LEN`, `OPENAI_SERVED_MODEL_NAME_OVERRIDE`, `TOOL_CALL_PARSER=hermes` for Qwen2.5's tool-call format) and one `POST /v1/endpoints` (`workersMin=0`, `flashboot=true`, `scalerType=QUEUE_DELAY`, `executionTimeoutMs=600000`). Request shapes are asserted against RunPod's published OpenAPI document in `tests/test_runpod_serverless.py`. Why REST and not OpenTofu for this path: the provider has no template resource, and an endpoint requires one.
+
+## Option B — On-demand pod (OpenTofu)
+
+### What this actually provisions
 
 `infra/opentofu/environments/runpod-test/` provisions one real RunPod GPU pod running vLLM (`infra/opentofu/modules/runpod-gpu-pool/`), sized down to Qwen2.5-Coder-32B-Instruct on a single GPU — not the full 8-GPU GLM-5.3-Flash production profile, which needs far more VRAM than one test pod has (see the [Models](../../README.md#models) table). Everything else — Postgres, Redis, Qdrant, the Keystone app itself — still runs via the normal `docker-compose.yml`, just pointed at the RunPod pod's public URL instead of a local vLLM container.
 
-## Prerequisites
+### Prerequisites
 
 - A [RunPod](https://runpod.io) account and API key (RunPod console → Settings → API Keys).
 - OpenTofu 1.6+ (or Terraform 1.6+) and Docker + Compose v2 on the machine running Keystone's own stack.
 
-## Steps
+### Steps
 
 ```bash
 # 1. Provision the GPU pod
@@ -50,11 +95,11 @@ curl http://localhost:8080/health
 
 From here, everything in the main [README](../../README.md) — submitting a background task, an interactive OpenCode session, the benchmark suite — works exactly as it does against a local vLLM instance, because it's the same OpenAI-compatible interface either way.
 
-## Sizing beyond one GPU
+### Sizing beyond one GPU
 
 `infra/opentofu/environments/runpod-test/main.tf`'s own comment describes the pattern: add a second `module "reasoning_gpu_pool" { source = "../../modules/runpod-gpu-pool" ... }` block (same module, different `pool_name`/`gpu_type_id`/`docker_args`) for each additional role you want RunPod-hosted, and point the matching `VLLM_*_URL` at its own `proxy_urls` output. `helm/keystone/values-runpod-test.yaml` is a separate, heavier profile for running the *entire* Helm chart (including in-cluster vLLM) on a GPU-enabled Kubernetes cluster rather than standalone RunPod pods — use it only if you already have such a cluster; this repo doesn't include a script that provisions one on RunPod.
 
-## Tear down
+### Tear down
 
 ```bash
 cd infra/opentofu/environments/runpod-test

@@ -45,6 +45,7 @@ from src.cli.ops import (
     build_up_command,
     find_repo_root,
 )
+from src.cli.runpod_serverless import GPU_TIER_24GB, GPU_TIER_80GB, RunPodServerless, explain_api_error
 from src.config import get_settings
 
 app = typer.Typer(add_completion=False, help="Keystone — self-hosted LLM inference & autonomous coding agents.")
@@ -53,11 +54,13 @@ finetune_app = typer.Typer(add_completion=False, help="Start and manage fine-tun
 tenants_app = typer.Typer(add_completion=False, help="Bootstrap tenants (KEYSTONE_ROOT_ADMIN_TOKEN required).")
 users_app = typer.Typer(add_completion=False, help="Manage tenant users (KEYSTONE_ROOT_ADMIN_TOKEN required).")
 bundle_app = typer.Typer(add_completion=False, help="Build/import the air-gapped offline bundle (wraps airgap/*.sh).")
+deploy_app = typer.Typer(add_completion=False, help="Deploy a model backend to a cloud (RunPod Serverless today).")
 app.add_typer(memory_app, name="memory")
 app.add_typer(finetune_app, name="finetune")
 app.add_typer(tenants_app, name="tenants")
 app.add_typer(users_app, name="users")
 app.add_typer(bundle_app, name="bundle")
+app.add_typer(deploy_app, name="deploy")
 
 console = Console()
 error_console = Console(stderr=True, style="bold red")
@@ -515,6 +518,65 @@ def bundle_import(
     """Load the transferred bundle on the air-gapped target — wraps airgap/import_bundle.sh."""
     root = _require_repo_root()
     _run_streamed(build_bundle_import_command(root, bundle_dir, push=push), cwd=root)
+
+
+@deploy_app.command("runpod-serverless")
+def deploy_runpod_serverless(
+    name: Annotated[str, typer.Option(help="Endpoint/template name — re-running with the same name reuses them")] = (
+        "keystone-coder"
+    ),
+    model: Annotated[str, typer.Option(help="Hugging Face model id to serve")] = "Qwen/Qwen2.5-Coder-7B-Instruct",
+    served_name: Annotated[str, typer.Option(help="The `model` name clients send")] = "keystone-coder",
+    gpu_tier: Annotated[str, typer.Option(help="24gb | 80gb — which serverless GPU pool to schedule on")] = "24gb",
+    max_model_len: Annotated[int, typer.Option()] = 16384,
+    workers_max: Annotated[int, typer.Option(help="Upper bound on concurrent GPU workers (cost ceiling)")] = 2,
+    idle_timeout: Annotated[int, typer.Option(help="Seconds idle before a worker scales to zero")] = 60,
+    destroy: Annotated[bool, typer.Option(help="Delete the endpoint and template of this name instead")] = False,
+):
+    """Create (or reuse) a RunPod Serverless vLLM endpoint serving an open-weight model,
+    scaled to zero when idle — a real GPU backend with no hardware to buy. Needs
+    RUNPOD_API_KEY in .env. Prints the exact .env lines that point a role at it."""
+    settings = get_settings()
+    if settings.runpod_api_key is None:
+        error_console.print("RUNPOD_API_KEY is not set in .env — see docs/deployment/RUNPOD_SETUP.md.")
+        raise typer.Exit(code=1)
+    tiers = {"24gb": GPU_TIER_24GB, "80gb": GPU_TIER_80GB}
+    if gpu_tier not in tiers:
+        error_console.print(f"--gpu-tier must be one of {sorted(tiers)}")
+        raise typer.Exit(code=1)
+
+    with RunPodServerless(settings.runpod_api_key.get_secret_value()) as rp:
+        try:
+            if destroy:
+                removed = rp.destroy(name)
+                console.print(f"Removed endpoint={removed['endpoint']} template={removed['template']} for {name!r}")
+                return
+            deployment = rp.deploy(
+                name=name,
+                model=model,
+                served_model_name=served_name,
+                gpu_type_ids=tiers[gpu_tier],
+                max_model_len=max_model_len,
+                workers_max=workers_max,
+                idle_timeout_seconds=idle_timeout,
+            )
+        except httpx.HTTPStatusError as exc:
+            error_console.print(explain_api_error(exc.response.status_code, exc.response.text))
+            raise typer.Exit(code=1) from exc
+
+    verb_t = "created" if deployment.created_template else "reused"
+    verb_e = "created" if deployment.created_endpoint else "reused"
+    console.print(f"[green]Template[/green] {deployment.template_id} ({verb_t})  serving {deployment.model}")
+    console.print(
+        f"[green]Endpoint[/green] {deployment.endpoint_id} ({verb_e})  gpu tier {gpu_tier}, workers 0..{workers_max}"
+    )
+    console.print(f"[bold]{deployment.openai_base_url}[/bold]")
+    console.print("\nPoint a role at it — add to .env (the first request after idle is a cold start):")
+    console.print(f"  RUNPOD_ENDPOINT_URL={deployment.openai_base_url}")
+    console.print(f"  VLLM_CODING_URL={deployment.openai_base_url}")
+    console.print("  VLLM_CODING_API_KEY=${RUNPOD_API_KEY}")
+    console.print(f"  CODING_MODEL_ID={deployment.served_model_name}")
+    console.print("\nThen `keystone doctor` checks it, and `keystone deploy runpod-serverless --destroy` removes it.")
 
 
 @app.command("ingest")
