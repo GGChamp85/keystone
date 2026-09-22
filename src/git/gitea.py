@@ -80,4 +80,4 @@ class GiteaHost:
 
     def _raise_for_status(self, resp: httpx.Response, context: str) -> None:
         if resp.status_code >= 400:
-            raise GitHostError(f"Gitea API error on {context}: {resp.status_code} {resp.text[:500]}")
+            raise GitHostError(f"Gitea API error on {context}: {resp.status_code} {resp.text}")

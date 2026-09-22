@@ -273,7 +273,7 @@ def check_docker() -> CheckResult:
         return CheckResult(
             "Docker",
             CheckStatus.FAIL,
-            f"docker CLI present but the daemon isn't reachable: {result.stderr.strip()[:200]}",
+            f"docker CLI present but the daemon isn't reachable: {result.stderr.strip()}",
         )
     except Exception as exc:
         return CheckResult("Docker", CheckStatus.FAIL, f"failed to run `docker info` ({exc})")

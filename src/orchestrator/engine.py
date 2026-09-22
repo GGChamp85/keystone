@@ -53,6 +53,35 @@ logger = structlog.get_logger(__name__)
 _background_tasks: set[asyncio.Task] = set()
 
 
+_GIT_SUBJECT_MAX = 72  # git's own subject-line convention; the full description follows in the body
+_PR_TITLE_MAX = 255  # Gitea's hard limit on a pull request title
+
+
+def _first_line(text: str, limit: int) -> str:
+    line = (text or "").strip().splitlines()[0] if (text or "").strip() else "task"
+    return line if len(line) <= limit else line[: limit - 1].rstrip() + "…"
+
+
+def _commit_message(task_description: str) -> str:
+    """Subject line per git's convention, then the complete task description as the body — nothing dropped."""
+    subject = f"Keystone Agents: {_first_line(task_description, _GIT_SUBJECT_MAX - len('Keystone Agents: '))}"
+    body = (task_description or "").strip()
+    return f"{subject}\n\n{body}" if body and body != subject.removeprefix("Keystone Agents: ") else subject
+
+
+def _pr_title(task_description: str) -> str:
+    return f"Keystone Agents: {_first_line(task_description, _PR_TITLE_MAX - len('Keystone Agents: '))}"
+
+
+def _pr_body(task_description: str, result_summary: str) -> str:
+    """The full task description and the agent's own summary — the PR is the record, so nothing is cut."""
+    parts = ["## Task", (task_description or "").strip() or "(no description)"]
+    if result_summary:
+        parts += ["", "## What the agent did", result_summary.strip()]
+    parts += ["", "_Opened automatically by Keystone Agents._"]
+    return "\n".join(parts)
+
+
 class KeystoneEngine:
     """
     The main entry point for running Keystone Agents agent tasks.
@@ -104,6 +133,7 @@ class KeystoneEngine:
         context_files: dict[str, str] | None = None,
         user_id: UUID | None = None,
         user_slug: str | None = None,
+        quality_blocking_tools: list[str] | None = None,
     ) -> UUID:
         """
         Create a new agent task and start execution.
@@ -133,7 +163,7 @@ class KeystoneEngine:
 
         async with get_db_context() as db:
             tenant = await db.get(Tenant, tenant_id)
-        tenant_max = tenant.max_concurrent_agents if tenant is not None else 3
+        tenant_max = tenant.max_concurrent_agents if tenant is not None else 0  # 0 = no cap
         if not await try_acquire_task_slot(tenant_id, task_id, tenant_max, user_id=user_id):
             raise ConcurrencyLimitExceeded(tenant_max, per_user_fair_share(tenant_max) if user_id else None)
 
@@ -172,6 +202,7 @@ class KeystoneEngine:
             "context_files": context_files or {},
             "user_id": user_id,
             "user_slug": user_slug,
+            "quality_blocking_tools": quality_blocking_tools,
             "heartbeat_callback": _publish_event,
         }
 
@@ -197,6 +228,7 @@ class KeystoneEngine:
                     enable_sandbox_testing=enable_sandbox_testing,
                     user_id=str(user_id) if user_id else None,
                     user_slug=user_slug,
+                    quality_blocking_tools=quality_blocking_tools,
                 ),
                 id=workflow_id,
                 task_queue=settings.temporal_task_queue,
@@ -251,6 +283,7 @@ class KeystoneEngine:
         context_files: dict[str, str],
         user_id: UUID | None = None,
         user_slug: str | None = None,
+        quality_blocking_tools: list[str] | None = None,
         heartbeat_callback: HeartbeatCallback | None = None,
     ) -> dict[str, Any]:
         """
@@ -282,6 +315,8 @@ class KeystoneEngine:
             enable_reasoning_review=enable_reasoning_review,
             enable_sandbox_testing=enable_sandbox_testing,
             user_slug=user_slug,
+            quality_blocking_tools=list(quality_blocking_tools or get_settings().quality_gate_blocking_tools),
+            max_context_tokens=get_settings().agent_max_context_tokens,
         )
 
         # Retrieve RAG context from Qdrant
@@ -314,11 +349,11 @@ class KeystoneEngine:
         # Build and run graph
         breaker_config = CircuitBreakerConfig(
             max_iterations=max_iterations,
-            max_tokens_per_task=2_000_000,
+            max_tokens_per_task=settings.max_tokens_per_task,
             max_consecutive_test_failures=3,
             max_consecutive_review_failures=3,
             max_consecutive_quality_failures=3,
-            max_wall_clock_seconds=1800,
+            max_wall_clock_seconds=settings.agent_max_wall_clock_seconds,
             tenant_daily_limit=settings.default_daily_token_limit,
             tenant_monthly_limit=settings.default_monthly_token_limit,
         )
@@ -484,9 +519,9 @@ class KeystoneEngine:
             if not diff.strip():
                 logger.info("keystone.git_workflow_no_changes", task_id=str(task_id))
                 return result
-            result["output_diff"] = diff[:200_000]  # cap — a huge diff shouldn't blow out the DB row
+            result["output_diff"] = diff  # the full diff — output_diff is a TEXT column
 
-            commit_sha = await ws.commit_all(f"Keystone Agents: {final_state.get('task_description', '')[:200]}")
+            commit_sha = await ws.commit_all(_commit_message(final_state.get("task_description", "")))
             result["commit_sha"] = commit_sha
 
             await ws.push(working_branch)
@@ -509,8 +544,8 @@ class KeystoneEngine:
                 repo,
                 head=working_branch,
                 base=base_branch,
-                title=f"Keystone Agents: {final_state.get('task_description', '')[:200]}",
-                body=final_state.get("result_summary", "") or "Opened automatically by Keystone Agents.",
+                title=_pr_title(final_state.get("task_description", "")),
+                body=_pr_body(final_state.get("task_description", ""), final_state.get("result_summary", "")),
             )
             result["pr_url"] = pr.html_url
             result["pr_number"] = pr.number

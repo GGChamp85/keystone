@@ -9,9 +9,10 @@ and automatic retries with exponential backoff.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
 import httpx
@@ -48,6 +49,15 @@ def _is_retryable(exc: BaseException) -> bool:
 
 class StructuredOutputError(RuntimeError):
     """chat_structured()'s response didn't parse as the requested schema, even after one self-correction retry."""
+
+
+class _StreamStartError(Exception):
+    """Internal: a transport failure during `stream_to_message`, tagged with whether any chunk had arrived."""
+
+    def __init__(self, cause: Exception, received_any: bool):
+        super().__init__(str(cause))
+        self.cause = cause
+        self.received_any = received_any
 
 
 class InferenceClient:
@@ -236,14 +246,23 @@ class InferenceClient:
         frequency_penalty: float = 0.0,
         presence_penalty: float = 0.0,
         model_override: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+        include_usage: bool = False,
         **kwargs: Any,
     ) -> AsyncIterator[str]:
         """
         Yield SSE chunks from a streaming completion. `model_override`: see
         `complete()`'s docstring — same per-tenant adapter routing applies.
         Each yielded string is a complete `data: {...}` SSE line.
+
+        `tools`/`tool_choice`: tool calls arrive as deltas (see
+        `stream_to_message`, which reassembles them). `include_usage` asks
+        for `stream_options.include_usage`, the OpenAI-standard way to get a
+        final chunk carrying real token usage (vLLM and llama.cpp both honor
+        it — verified against a live llama.cpp server).
         """
-        payload = {
+        payload: dict[str, Any] = {
             "model": model_override or self.model_id,
             "messages": messages,
             "temperature": temperature,
@@ -255,6 +274,12 @@ class InferenceClient:
         }
         if stop:
             payload["stop"] = stop
+        if tools:
+            payload["tools"] = tools
+            if tool_choice is not None:
+                payload["tool_choice"] = tool_choice
+        if include_usage:
+            payload["stream_options"] = {"include_usage": True}
 
         async with self._client.stream("POST", "/chat/completions", json=payload) as resp:
             resp.raise_for_status()
@@ -266,6 +291,110 @@ class InferenceClient:
                         yield "data: [DONE]\n\n"
                         break
                     yield f"data: {chunk}\n\n"
+
+    async def stream_to_message(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        on_text: Callable[[str], Awaitable[None]] | None = None,
+        model_override: str | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """
+        A streaming request reassembled into the same response dict
+        `complete()` returns — `choices[0].message` with `content` and any
+        `tool_calls`, plus real `usage` from the final chunk — so the agent
+        loop can stream every turn (live progress, no idle read-timeout on a
+        long turn) without changing how it reads the result. `on_text` is
+        awaited with each content delta as it arrives.
+
+        Retries (same policy as `complete()`) apply only until the first
+        chunk has been received: a stream that has already started cannot
+        be replayed, so a failure mid-stream propagates to the caller.
+        """
+        for attempt in range(1, 4):
+            try:
+                return await self._stream_and_accumulate(messages, on_text, model_override, kwargs)
+            except _StreamStartError as exc:
+                if exc.received_any or attempt >= 3 or not _is_retryable(exc.cause):
+                    raise exc.cause from None
+                await asyncio.sleep(min(2 ** (attempt - 1) * 0.5, 4.0))
+        raise RuntimeError("unreachable: stream_to_message exhausted attempts without raising")
+
+    async def _stream_and_accumulate(
+        self,
+        messages: list[dict[str, Any]],
+        on_text: Callable[[str], Awaitable[None]] | None,
+        model_override: str | None,
+        kwargs: dict[str, Any],
+    ) -> dict[str, Any]:
+        content_parts: list[str] = []
+        tool_calls: dict[int, dict[str, Any]] = {}
+        usage: dict[str, Any] = {}
+        finish_reason: str | None = None
+        response_id = ""
+        model_name = model_override or self.model_id
+        received_any = False
+        t0 = time.monotonic()
+        try:
+            async for sse in self.stream(messages, model_override=model_override, include_usage=True, **kwargs):
+                raw = sse[len("data: ") :].strip()
+                if raw == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                received_any = True
+                response_id = chunk.get("id") or response_id
+                model_name = chunk.get("model") or model_name
+                if chunk.get("usage"):
+                    usage = chunk["usage"]
+                for choice in chunk.get("choices") or []:
+                    delta = choice.get("delta") or {}
+                    text = delta.get("content")
+                    if text:
+                        content_parts.append(text)
+                        if on_text is not None:
+                            await on_text(text)
+                    for tc in delta.get("tool_calls") or []:
+                        idx = int(tc.get("index", 0))
+                        entry = tool_calls.setdefault(
+                            idx, {"id": "", "type": "function", "function": {"name": "", "arguments": ""}}
+                        )
+                        if tc.get("id"):
+                            entry["id"] = tc["id"]
+                        fn = tc.get("function") or {}
+                        if fn.get("name"):
+                            entry["function"]["name"] += fn["name"]
+                        if fn.get("arguments"):
+                            entry["function"]["arguments"] += fn["arguments"]
+                    if choice.get("finish_reason"):
+                        finish_reason = choice["finish_reason"]
+        except (httpx.HTTPError, httpx.StreamError) as exc:
+            raise _StreamStartError(exc, received_any) from exc
+
+        message: dict[str, Any] = {"role": "assistant", "content": "".join(content_parts) or None}
+        if tool_calls:
+            calls = [tool_calls[i] for i in sorted(tool_calls)]
+            for n, call in enumerate(calls):
+                call["id"] = call["id"] or f"call_{n}"
+            message["tool_calls"] = calls
+        logger.info(
+            "vs_inference.completion",
+            model=model_name,
+            prompt_tokens=usage.get("prompt_tokens", 0),
+            completion_tokens=usage.get("completion_tokens", 0),
+            latency_ms=round((time.monotonic() - t0) * 1000),
+            has_tool_calls=bool(tool_calls),
+            streamed=True,
+        )
+        return {
+            "id": response_id,
+            "model": model_name,
+            "choices": [{"index": 0, "message": message, "finish_reason": finish_reason or "stop"}],
+            "usage": usage,
+        }
 
     # ── Health check ──────────────────────────────────────────
 

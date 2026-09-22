@@ -63,3 +63,13 @@ def test_python_takes_priority_over_node_if_both_present():
     # documented limitation, not a silent surprise, so pin it with a test.
     profile = detect_repo_profile({"pyproject.toml", "package.json"})
     assert profile.ecosystem == "python"
+
+
+def test_python_repo_recognised_by_test_config_alone_has_tests_but_nothing_to_install():
+    # A pytest.ini / tox.ini / conftest.py repo with no packaging files is still a Python repo
+    # (found for real: `run_tests` reported ecosystem='unknown' on exactly this layout).
+    for marker in ("pytest.ini", "tox.ini", "conftest.py"):
+        profile = detect_repo_profile({marker, "app.py"})
+        assert profile.ecosystem == "python", marker
+        assert profile.test_cmd == "pytest"
+        assert profile.install_cmd is None

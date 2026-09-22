@@ -48,6 +48,13 @@ class CreateTenantRequest(BaseModel):
     tier: Literal["free", "pro", "enterprise"] = "free"
     daily_token_limit: int | None = None
     monthly_token_limit: int | None = None
+    max_concurrent_agents: int = Field(
+        default=0,
+        ge=0,
+        description="Cap on concurrently running agent tasks for this tenant. 0 (default) = no cap — "
+        "throughput is bounded by deployed worker/sandbox/GPU capacity. A positive value is enforced "
+        "with per-user fairness (no one user may hold more than half of it).",
+    )
 
 
 class CreateAPIKeyRequest(BaseModel):
@@ -55,7 +62,9 @@ class CreateAPIKeyRequest(BaseModel):
     scopes: list[str] = Field(default=["inference", "agent"])
     expires_in_days: int | None = Field(default=None, ge=1, le=3650)
     daily_token_limit_override: int | None = None
-    rate_limit_override: int | None = Field(default=None, ge=1, le=10000, description="Requests per minute")
+    rate_limit_override: int | None = Field(
+        default=None, ge=0, description="Requests per minute for this key; 0 = unlimited"
+    )
 
 
 class RevokeAPIKeyRequest(BaseModel):
@@ -103,8 +112,8 @@ class AgentTaskRequest(BaseModel):
     max_iterations: int = Field(
         default=15,
         ge=1,
-        le=50,
-        description="Maximum agent loop iterations (circuit breaker)",
+        description="Safety bound on plan/code/test/fix iterations for this task (a runaway loop stops here). "
+        "No ceiling — set what the task needs.",
     )
     enable_reasoning_review: bool = Field(
         default=True,
@@ -117,6 +126,11 @@ class AgentTaskRequest(BaseModel):
     context_files: dict[str, str] | None = Field(
         default=None,
         description="Extra context files as {filename: content}",
+    )
+    quality_blocking_tools: list[str] | None = Field(
+        default=None,
+        description="Quality-gate tools whose findings send the task back to fixing. Default: the server's "
+        "QUALITY_GATE_BLOCKING_TOOLS (bandit, mypy). Add 'ruff', 'eslint', 'tsc', 'go', 'cargo' to be stricter.",
     )
 
 

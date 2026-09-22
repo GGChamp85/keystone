@@ -158,7 +158,7 @@ def _read_dataset_preview(path: Path, lines: int) -> tuple[int, list[dict]] | No
                 try:
                     records.append(json.loads(line))
                 except json.JSONDecodeError:
-                    records.append({"_raw": line.strip()[:500]})
+                    records.append({"_raw": line.strip()})
     return total, records
 
 

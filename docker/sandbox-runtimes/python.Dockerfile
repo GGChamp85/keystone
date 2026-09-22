@@ -35,9 +35,13 @@ ENV PIP_INDEX_URL=${PIP_INDEX_URL} \
 
 # git: the real git workflow (clone/branch/commit/push, workspace.py).
 # curl: git's own https transport plus general debugging/tool use.
+# universal-ctags: the repository map (src/orchestrator/repo_map.py) — one
+# package covering every language the agent meets, instead of tree-sitter
+# grammar wheels that would have to ride along in the air-gap bundle.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
+    universal-ctags \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir \

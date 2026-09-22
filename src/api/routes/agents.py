@@ -57,6 +57,7 @@ async def submit_task(
             enable_reasoning_review=req.enable_reasoning_review,
             enable_sandbox_testing=req.enable_sandbox_testing,
             context_files=req.context_files,
+            quality_blocking_tools=req.quality_blocking_tools,
         )
     except ConcurrencyLimitExceeded as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc

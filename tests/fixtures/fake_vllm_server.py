@@ -11,7 +11,7 @@ responses, run as a subprocess by tests/test_inference_client.py.
 import json
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 app = FastAPI()
 state = {"call_count": 0, "fail_with_429_times": 0, "last_payload": None, "last_headers": None}
@@ -49,6 +49,9 @@ async def chat_completions(req: Request):
 
     if state["call_count"] <= state["fail_with_429_times"]:
         return JSONResponse(status_code=429, content={"error": "rate limited"})
+
+    if payload.get("stream"):
+        return StreamingResponse(_stream_chunks(payload), media_type="text/event-stream")
 
     if payload.get("tools"):
         return {
@@ -89,6 +92,62 @@ async def chat_completions(req: Request):
         "choices": [{"message": {"role": "assistant", "content": "hello"}, "finish_reason": "stop"}],
         "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
     }
+
+
+def _sse(obj: dict) -> str:
+    return f"data: {json.dumps(obj)}\n\n"
+
+
+async def _stream_chunks(payload: dict):
+    """The real chunk shapes vLLM emits: role first, then content deltas — or a tool call whose id/name
+    arrive in one chunk and whose JSON arguments are split across later ones — then finish_reason, then
+    (only with stream_options.include_usage) a usage-only chunk with empty choices, then [DONE]."""
+    base = {"id": "chatcmpl-stream", "object": "chat.completion.chunk", "model": payload.get("model", "fake")}
+    yield _sse({**base, "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}]})
+    if payload.get("tools"):
+        args = json.dumps({"path": "app.py"})
+        head, tail = args[:5], args[5:]
+        yield _sse(
+            {
+                **base,
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": "call_s1",
+                                    "type": "function",
+                                    "function": {"name": "read_file", "arguments": head},
+                                }
+                            ]
+                        },
+                        "finish_reason": None,
+                    }
+                ],
+            }
+        )
+        yield _sse(
+            {
+                **base,
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"tool_calls": [{"index": 0, "function": {"arguments": tail}}]},
+                        "finish_reason": None,
+                    }
+                ],
+            }
+        )
+        yield _sse({**base, "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]})
+    else:
+        for piece in ("hel", "lo"):
+            yield _sse({**base, "choices": [{"index": 0, "delta": {"content": piece}, "finish_reason": None}]})
+        yield _sse({**base, "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
+    if (payload.get("stream_options") or {}).get("include_usage"):
+        yield _sse({**base, "choices": [], "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}})
+    yield "data: [DONE]\n\n"
 
 
 @app.post("/set_bad_json_once")

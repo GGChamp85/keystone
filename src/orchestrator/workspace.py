@@ -45,7 +45,7 @@ class WorkspaceCommandError(RuntimeError):
         self.exit_code = exit_code
         self.stdout = stdout
         self.stderr = stderr
-        super().__init__(f"command failed ({exit_code}): {command}\n{stderr[:2000]}")
+        super().__init__(f"command failed ({exit_code}): {command}\n{stderr}")
 
 
 @dataclass
@@ -157,6 +157,11 @@ class Workspace:
     async def list_files(self, max_depth: int = 2) -> set[str]:
         """Relative file/dir names near the repo root — feeds `repo_profile.detect_repo_profile`."""
         result = await self.run(f"find . -maxdepth {max_depth} -mindepth 1 -printf '%P\\n'", check=False)
+        return {line.strip() for line in result.get("stdout", "").splitlines() if line.strip()}
+
+    async def list_tracked_files(self) -> set[str]:
+        """Every git-tracked path (relative, any depth) — feeds `test_scope.related_test_command`."""
+        result = await self.run("git ls-files", check=False)
         return {line.strip() for line in result.get("stdout", "").splitlines() if line.strip()}
 
     async def read_package_json_scripts(self) -> dict[str, str]:

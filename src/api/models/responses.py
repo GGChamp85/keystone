@@ -131,10 +131,10 @@ class TokenBudgetResponse(BaseModel):
     tenant_id: UUID
     daily_limit: int
     daily_used: int
-    daily_remaining: int
+    daily_remaining: int | None  # None = unlimited
     monthly_limit: int
     monthly_used: int
-    monthly_remaining: int
+    monthly_remaining: int | None  # None = unlimited
     percent_daily_used: float
     percent_monthly_used: float
 

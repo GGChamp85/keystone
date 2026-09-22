@@ -121,9 +121,13 @@ class Tenant(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     tier: Mapped[TenantTier] = mapped_column(SAEnum(TenantTier), default=TenantTier.FREE, nullable=False)
-    daily_token_limit: Mapped[int] = mapped_column(BigInteger, nullable=False, default=5_000_000)
-    monthly_token_limit: Mapped[int] = mapped_column(BigInteger, nullable=False, default=100_000_000)
-    max_concurrent_agents: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    # Token budgets: 0 = unlimited (the default). A positive value is enforced by the gateway
+    # (src/api/middleware/rate_limiter.py) and the agent circuit breaker.
+    daily_token_limit: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    monthly_token_limit: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    # 0 = no cap (the default): concurrency is bounded by deployed capacity, not by policy.
+    # A positive value is enforced by src/orchestrator/concurrency.py with per-user fairness.
+    max_concurrent_agents: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     subscription_status: Mapped[SubscriptionStatus] = mapped_column(
         SAEnum(SubscriptionStatus), default=SubscriptionStatus.ACTIVE, nullable=False
     )

@@ -64,6 +64,7 @@ async def create_tenant(req: CreateTenantRequest, request: Request, db: AsyncSes
         tier=TenantTier(req.tier),
         daily_token_limit=req.daily_token_limit or settings.default_daily_token_limit,
         monthly_token_limit=req.monthly_token_limit or settings.default_monthly_token_limit,
+        max_concurrent_agents=req.max_concurrent_agents,
     )
     db.add(tenant)
     await db.flush()

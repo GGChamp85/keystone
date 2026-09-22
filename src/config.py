@@ -140,7 +140,7 @@ class Settings(BaseSettings):
     sandbox_backend: str = "gvisor"  # "gvisor" | "firecracker"
     sandbox_daemon_url: str = "http://sandbox-daemon:9000"
     sandbox_timeout_seconds: int = 300
-    sandbox_max_concurrent: int = 10
+    sandbox_max_concurrent: int = 0  # per-tenant concurrent sandboxes; 0 = no cap (host capacity is the limit)
     allow_unsandboxed_dev: bool = False
 
     # ── Git (internal Gitea in air-gapped mode) ────────────────
@@ -158,10 +158,37 @@ class Settings(BaseSettings):
     go_proxy_url: str | None = None  # e.g. https://goproxy.internal.keystone.local
 
     # ── Token Budgets ─────────────────────────────────────────
-    default_daily_token_limit: int = 5_000_000
-    default_monthly_token_limit: int = 100_000_000
-    max_agent_iterations: int = 15
-    max_tokens_per_request: int = 32_768
+    # Every budget here is 0 = no limit by default. Capacity is bounded by what you
+    # deploy (GPUs, workers, sandboxes), not by a policy number; set a positive value
+    # only to impose a real spend or safety cap for a tenant, a task, or a request.
+    default_daily_token_limit: int = 0  # tokens/day per new tenant (0 = unlimited)
+    default_monthly_token_limit: int = 0  # tokens/month per new tenant (0 = unlimited)
+    default_requests_per_minute: int = 0  # gateway request rate per API key (0 = unlimited)
+    max_agent_iterations: int = (
+        15  # the one per-task SAFETY bound (a runaway fix/test loop); per-task override, no ceiling
+    )
+    max_tokens_per_task: int = 0  # tokens one agent task may spend (0 = unlimited)
+    max_tokens_per_request: int = 0  # ceiling on a completion request's max_tokens (0 = the model's own limit)
+
+    # ── Agent time bounds (SAFETY, not capacity — generous, configurable, per-task) ──
+    agent_test_timeout_seconds: int = 3_600  # the repo's full test suite
+    agent_install_timeout_seconds: int = 3_600  # the repo's dependency install
+    agent_quality_timeout_seconds: int = 1_800  # each lint/typecheck/security tool
+    agent_tool_timeout_seconds: int = 1_800  # ceiling for run_command's own timeout argument
+    agent_max_wall_clock_seconds: int = 0  # whole-task wall clock (0 = none; max_iterations is the bound)
+
+    # ── Coding agent behaviour (src/orchestrator/nodes/) ──────────
+    # Which quality-gate tools send a task back to fixing on a finding (nodes/quality.py).
+    # bandit (high/medium) and mypy by default; add "ruff", "eslint", "tsc", "go", "cargo"
+    # to fail on lint too. Per-task override: AgentTaskRequest.quality_blocking_tools.
+    quality_gate_blocking_tools: list[str] = Field(default_factory=lambda: ["bandit", "mypy"])
+    # Token budget for the coding loop's own conversation (context.py's trimming/summarising);
+    # keep headroom under the serving model's max_model_len for the 8192-token completion.
+    agent_max_context_tokens: int = 24_000
+    # Stream each coding turn (tool calls + text accumulated from deltas) instead of one
+    # blocking request — live progress in the trace and no idle read-timeout on long turns.
+    # Set false for a backend that cannot stream tool calls.
+    agent_stream_turns: bool = True
 
     # ── Temporal ──────────────────────────────────────────────
     temporal_host: str = "temporal:7233"

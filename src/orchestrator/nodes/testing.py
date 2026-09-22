@@ -31,14 +31,15 @@ import time
 
 import structlog
 
-from src.orchestrator.nodes._shared import get_or_clone_workspace
-from src.orchestrator.repo_profile import detect_repo_profile
+from src.config import get_settings
+from src.orchestrator.nodes._shared import detect_profile, get_or_clone_workspace
 from src.orchestrator.state import (
     AgentPhase,
     AgentState,
     IterationRecord,
     TestResult,
 )
+from src.orchestrator.test_scope import related_test_command
 from src.orchestrator.workspace import Workspace, WorkspaceCommandError
 from src.sandbox.manager import SandboxManager
 
@@ -82,9 +83,7 @@ async def _test_in_repo_workspace(state: AgentState) -> AgentState:
             state.error_message = "No file changes to test (coding produced an empty diff)."
             return state
 
-        files = await ws.list_files()
-        scripts = await ws.read_package_json_scripts() if "package.json" in files else {}
-        profile = detect_repo_profile(files, scripts)
+        profile = await detect_profile(ws)
 
         state.test_results = []
         if not profile.test_cmd:
@@ -97,11 +96,21 @@ async def _test_in_repo_workspace(state: AgentState) -> AgentState:
             )
             all_passed = False
         else:
-            all_passed = await _run_command_as_test(ws, profile.test_cmd, profile.test_cmd, state.test_results)
+            # Related tests first (fast, targeted feedback), the full suite only
+            # once they pass — a failure in the scoped run goes straight back to
+            # fixing with the relevant output instead of a wall of unrelated tests.
+            scoped = related_test_command(profile, state.files_touched, await ws.list_tracked_files())
+            all_passed = True
+            if scoped:
+                all_passed = await _run_command_as_test(
+                    ws, f"related: {scoped}", scoped, state.test_results, no_tests_collected_ok=True
+                )
+            if all_passed:
+                all_passed = await _run_command_as_test(ws, profile.test_cmd, profile.test_cmd, state.test_results)
 
         state.tests_passed = all_passed
         state.sandbox_output = "\n".join(
-            f"[{'PASS' if tr.passed else 'FAIL'}] {tr.test_name}: {tr.output[:200]}" for tr in state.test_results
+            f"[{'PASS' if tr.passed else 'FAIL'}] {tr.test_name}: {tr.output}" for tr in state.test_results
         )
 
         files_modified = len(state.files_touched) or len(state.file_changes)
@@ -121,8 +130,7 @@ async def _test_in_repo_workspace(state: AgentState) -> AgentState:
                 phase="testing",
                 model_role="sandbox",
                 test_results=[
-                    {"test_name": tr.test_name, "passed": tr.passed, "error": tr.error[:200]}
-                    for tr in state.test_results
+                    {"test_name": tr.test_name, "passed": tr.passed, "error": tr.error} for tr in state.test_results
                 ],
                 duration_ms=int((time.monotonic() - t0) * 1000),
             )
@@ -149,22 +157,26 @@ async def _test_in_repo_workspace(state: AgentState) -> AgentState:
     return state
 
 
-async def _run_command_as_test(ws: Workspace, name: str, command: str, results: list[TestResult]) -> bool:
+async def _run_command_as_test(
+    ws: Workspace, name: str, command: str, results: list[TestResult], *, no_tests_collected_ok: bool = False
+) -> bool:
     try:
-        result = await ws.run(command, timeout=180, check=False)
-        passed = result["exit_code"] == 0
+        result = await ws.run(command, timeout=get_settings().agent_test_timeout_seconds, check=False)
+        # pytest exits 5 when it collected nothing — for a scoped run that means "no related
+        # tests after all", not a failure; the full suite that follows is the real verdict.
+        passed = result["exit_code"] == 0 or (no_tests_collected_ok and result["exit_code"] == 5)
         results.append(
             TestResult(
                 test_name=name,
                 passed=passed,
-                output=result.get("stdout", "")[:5000],
-                error=result.get("stderr", "")[:5000],
+                output=result.get("stdout", ""),
+                error=result.get("stderr", ""),
                 duration_ms=result.get("duration_ms", 0),
             )
         )
         return passed
     except WorkspaceCommandError as exc:
-        results.append(TestResult(test_name=name, passed=False, error=str(exc)[:5000]))
+        results.append(TestResult(test_name=name, passed=False, error=str(exc)))
         return False
 
 
@@ -207,8 +219,8 @@ async def _test_standalone(state: AgentState) -> AgentState:
                     TestResult(
                         test_name=cmd_name,
                         passed=passed,
-                        output=result.get("stdout", "")[:5000],
-                        error=result.get("stderr", "")[:5000],
+                        output=result.get("stdout", ""),
+                        error=result.get("stderr", ""),
                         duration_ms=result.get("duration_ms", 0),
                     )
                 )
@@ -219,7 +231,7 @@ async def _test_standalone(state: AgentState) -> AgentState:
                         "testing.test_failed",
                         test=cmd_name,
                         exit_code=result["exit_code"],
-                        stderr=result.get("stderr", "")[:500],
+                        stderr=result.get("stderr", ""),
                     )
 
             except Exception as exc:
@@ -234,7 +246,7 @@ async def _test_standalone(state: AgentState) -> AgentState:
 
         state.tests_passed = all_passed
         state.sandbox_output = "\n".join(
-            f"[{'PASS' if tr.passed else 'FAIL'}] {tr.test_name}: {tr.output[:200]}" for tr in state.test_results
+            f"[{'PASS' if tr.passed else 'FAIL'}] {tr.test_name}: {tr.output}" for tr in state.test_results
         )
 
         if all_passed:
@@ -247,9 +259,7 @@ async def _test_standalone(state: AgentState) -> AgentState:
             state.consecutive_test_failures += 1
             state.phase = AgentPhase.FIXING  # Go back to coding to fix
 
-        test_data = [
-            {"test_name": tr.test_name, "passed": tr.passed, "error": tr.error[:200]} for tr in state.test_results
-        ]
+        test_data = [{"test_name": tr.test_name, "passed": tr.passed, "error": tr.error} for tr in state.test_results]
 
         state.record_iteration(
             IterationRecord(

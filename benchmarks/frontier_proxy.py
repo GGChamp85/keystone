@@ -286,6 +286,42 @@ async def chat_completions(request: Request):
         resp = await _client.messages.create(**kwargs)
         return JSONResponse(_anthropic_response_to_openai(resp, requested_model))
 
+    include_usage = bool((body.get("stream_options") or {}).get("include_usage"))
+
+    if kwargs.get("tools"):
+        # Tool-call streaming: the agent loop (src/orchestrator/nodes/coding.py) streams every
+        # turn and reassembles tool calls from deltas. Rather than translate Anthropic's
+        # input_json_delta events, the complete response is fetched and emitted as one
+        # well-formed chunk sequence (content, tool_calls, finish_reason, usage, [DONE]) —
+        # correct for every consumer, just not incremental. Incremental translation is W4's.
+        resp = await _client.messages.create(**kwargs)
+        translated = _anthropic_response_to_openai(resp, requested_model)
+
+        async def emulated_stream():
+            chunk_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
+            base = {
+                "id": chunk_id,
+                "object": "chat.completion.chunk",
+                "created": int(time.time()),
+                "model": requested_model,
+            }
+
+            def chunk(delta: dict[str, Any], finish_reason: str | None = None) -> str:
+                choice = {"index": 0, "delta": delta, "finish_reason": finish_reason}
+                return f"data: {json.dumps({**base, 'choices': [choice]})}\n\n"
+
+            message = translated["choices"][0]["message"]
+            if message.get("content"):
+                yield chunk({"content": message["content"]})
+            if message.get("tool_calls"):
+                yield chunk({"tool_calls": [{"index": i, **tc} for i, tc in enumerate(message["tool_calls"])]})
+            yield chunk({}, translated["choices"][0].get("finish_reason") or "stop")
+            if include_usage:
+                yield f"data: {json.dumps({**base, 'choices': [], 'usage': translated.get('usage', {})})}\n\n"
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(emulated_stream(), media_type="text/event-stream")
+
     async def event_stream():
         chunk_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
         async with _client.messages.stream(**kwargs) as stream:
@@ -306,6 +342,16 @@ async def chat_completions(request: Request):
             "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
         }
         yield f"data: {json.dumps(final)}\n\n"
+        if include_usage:
+            # The SDK's stream exposes the final message (with real usage) once the stream is consumed.
+            final_message = await stream.get_final_message()
+            usage = {
+                "prompt_tokens": final_message.usage.input_tokens,
+                "completion_tokens": final_message.usage.output_tokens,
+                "total_tokens": final_message.usage.input_tokens + final_message.usage.output_tokens,
+            }
+            usage_chunk = {**final, "choices": [], "usage": usage}
+            yield f"data: {json.dumps(usage_chunk)}\n\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

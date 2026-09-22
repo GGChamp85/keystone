@@ -25,7 +25,9 @@ with workflow.unsafe.imports_passed_through():
 # (src/orchestrator/circuit_breaker.py) — the activity timeout must always be
 # >= the circuit breaker's own wall-clock limit, or Temporal would kill the
 # activity before the agent's own timeout logic gets a chance to fail cleanly.
-DEFAULT_MAX_WALL_CLOCK_SECONDS = 1800
+DEFAULT_MAX_WALL_CLOCK_SECONDS = (
+    86_400  # activity start-to-close: a day — tasks are bounded by max_iterations, not by a clock
+)
 
 
 @dataclass
@@ -44,6 +46,7 @@ class AgentWorkflowInput:
     enable_sandbox_testing: bool = True
     user_id: str | None = None
     user_slug: str | None = None
+    quality_blocking_tools: list[str] | None = None
 
 
 @workflow.defn
@@ -82,6 +85,7 @@ class CodingAgentWorkflow:
                 input.enable_sandbox_testing,
                 input.user_id,
                 input.user_slug,
+                input.quality_blocking_tools,
             ],
             start_to_close_timeout=timedelta(seconds=DEFAULT_MAX_WALL_CLOCK_SECONDS + 300),
             heartbeat_timeout=timedelta(minutes=3),

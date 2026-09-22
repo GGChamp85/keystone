@@ -71,9 +71,10 @@ class _TenantConcurrency:
         self._lock = asyncio.Lock()
 
     async def acquire(self, tenant_id: str, max_concurrent: int) -> None:
+        """`max_concurrent` 0 = no cap (the default): the Docker host's real capacity is the limit."""
         async with self._lock:
             current = self._counts.get(tenant_id, 0)
-            if current >= max_concurrent:
+            if max_concurrent > 0 and current >= max_concurrent:
                 raise HTTPException(
                     status_code=429,
                     detail=f"Tenant sandbox concurrency limit reached ({max_concurrent})",
@@ -101,7 +102,7 @@ class CreateRequest(BaseModel):
     network_enabled: bool = False
     cpu_limit: float = 1.0
     memory_mb: int = 1024
-    max_concurrent_per_tenant: int = 10
+    max_concurrent_per_tenant: int = 0  # 0 = no cap
 
 
 class CreateResponse(BaseModel):

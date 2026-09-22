@@ -31,13 +31,13 @@ import time
 
 import structlog
 
+from src.config import get_settings
 from src.orchestrator.nodes._shared import get_or_clone_workspace, next_gate_phase
 from src.orchestrator.repo_profile import detect_repo_profile
 from src.orchestrator.state import AgentPhase, AgentState, IterationRecord, QualityFinding
 
 logger = structlog.get_logger(__name__)
 
-QUALITY_TOOL_TIMEOUT = 180
 _MYPY_LINE_RE = re.compile(
     r"^(?P<path>[^:]+):(?P<line>\d+):(?:\d+:)?\s*error:\s*(?P<message>.+?)(?:\s*\[(?P<code>[\w-]+)])?$"
 )
@@ -110,7 +110,7 @@ def _parse_generic(tool: str, output: str) -> list[QualityFinding]:
     stripped = output.strip()
     if not stripped:
         return []
-    return [QualityFinding(tool=tool, path="", line=None, severity="warning", code="", message=stripped[:4000])]
+    return [QualityFinding(tool=tool, path="", line=None, severity="warning", code="", message=stripped)]
 
 
 def _findings_for_command(command: str, output: str) -> list[QualityFinding]:
@@ -124,8 +124,15 @@ def _findings_for_command(command: str, output: str) -> list[QualityFinding]:
     return _parse_generic(tool, output)
 
 
-def _is_blocking(finding: QualityFinding) -> bool:
-    return finding.tool in ("bandit", "mypy") and finding.severity == "error"
+def _is_blocking(finding: QualityFinding, blocking_tools: list[str] | tuple[str, ...] = ("bandit", "mypy")) -> bool:
+    """A finding blocks when its tool is in `blocking_tools` (Settings.quality_gate_blocking_tools,
+    or the task's own list). bandit's low-severity findings are informational even then; every
+    other listed tool blocks on any warning-or-worse finding — listing `ruff` means "fail on lint"."""
+    if finding.tool not in blocking_tools:
+        return False
+    if finding.tool == "bandit":
+        return finding.severity == "error"  # high/medium; low is `info`
+    return finding.severity in ("error", "warning", "critical")
 
 
 async def quality_node(state: AgentState) -> AgentState:
@@ -146,20 +153,20 @@ async def quality_node(state: AgentState) -> AgentState:
 
         all_findings: list[QualityFinding] = []
         for command in commands:
-            result = await ws.run(command, timeout=QUALITY_TOOL_TIMEOUT, check=False)
+            result = await ws.run(command, timeout=get_settings().agent_quality_timeout_seconds, check=False)
             if result.get("exit_code", 0) == 0:
                 continue
             output = f"{result.get('stdout', '')}\n{result.get('stderr', '')}"
             all_findings.extend(_findings_for_command(command, output))
 
         state.quality_findings = all_findings
-        blocking = [f for f in all_findings if _is_blocking(f)]
+        blocking = [f for f in all_findings if _is_blocking(f, state.quality_blocking_tools)]
 
         if blocking:
             state.consecutive_quality_failures += 1
             state.phase = AgentPhase.FIXING
             state.error_message = f"{len(blocking)} blocking quality finding(s): " + "; ".join(
-                f"{f.tool}:{f.path}:{f.line} {f.message[:100]}" for f in blocking[:5]
+                f"{f.tool}:{f.path}:{f.line} {f.message}" for f in blocking
             )
         else:
             state.consecutive_quality_failures = 0
@@ -177,7 +184,7 @@ async def quality_node(state: AgentState) -> AgentState:
                         "line": f.line,
                         "severity": f.severity,
                         "code": f.code,
-                        "message": f.message[:300],
+                        "message": f.message,
                     }
                     for f in all_findings
                 ],

@@ -46,6 +46,10 @@ class ScriptedClient:
             raise AssertionError("ScriptedClient ran out of scripted responses")
         return self._script.pop(0)
 
+    async def stream_to_message(self, messages, on_text=None, **kwargs):
+        # The loop streams each turn by default; the scripted client answers the same way either way.
+        return await self.complete(messages, **kwargs)
+
 
 def _tool_call_response(name: str, arguments: dict, prompt_tokens=50, completion_tokens=20) -> dict:
     return {

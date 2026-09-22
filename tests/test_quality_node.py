@@ -161,3 +161,37 @@ async def test_disabled_quality_gates_skips_straight_through():
 
     assert result.quality_findings == []
     assert result.phase == AgentPhase.COMPLETE
+
+
+# ── which tools block (pure) ──────────────────────────────────
+
+
+def test_blocking_tools_default_and_per_task_override():
+    from src.orchestrator.nodes.quality import _is_blocking
+    from src.orchestrator.state import QualityFinding
+
+    bandit_high = QualityFinding(tool="bandit", path="a.py", severity="error", message="hardcoded password")
+    bandit_low = QualityFinding(tool="bandit", path="a.py", severity="info", message="assert used")
+    mypy_err = QualityFinding(tool="mypy", path="a.py", severity="error", message="incompatible type")
+    ruff_warn = QualityFinding(tool="ruff", path="a.py", severity="warning", message="unused import")
+    eslint = QualityFinding(tool="npx", path="", severity="warning", message="raw eslint output")
+
+    default = ["bandit", "mypy"]
+    assert _is_blocking(bandit_high, default) and _is_blocking(mypy_err, default)
+    assert not _is_blocking(bandit_low, default)  # low severity is informational even when bandit blocks
+    assert not _is_blocking(ruff_warn, default)  # lint is advisory by default
+
+    strict = ["bandit", "mypy", "ruff", "npx"]
+    assert _is_blocking(ruff_warn, strict) and _is_blocking(eslint, strict)  # listing a lint tool means fail on lint
+    assert not _is_blocking(bandit_low, strict)
+
+    lenient: list[str] = []
+    assert not _is_blocking(bandit_high, lenient) and not _is_blocking(mypy_err, lenient)
+
+
+def test_agent_task_request_accepts_a_blocking_tools_override():
+    from src.api.models.requests import AgentTaskRequest
+
+    req = AgentTaskRequest(task="fix the flaky test in the scheduler", quality_blocking_tools=["ruff", "mypy"])
+    assert req.quality_blocking_tools == ["ruff", "mypy"]
+    assert AgentTaskRequest(task="fix the flaky test in the scheduler").quality_blocking_tools is None

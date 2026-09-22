@@ -105,3 +105,72 @@ def test_trim_turns_never_splits_an_assistant_tool_calls_message_from_its_tool_r
     result = trim_turns_to_budget(turns, max_tokens=100_000, keep_head_turns=1)
 
     assert result == [*head, *turn]
+
+
+# ── summarise-on-overflow (trim_turns_to_budget_async) ────────
+
+
+def _big_turns(n: int) -> list[list[dict]]:
+    head = [{"role": "system", "content": "sys"}, {"role": "user", "content": "task"}]
+    return [head] + [
+        [
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {"id": f"c{i}", "type": "function", "function": {"name": "read_file", "arguments": "{}"}}
+                ],
+            },
+            # ~300 real tokens per turn (distinct words — a run of one character tokenises to almost nothing)
+            {
+                "role": "tool",
+                "tool_call_id": f"c{i}",
+                "content": f"turn {i} " + " ".join(f"w{i}_{j}" for j in range(150)),
+            },
+        ]
+        for i in range(n)
+    ]
+
+
+async def test_async_trim_replaces_dropped_turns_with_the_summarizers_text():
+    from src.orchestrator.context import trim_turns_to_budget_async
+
+    seen: list[list[dict]] = []
+
+    async def summarizer(messages):
+        seen.append(messages)
+        return "Read app.py (greet at line 1); patched app.py; tests passed."
+
+    messages = await trim_turns_to_budget_async(_big_turns(6), max_tokens=500, keep_head_turns=1, summarizer=summarizer)
+    assert messages[0]["role"] == "system" and messages[1]["content"] == "task"  # head kept
+    notice = messages[2]
+    assert notice["role"] == "user"
+    assert notice["content"].startswith("[Context summary of ")
+    assert "Read app.py (greet at line 1)" in notice["content"]
+    assert seen and all(m["role"] in ("assistant", "tool") for m in seen[0])  # only the dropped turns were summarised
+    assert messages[-1]["content"].startswith("turn 5")  # the most recent turn survives
+
+
+async def test_async_trim_falls_back_to_the_plain_notice_when_the_summarizer_fails_or_is_empty():
+    from src.orchestrator.context import trim_turns_to_budget_async
+
+    async def broken(messages):
+        raise RuntimeError("model down")
+
+    async def empty(messages):
+        return "   "
+
+    for summarizer in (broken, empty, None):
+        messages = await trim_turns_to_budget_async(_big_turns(6), max_tokens=500, summarizer=summarizer)
+        assert "were dropped to stay within the context budget" in messages[2]["content"]
+
+
+async def test_async_trim_is_a_no_op_within_budget_and_never_calls_the_summarizer():
+    from src.orchestrator.context import trim_turns_to_budget_async
+
+    async def must_not_run(messages):
+        raise AssertionError("summarizer called within budget")
+
+    turns = _big_turns(2)
+    messages = await trim_turns_to_budget_async(turns, max_tokens=100_000, summarizer=must_not_run)
+    assert messages == [m for t in turns for m in t]

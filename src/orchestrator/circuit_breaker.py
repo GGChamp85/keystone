@@ -38,11 +38,11 @@ class CircuitBreakerTripped(Exception):
 @dataclass
 class CircuitBreakerConfig:
     max_iterations: int = 15
-    max_tokens_per_task: int = 2_000_000
+    max_tokens_per_task: int = 0  # 0 = unlimited
     max_consecutive_test_failures: int = 3
     max_consecutive_review_failures: int = 3
     max_consecutive_quality_failures: int = 3
-    max_wall_clock_seconds: int = 1800  # 30 minutes
+    max_wall_clock_seconds: int = 0  # 0 = no wall-clock cap; Settings.agent_max_wall_clock_seconds
     tenant_daily_limit: int | None = None
     tenant_monthly_limit: int | None = None
 
@@ -78,7 +78,7 @@ class CircuitBreaker:
             )
 
         # 2. Token budget
-        if state.total_tokens >= self.config.max_tokens_per_task:
+        if self.config.max_tokens_per_task > 0 and state.total_tokens >= self.config.max_tokens_per_task:
             raise self._trip(
                 "token_budget",
                 f"Token budget exhausted ({state.total_tokens:,}/{self.config.max_tokens_per_task:,}). "
@@ -121,7 +121,7 @@ class CircuitBreaker:
         # 6. Wall-clock timeout
         if self._start_time is not None:
             elapsed = time.monotonic() - self._start_time
-            if elapsed >= self.config.max_wall_clock_seconds:
+            if self.config.max_wall_clock_seconds > 0 and elapsed >= self.config.max_wall_clock_seconds:
                 raise self._trip(
                     "wall_clock_timeout",
                     f"Wall-clock timeout ({elapsed:.0f}s / {self.config.max_wall_clock_seconds}s). "

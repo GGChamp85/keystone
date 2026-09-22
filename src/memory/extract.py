@@ -80,13 +80,11 @@ def _build_signal(
     blocking_quality = [f for f in quality_findings if f.get("severity") == "error"]
     if blocking_quality:
         parts.append("\n## Quality Findings That Had To Be Fixed")
-        parts.extend(f"- [{f.get('tool')}] {f.get('path')}: {f.get('message', '')[:200]}" for f in blocking_quality)
+        parts.extend(f"- [{f.get('tool')}] {f.get('path')}: {f.get('message', '')}" for f in blocking_quality)
     blocking_review = [c for c in review_comments if c.get("severity") in ("error", "critical")]
     if blocking_review:
         parts.append("\n## Review Comments That Had To Be Fixed")
-        parts.extend(
-            f"- [{c.get('severity')}] {c.get('file_path')}: {c.get('message', '')[:200]}" for c in blocking_review
-        )
+        parts.extend(f"- [{c.get('severity')}] {c.get('file_path')}: {c.get('message', '')}" for c in blocking_review)
     return "\n".join(parts)
 
 

@@ -84,3 +84,24 @@ async def test_real_stream_yields_chunks_and_terminates(client):
     chunks = [chunk async for chunk in client.stream(messages=[{"role": "user", "content": "Say hi."}], max_tokens=16)]
     assert chunks, "stream produced no chunks"
     assert chunks[-1].strip().endswith("[DONE]"), chunks[-1]
+
+
+@requires_model_backend
+async def test_stream_to_message_against_the_real_backend_returns_text_and_real_usage(client):
+    deltas: list[str] = []
+
+    async def on_text(t: str) -> None:
+        deltas.append(t)
+
+    response = await client.stream_to_message(
+        [{"role": "user", "content": "Reply with the single word: ready"}],
+        max_tokens=16,
+        temperature=0.0,
+        on_text=on_text,
+    )
+    message = response["choices"][0]["message"]
+    assert message["role"] == "assistant"
+    assert message["content"] and message["content"].strip()
+    assert "".join(deltas) == message["content"]  # every delta reached the callback, in order
+    usage = response["usage"]
+    assert usage["prompt_tokens"] > 0 and usage["completion_tokens"] > 0  # real include_usage from the server

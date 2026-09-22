@@ -257,3 +257,20 @@ async def test_submit_task_with_auto_model_routes_a_simple_task_to_coding_fallba
             await asyncio.sleep(0.1)
     finally:
         get_settings.cache_clear()
+
+
+def test_per_user_fair_share_is_uncapped_when_the_tenant_is_uncapped():
+    assert per_user_fair_share(0) == 0
+
+
+async def test_zero_cap_means_unlimited_for_the_tenant_and_every_user(tenant_id):
+    """The default: no policy cap. Many tasks from one user and from several users all acquire,
+    membership is still tracked (so release/observability work), and nothing is ever rejected."""
+    user_a, user_b = uuid.uuid4(), uuid.uuid4()
+    tasks = [uuid.uuid4() for _ in range(12)]
+    for i, task in enumerate(tasks):
+        assert await try_acquire_task_slot(tenant_id, task, tenant_max=0, user_id=user_a if i % 3 else user_b) is True
+    assert await current_tenant_concurrency(tenant_id) == 12
+    for i, task in enumerate(tasks):
+        await release_task_slot(tenant_id, task, user_id=user_a if i % 3 else user_b)
+    assert await current_tenant_concurrency(tenant_id) == 0

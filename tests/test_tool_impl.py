@@ -15,7 +15,7 @@ import uuid
 
 import pytest
 
-from src.orchestrator.tools.impl import apply_patch, grep, list_dir, read_file, run_command
+from src.orchestrator.tools.impl import apply_patch, get_repo_map, grep, list_dir, read_file, run_command, run_tests
 from src.orchestrator.workspace import Workspace
 from src.sandbox.manager import SandboxManager
 
@@ -59,6 +59,26 @@ async def test_read_file_missing_path_is_a_clean_failure_not_an_exception(ws):
 
 
 @requires_sandbox
+async def test_read_file_line_range_is_numbered_and_bounded(ws):
+    await ws.write_file("multi.py", "\n".join(f"line{i}" for i in range(1, 11)) + "\n")
+    result = await read_file(ws, "multi.py", start_line=3, end_line=5)
+    assert result.ok
+    assert result.output == "multi.py lines 3-5 of 10\n3: line3\n4: line4\n5: line5"
+    tail = await read_file(ws, "multi.py", start_line=9)
+    assert tail.ok and tail.output.endswith("10: line10")
+    past_end = await read_file(ws, "multi.py", start_line=50)
+    assert not past_end.ok and "only 10 lines" in past_end.error
+
+
+@requires_sandbox
+async def test_get_repo_map_returns_real_symbols_from_ctags(ws):
+    result = await get_repo_map(ws, max_tokens=1000)
+    assert result.ok
+    assert "app.py:" in result.output
+    assert "1: function greet(name)" in result.output
+
+
+@requires_sandbox
 async def test_list_dir_shows_the_file_we_created(ws):
     result = await list_dir(ws, ".")
     assert result.ok
@@ -93,6 +113,31 @@ async def test_apply_patch_search_not_found_gives_actionable_error(ws):
     result = await apply_patch(ws, path="app.py", search="this text is not in the file", replace="x")
     assert not result.ok
     assert "not found" in result.error
+
+
+@requires_sandbox
+async def test_apply_patch_tolerates_a_whitespace_only_mismatch_and_says_so(ws):
+    # The model's search block is re-indented relative to the real file.
+    result = await apply_patch(
+        ws,
+        path="app.py",
+        search="def greet(name):\n  return f'hello {name}'",
+        replace="def greet(name):\n    return f'hey {name}'\n",
+    )
+    assert result.ok, result.error
+    assert "fuzzy match at lines 1-2" in result.output
+    assert "whitespace" in result.output
+    content = (await read_file(ws, "app.py")).output
+    assert content == "def greet(name):\n    return f'hey {name}'\n"
+
+
+@requires_sandbox
+async def test_apply_patch_refuses_a_fuzzy_match_that_could_mean_two_places(ws):
+    await apply_patch(ws, path="twice.py", create=True, replace="a = 1\nb = 2\na = 1\n")
+    result = await apply_patch(ws, path="twice.py", search="a  =  1", replace="a = 9")
+    assert not result.ok
+    assert "2 places" in result.error and "lines 1-1" in result.error and "lines 3-3" in result.error
+    assert (await read_file(ws, "twice.py")).output == "a = 1\nb = 2\na = 1\n"  # untouched
 
 
 @requires_sandbox
@@ -171,6 +216,42 @@ async def test_run_command_nonzero_exit_is_ok_with_exit_code_visible(ws):
     result = await run_command(ws, "exit 7")
     assert result.ok  # a failing command is real information, not a tool failure
     assert "exit code 7" in result.output
+
+
+@requires_sandbox
+async def test_run_tests_related_then_all_against_the_real_repo_tooling(ws):
+    await ws.write_file("pytest.ini", "[pytest]\n")
+    await ws.write_file(
+        "test_app.py", "from app import greet\n\n\ndef test_greet():\n    assert greet('w') == 'hello w'\n"
+    )
+    await ws.write_file("test_other.py", "def test_other():\n    assert 1 == 1\n")
+    await ws.run("git add -A")
+
+    related = await run_tests(ws, scope="related", touched_paths=["app.py"])
+    assert related.ok
+    assert related.output.startswith("$ pytest -q test_app.py\n(exit code 0) related tests passed")
+    assert "1 passed" in related.output
+
+    everything = await run_tests(ws, scope="all", touched_paths=["app.py"])
+    assert everything.ok
+    assert everything.output.startswith("$ pytest\n(exit code 0) full suite passed")
+    assert "2 passed" in everything.output
+
+    nothing_related = await run_tests(ws, scope="related", touched_paths=["unrelated.py"])
+    assert "no tests related" in nothing_related.output and "2 passed" in nothing_related.output
+
+    await ws.write_file("app.py", "def greet(name):\n    return f'bye {name}'\n")
+    failing = await run_tests(ws, scope="related", touched_paths=["app.py"])
+    assert failing.ok  # a failing test is information, not a tool error
+    assert "(exit code 1) related tests FAILED" in failing.output
+    assert "assert" in failing.output
+
+
+@requires_sandbox
+async def test_run_tests_without_a_detectable_test_command_is_a_clean_error(ws):
+    result = await run_tests(ws, scope="all")
+    assert not result.ok
+    assert "No test command" in result.error
 
 
 @requires_sandbox

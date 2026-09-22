@@ -26,6 +26,9 @@ class RepoProfile:
     test_cmd: str | None
     lint_cmds: list[str] = field(default_factory=list)
     typecheck_cmd: str | None = None
+    # node only: the literal package.json "test" script (`npm test` hides it), so
+    # src/orchestrator/test_scope.py can tell a jest project from a mocha/vitest one.
+    test_script: str = ""
 
 
 def _has(files: set[str], *names: str) -> bool:
@@ -41,7 +44,18 @@ def detect_repo_profile(files: set[str], package_json_scripts: dict[str, str] | 
     since npm/yarn/pnpm test/lint commands are project-defined rather than
     inferable from file presence alone.
     """
-    if _has(files, "pyproject.toml", "setup.py", "requirements.txt", "requirements-dev.txt", "Pipfile"):
+    if _has(
+        files,
+        "pyproject.toml",
+        "setup.py",
+        "setup.cfg",
+        "requirements.txt",
+        "requirements-dev.txt",
+        "Pipfile",
+        "pytest.ini",
+        "tox.ini",
+        "conftest.py",
+    ):
         return _python_profile(files)
     if _has(files, "package.json"):
         return _node_profile(files, package_json_scripts or {})
@@ -73,12 +87,15 @@ def _python_profile(files: set[str]) -> RepoProfile:
         install = "pip install -r requirements.txt"
     elif _has(files, "pyproject.toml"):
         install = "pip install -e '.[dev]'" if _has(files, "poetry.lock") is False else "pip install -e ."
-    else:
+    elif _has(files, "setup.py", "setup.cfg"):
         install = "pip install -e ."
+    else:
+        # A test-only Python repo (pytest.ini / tox.ini / conftest.py, nothing to build): no install step.
+        install = None
 
     test_cmd = (
         "pytest"
-        if _has(files, "pytest.ini", "pyproject.toml", "setup.cfg", "conftest.py")
+        if _has(files, "pytest.ini", "tox.ini", "pyproject.toml", "setup.cfg", "conftest.py")
         else "python -m unittest discover"
     )
 
@@ -117,5 +134,10 @@ def _node_profile(files: set[str], scripts: dict[str, str]) -> RepoProfile:
     )
 
     return RepoProfile(
-        ecosystem="node", install_cmd=install, test_cmd=test_cmd, lint_cmds=lint_cmds, typecheck_cmd=typecheck_cmd
+        ecosystem="node",
+        install_cmd=install,
+        test_cmd=test_cmd,
+        lint_cmds=lint_cmds,
+        typecheck_cmd=typecheck_cmd,
+        test_script=scripts.get("test", ""),
     )

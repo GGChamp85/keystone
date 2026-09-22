@@ -370,7 +370,7 @@ def _dict_to_state(d: dict[str, Any]) -> AgentState:
     state.root_cause_notes = d.get("root_cause_notes", [])
     state.total_prompt_tokens = d.get("total_prompt_tokens", 0)
     state.total_completion_tokens = d.get("total_completion_tokens", 0)
-    state.max_tokens_per_task = d.get("max_tokens_per_task", 2_000_000)
+    state.max_tokens_per_task = d.get("max_tokens_per_task", 0)
 
     state.trace = [
         IterationRecord(

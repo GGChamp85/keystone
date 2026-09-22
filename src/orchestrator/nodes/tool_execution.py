@@ -60,7 +60,7 @@ def _build_failure_ledger(state: AgentState) -> str:
         failing = [tr for tr in state.test_results if not tr.passed]
         if failing:
             parts.append("Test failures:")
-            parts.extend(f"- {tr.test_name}: {tr.error[:500]}" for tr in failing)
+            parts.extend(f"- {tr.test_name}: {tr.error}" for tr in failing)
     if state.review_comments:
         blocking = [rc for rc in state.review_comments if rc.severity in ("error", "critical")]
         if blocking:

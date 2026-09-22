@@ -29,10 +29,12 @@ import time
 
 import structlog
 
+from src.config import get_settings
 from src.inference.client import get_inference_client
 from src.inference.model_router import resolve_model_name_for_client
-from src.orchestrator.context import trim_turns_to_budget
-from src.orchestrator.nodes._shared import get_or_clone_workspace
+from src.orchestrator.context import Summarizer, fit_to_tokens, trim_turns_to_budget_async
+from src.orchestrator.nodes._shared import ensure_repo_map, get_or_clone_workspace
+from src.orchestrator.nodes.quality import _is_blocking
 from src.orchestrator.state import (
     AgentPhase,
     AgentState,
@@ -52,20 +54,23 @@ directly inside a real, already-cloned git repository, using tools — you never
 memory or guess at what it currently contains.
 
 Rules:
-1. Explore before you edit: use list_dir/grep/read_file to see the real current code before changing \
-anything. If you already modified a file earlier in this task, re-read it — don't assume you remember its \
-exact current content.
-2. Make the smallest correct change. Use apply_patch's search/replace mode for most edits (search must match \
-the file's real current text exactly); use create=true only for a genuinely new file; use unified_diff only \
-for a multi-hunk change you've verified against the real file content.
+1. Explore before you edit: the repository map (get_repo_map) tells you which file and line a symbol lives \
+at; read_file with start_line/end_line shows exactly that region; grep finds every call site. See the real \
+current code before changing anything. If you already modified a file earlier in this task, re-read it — \
+don't assume you remember its exact current content.
+2. Make the smallest correct change. Use apply_patch's search/replace mode for most edits (copy the file's \
+real current text as `search`; a whitespace-only or near-identical mismatch is tolerated when unambiguous, \
+and the result tells you when that happened); use create=true only for a genuinely new file; use \
+unified_diff only for a multi-hunk change you've verified against the real file content.
 3. Write complete, production-quality code: proper error handling and type hints, following the surrounding \
 codebase's own conventions (check a neighboring file if unsure) — no stubs, no TODOs, no placeholders.
 4. If a tool call fails, its error message tells you exactly what went wrong — act on it (re-read the file, \
 narrow an ambiguous search, fix a bad argument) rather than repeating the same call.
-5. You may run a command (e.g. a quick syntax check) via run_command, but the repo's real test suite runs \
-automatically after you finish — don't try to reinvent it.
-6. When every necessary change for this task is made, reply with a plain message and NO tool call, summarizing \
-what you changed and why. That ends this session — only do this once you are actually done.
+5. Verify before you finish: after your edits, call run_tests (scope='related' for fast feedback on the \
+files you changed; scope='all' once before you're done) and fix what fails. The full suite also runs \
+automatically after you finish, and a failure there costs a whole extra round — catch it here first.
+6. When every necessary change for this task is made and run_tests passes, reply with a plain message and NO \
+tool call, summarizing what you changed and why. That ends this session — only do this once you are actually done.
 """
 
 STANDALONE_CODING_SYSTEM_PROMPT = """\
@@ -104,6 +109,12 @@ async def coding_node(state: AgentState) -> AgentState:
 # ── Repo mode: real agentic tool-use loop ──────────────────────
 
 
+def _prompt_budget(state: AgentState) -> int:
+    """Tokens one section of the task context may take: half the loop's context budget, so the task, the
+    map and the conversation always fit alongside it. Derived from configuration, never a fixed number."""
+    return max(2_000, state.max_context_tokens // 2)
+
+
 def _build_agentic_user_context(state: AgentState) -> str:
     parts = [f"## Task\n{state.task_description}"]
 
@@ -119,7 +130,12 @@ def _build_agentic_user_context(state: AgentState) -> str:
 
     if state.test_results and not state.tests_passed:
         parts.append("\n## Test Failures To Fix")
-        parts.extend(f"- **{tr.test_name}**: {tr.error[:1000]}" for tr in state.test_results if not tr.passed)
+        budget = _prompt_budget(state)
+        parts.extend(
+            f"- **{tr.test_name}**:\n{fit_to_tokens(tr.error or tr.output, budget, keep='tail', what='test output')}"
+            for tr in state.test_results
+            if not tr.passed
+        )
 
     if state.review_comments and not state.review_passed:
         parts.append("\n## Review Comments To Address")
@@ -130,9 +146,10 @@ def _build_agentic_user_context(state: AgentState) -> str:
                     line += f"\n  Suggestion: {rc.suggestion}"
                 parts.append(line)
 
-    blocking_quality = [f for f in state.quality_findings if f.tool in ("bandit", "mypy") and f.severity == "error"]
+    blocking_quality = [f for f in state.quality_findings if _is_blocking(f, state.quality_blocking_tools)]
     if blocking_quality:
-        parts.append("\n## Quality Gate Findings To Fix (bandit/mypy — blocking)")
+        tools = "/".join(state.quality_blocking_tools)
+        parts.append(f"\n## Quality Gate Findings To Fix ({tools} — blocking)")
         parts.extend(f"- [{f.tool}] {f.path}:{f.line} ({f.code}): {f.message}" for f in blocking_quality)
 
     if state.memory_context:
@@ -141,19 +158,36 @@ def _build_agentic_user_context(state: AgentState) -> str:
     if state.rag_context:
         parts.append(f"\n## Codebase Context (retrieved)\n{state.rag_context}")
 
-    parts.append(
-        "\n## Repository\nAlready cloned and checked out on your working branch. "
-        "Start with list_dir('.') and grep to orient yourself before editing."
-    )
+    if state.deps_install_error:
+        parts.append(
+            "\n## Dependency install (automatic, after clone) FAILED\n"
+            f"{fit_to_tokens(state.deps_install_error, _prompt_budget(state), keep='tail', what='install output')}\n"
+            "A test that fails on a missing import may be failing for this reason, not because of your change."
+        )
+
+    if state.repo_map:
+        parts.append(f"\n## Repository map\n{state.repo_map}")
+        parts.append(
+            "\n## Repository\nAlready cloned and checked out on your working branch. The map above shows "
+            "where the relevant symbols live — go to those files (read_file with a line range) rather than "
+            "exploring from scratch; use grep to confirm call sites before changing a signature."
+        )
+    else:
+        parts.append(
+            "\n## Repository\nAlready cloned and checked out on your working branch. "
+            "Start with get_repo_map, then list_dir/grep to orient yourself before editing."
+        )
     return "\n".join(parts)
 
 
 _TOOL_DETAIL_ARG: dict[str, str] = {
     "read_file": "path",
     "list_dir": "path",
+    "get_repo_map": "max_tokens",
     "apply_patch": "path",
     "grep": "pattern",
     "run_command": "command",
+    "run_tests": "scope",
 }
 
 
@@ -171,6 +205,57 @@ def _wrapped_tool_content(name: str, arguments: dict, result: ToolResult) -> str
         return result.to_content()
     detail = str(arguments.get(_TOOL_DETAIL_ARG.get(name, ""), ""))
     return wrap_tool_output(result.output, tool=name, detail=detail)
+
+
+_SUMMARY_SYSTEM_PROMPT = """\
+You are compressing the earlier part of a coding agent's tool-use session so the agent can continue with \
+less context. Write a dense, factual summary (at most ~300 words) covering: files read and what was learned \
+about them (paths, key symbols, line numbers); edits already applied (file and what changed); command and \
+test results seen; open problems. Facts only — no preamble, no advice.
+"""
+
+
+def _render_messages_for_summary(messages: list[dict], *, budget_tokens: int) -> str:
+    """The dropped turns as a transcript for the summariser, fitted to ITS context budget (every message
+    gets an equal share, head-kept so tool calls and the start of each result survive)."""
+    per_message = max(200, budget_tokens // max(1, len(messages)))
+    parts = []
+    for message in messages:
+        content = message.get("content") or ""
+        if message.get("tool_calls"):
+            calls = [
+                {"name": tc.get("function", {}).get("name"), "arguments": tc.get("function", {}).get("arguments")}
+                for tc in message["tool_calls"]
+            ]
+            content = f"{content}\n{json.dumps(calls)}".strip()
+        parts.append(f"[{message.get('role')}] {fit_to_tokens(content, per_message, what='message')}")
+    return "\n\n".join(parts)
+
+
+def _make_turn_summarizer(state: AgentState) -> Summarizer:
+    """The real model call behind context.py's summarise-on-overflow: the cheaper coding_fallback role
+    condenses the turns being dropped; its tokens count against the task like any other call."""
+
+    async def summarize(messages: list[dict]) -> str:
+        client = get_inference_client("coding_fallback")
+        model_name = await resolve_model_name_for_client(client, state.tenant_id)
+        response = await client.complete(
+            messages=[
+                {"role": "system", "content": _SUMMARY_SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": _render_messages_for_summary(messages, budget_tokens=state.max_context_tokens),
+                },
+            ],
+            temperature=0.0,
+            max_tokens=600,
+            model_override=model_name,
+        )
+        usage = response.get("usage", {})
+        state.add_tokens(usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0))
+        return response["choices"][0]["message"].get("content") or ""
+
+    return summarize
 
 
 async def _run_agentic_loop(state: AgentState, ws: Workspace) -> tuple[bool, str, list[str]]:
@@ -195,12 +280,19 @@ async def _run_agentic_loop(state: AgentState, ws: Workspace) -> tuple[bool, str
     touched: set[str] = set()
     summary = ""
     completed = False
+    summarizer = _make_turn_summarizer(state)
+    stream_turns = get_settings().agent_stream_turns
 
     for _step in range(state.max_tool_steps):
-        messages = trim_turns_to_budget(turns, max_tokens=state.max_context_tokens, keep_head_turns=1)
-        response = await client.complete(
+        messages = await trim_turns_to_budget_async(
+            turns, max_tokens=state.max_context_tokens, keep_head_turns=1, summarizer=summarizer
+        )
+        request: dict = dict(
             messages=messages, temperature=0.15, max_tokens=8192, model_override=model_name, **protocol.request_kwargs()
         )
+        # Streamed by default: tool calls and text are reassembled from deltas into the same
+        # response shape, so a long turn shows progress instead of sitting on a read timeout.
+        response = await (client.stream_to_message(**request) if stream_turns else client.complete(**request))
         usage = response.get("usage", {})
         state.add_tokens(usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0))
 
@@ -218,7 +310,9 @@ async def _run_agentic_loop(state: AgentState, ws: Workspace) -> tuple[bool, str
             if isinstance(call, ToolCallError):
                 turn.extend(protocol.format_tool_result(call, f"ERROR: {call.error}"))
                 continue
-            result = await dispatch_tool_call(ws, call.name, call.arguments)
+            result = await dispatch_tool_call(
+                ws, call.name, call.arguments, touched_paths=sorted(touched | set(state.files_touched))
+            )
             turn.extend(protocol.format_tool_result(call, _wrapped_tool_content(call.name, call.arguments, result)))
             path = touched_path(call.name, call.arguments, result)
             if path:
@@ -237,6 +331,7 @@ async def _code_with_tools(state: AgentState) -> AgentState:
 
     try:
         ws = await get_or_clone_workspace(state)
+        await ensure_repo_map(state, ws)
         completed, summary, touched = await _run_agentic_loop(state, ws)
 
         for path in touched:
@@ -327,9 +422,9 @@ async def _code_standalone(state: AgentState) -> AgentState:
         user_parts.append(f"\n## Codebase Context\n{state.rag_context}")
 
     if state.context_files:
-        for fname, content in list(state.context_files.items())[:5]:
-            truncated = content[:8000] if len(content) > 8000 else content
-            user_parts.append(f"\n## Reference: {fname}\n```\n{truncated}\n```")
+        per_file = max(1_000, _prompt_budget(state) // max(1, len(state.context_files)))
+        for fname, content in state.context_files.items():
+            user_parts.append(f"\n## Reference: {fname}\n```\n{fit_to_tokens(content, per_file, what=fname)}\n```")
 
     messages = [
         {"role": "system", "content": STANDALONE_CODING_SYSTEM_PROMPT},

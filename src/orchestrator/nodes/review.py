@@ -23,8 +23,10 @@ import time
 
 import structlog
 
+from src.config import get_settings
 from src.inference.client import StructuredOutputError, get_inference_client
 from src.inference.model_router import resolve_model_name_for_client
+from src.orchestrator.context import fit_to_tokens
 from src.orchestrator.nodes._shared import get_or_clone_workspace
 from src.orchestrator.state import (
     AgentPhase,
@@ -118,7 +120,10 @@ async def review_node(state: AgentState) -> AgentState:
             diff = await ws.diff()
             if not diff.strip():
                 return _fail_closed(state, "coding produced no working-tree changes to review")
-            user_parts.append(f"\n## Code Changes to Review (git diff)\n```diff\n{diff[:60_000]}\n```")
+            budget = max(4_000, get_settings().agent_max_context_tokens - 4_000)
+            user_parts.append(
+                f"\n## Code Changes to Review (git diff)\n```diff\n{fit_to_tokens(diff, budget, what='diff')}\n```"
+            )
         else:
             user_parts.append("\n## Code Changes to Review")
             user_parts.extend(
@@ -127,9 +132,9 @@ async def review_node(state: AgentState) -> AgentState:
 
         if state.context_files:
             user_parts.append("\n## Original Context Files")
-            for fname, content in list(state.context_files.items())[:3]:
-                truncated = content[:4000] if len(content) > 4000 else content
-                user_parts.append(f"\n### {fname}\n```\n{truncated}\n```")
+            per_file = max(1_000, get_settings().agent_max_context_tokens // (4 * max(1, len(state.context_files))))
+            for fname, content in state.context_files.items():
+                user_parts.append(f"\n### {fname}\n```\n{fit_to_tokens(content, per_file, what=fname)}\n```")
 
         messages = [
             {"role": "system", "content": REVIEW_SYSTEM_PROMPT},

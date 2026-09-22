@@ -11,12 +11,15 @@ against a real server), so the same schema works for both
 `protocol.TextToolProtocol` (rendered into the prompt as a description of
 the callable functions).
 
-Five tools, matching the plan: three read-only exploration tools
-(read_file/list_dir/grep) the model can call freely to understand a repo
-before editing, one write tool (apply_patch) that's the *only* way the
-model changes a file's content, and one broad tool (run_command) for
-everything else (installing deps, running a linter directly, etc.) —
-gated more heavily than the others since it's the least constrained.
+Seven tools: four read-only exploration tools (read_file with line ranges,
+list_dir, grep, get_repo_map — the ranked symbol outline from
+src/orchestrator/repo_map.py) the model can call freely to understand a
+repo before editing, one write tool (apply_patch) that's the *only* way the
+model changes a file's content, one verification tool (run_tests — the
+repo's real suite, related-tests-first) so the model checks its own work
+before signaling done, and one broad tool (run_command) for everything
+else (running a linter directly, etc.) — gated more heavily than the
+others since it's the least constrained.
 """
 
 from __future__ import annotations
@@ -26,7 +29,10 @@ TOOL_SCHEMAS: list[dict] = [
         "type": "function",
         "function": {
             "name": "read_file",
-            "description": "Read a file's full contents from the repository working tree.",
+            "description": (
+                "Read a file from the repository working tree — the whole file, or a line range "
+                "(returned with line numbers). Use a range for large files instead of reading everything."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -34,8 +40,37 @@ TOOL_SCHEMAS: list[dict] = [
                         "type": "string",
                         "description": "Path relative to the repository root, e.g. 'src/app.py'.",
                     },
+                    "start_line": {
+                        "type": "integer",
+                        "description": "First line to return (1-based, inclusive). Omit for the whole file.",
+                    },
+                    "end_line": {
+                        "type": "integer",
+                        "description": "Last line to return (inclusive). Omit for 'to the end of the file'.",
+                    },
                 },
                 "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_repo_map",
+            "description": (
+                "A ranked outline of the repository's symbols (classes, functions, methods with file, line "
+                "and signature), most-referenced code first, within a token budget. The first call's "
+                "result is already in your context; call again with a larger max_tokens to see more."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "max_tokens": {
+                        "type": "integer",
+                        "description": "Budget for the map in tokens. Default 4000, max 16000.",
+                    },
+                },
+                "required": [],
             },
         },
     },
@@ -93,10 +128,11 @@ TOOL_SCHEMAS: list[dict] = [
         "function": {
             "name": "apply_patch",
             "description": (
-                "Change a file's content. Preferred mode: give `search` (must match the file's current "
-                "content EXACTLY, including whitespace) and `replace` (what to put there instead) — "
-                "use this for most edits, it's more reliable than a diff because there's no line-number "
-                "drift to get wrong. For a brand-new file, omit `search` and set `create=true`. For "
+                "Change a file's content. Preferred mode: give `search` (the file's current text — an "
+                "exact match is best; a match that differs only in whitespace or is ≥92% similar is "
+                "accepted when it is unambiguous, and the result says so) and `replace` (what to put "
+                "there instead) — use this for most edits, it's more reliable than a diff because there's "
+                "no line-number drift to get wrong. For a brand-new file, omit `search` and set `create=true`. For "
                 "multi-hunk or multi-file changes in one call, give `unified_diff` instead (a real "
                 "`git diff`-format patch) — it's applied with `git apply --3way`, which tolerates minor "
                 "context drift; a hard conflict is returned as a structured failure, not a silent partial edit."
@@ -139,11 +175,35 @@ TOOL_SCHEMAS: list[dict] = [
     {
         "type": "function",
         "function": {
+            "name": "run_tests",
+            "description": (
+                "Run the repository's own test suite (auto-detected: pytest, npm test, go test, cargo test). "
+                "scope='related' runs only the tests covering the files you have changed so far — fast, "
+                "use it after every meaningful edit; scope='all' runs everything — use it once before you "
+                "finish. The exit code and the tail of the output are returned; a failure is information "
+                "to act on, not an error."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "scope": {
+                        "type": "string",
+                        "enum": ["related", "all"],
+                        "description": "'related' (default) or 'all'.",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "run_command",
             "description": (
-                "Run a shell command in the repository working tree (e.g. to install a dependency, run "
-                "a linter directly, or inspect something list_dir/grep can't). Prefer the repo's real "
-                "test command (already run automatically after your changes) over reinventing it here."
+                "Run a shell command in the repository working tree (e.g. to run a linter directly, or "
+                "inspect something list_dir/grep can't). Dependencies were installed automatically after "
+                "the clone; use run_tests, not this, to run the test suite."
             ),
             "parameters": {
                 "type": "object",

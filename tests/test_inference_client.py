@@ -243,3 +243,58 @@ async def test_chat_structured_on_usage_called_for_every_retry_attempt(fake_serv
         assert calls == [(10, 5), (10, 5)]
     finally:
         await client.close()
+
+
+async def test_stream_to_message_reassembles_streamed_content_and_usage(fake_server):
+    async with httpx.AsyncClient() as h:
+        await h.post(f"{fake_server}/reset", json={})
+    client = InferenceClient(base_url=fake_server, model_id="test-model")
+    deltas: list[str] = []
+
+    async def on_text(t: str) -> None:
+        deltas.append(t)
+
+    try:
+        response = await client.stream_to_message([{"role": "user", "content": "hi"}], on_text=on_text)
+        assert response["choices"][0]["message"] == {"role": "assistant", "content": "hello"}
+        assert response["choices"][0]["finish_reason"] == "stop"
+        assert response["usage"] == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+        assert deltas == ["hel", "lo"]
+        async with httpx.AsyncClient() as h:
+            payload = (await h.get(f"{fake_server}/last_payload")).json()
+        assert payload["stream"] is True
+        assert payload["stream_options"] == {"include_usage": True}
+    finally:
+        await client.close()
+
+
+async def test_stream_to_message_reassembles_a_tool_call_split_across_chunks(fake_server):
+    async with httpx.AsyncClient() as h:
+        await h.post(f"{fake_server}/reset", json={})
+    client = InferenceClient(base_url=fake_server, model_id="test-model")
+    tools = [{"type": "function", "function": {"name": "read_file", "parameters": {"type": "object"}}}]
+    try:
+        response = await client.stream_to_message([{"role": "user", "content": "go"}], tools=tools)
+        message = response["choices"][0]["message"]
+        assert message["content"] is None
+        assert message["tool_calls"] == [
+            {"id": "call_s1", "type": "function", "function": {"name": "read_file", "arguments": '{"path": "app.py"}'}}
+        ]
+        assert response["choices"][0]["finish_reason"] == "tool_calls"
+        assert response["usage"]["completion_tokens"] == 5
+        async with httpx.AsyncClient() as h:
+            payload = (await h.get(f"{fake_server}/last_payload")).json()
+        assert payload["tools"] == tools
+    finally:
+        await client.close()
+
+
+async def test_stream_to_message_retries_a_429_before_the_first_chunk(fake_server):
+    async with httpx.AsyncClient() as h:
+        await h.post(f"{fake_server}/reset", json={"fail_with_429_times": 1})
+    client = InferenceClient(base_url=fake_server, model_id="test-model")
+    try:
+        response = await client.stream_to_message([{"role": "user", "content": "hi"}])
+        assert response["choices"][0]["message"]["content"] == "hello"
+    finally:
+        await client.close()

@@ -143,6 +143,9 @@ class AgentState:
     # informational only for now, pending repo-memory-driven strictness.
     quality_findings: list[QualityFinding] = field(default_factory=list)
     consecutive_quality_failures: int = 0
+    # Which tools' findings block (Settings.quality_gate_blocking_tools, per-task override
+    # via AgentTaskRequest.quality_blocking_tools). bandit blocks on high/medium only.
+    quality_blocking_tools: list[str] = field(default_factory=lambda: ["bandit", "mypy"])
 
     # ── Sandbox ───────────────────────────────────────────────
     sandbox_id: str | None = None
@@ -156,6 +159,13 @@ class AgentState:
     # src.sandbox.manager.get_sandbox_manager()'s shared handle cache.
     repo_cloned: bool = False
     working_branch: str = ""
+    # The repo's own install command (repo_profile.install_cmd) runs once,
+    # right after the clone (nodes/_shared.py's install_dependencies), so
+    # the real test suite has its real dependencies. `deps_installed` means
+    # attempted; a non-zero exit is kept in `deps_install_error` and shown
+    # to the coding model so a failing import is attributed correctly.
+    deps_installed: bool = False
+    deps_install_error: str = ""
     commit_sha: str | None = None
     pr_url: str | None = None
     pr_number: int | None = None
@@ -169,6 +179,11 @@ class AgentState:
     max_tool_steps: int = 25
     tool_protocol: str = "native"
     files_touched: list[str] = field(default_factory=list)
+    # The ranked symbol outline (src/orchestrator/repo_map.py), built once
+    # right after the clone and given to both the planner and the coding
+    # loop so neither starts from a blind `list_dir`. Empty for standalone
+    # (no-repository) tasks or if the map could not be built.
+    repo_map: str = ""
     # Real token budget for the loop's own conversation (src/orchestrator/context.py's
     # trim_turns_to_budget), independent of `max_tokens_per_task` (the whole task's
     # spend cap). Conservative default with headroom below a 32K context model for the
@@ -188,7 +203,7 @@ class AgentState:
     # ── Token accounting ──────────────────────────────────────
     total_prompt_tokens: int = 0
     total_completion_tokens: int = 0
-    max_tokens_per_task: int = 2_000_000
+    max_tokens_per_task: int = 0  # 0 = unlimited (Settings.max_tokens_per_task)
 
     # ── Execution trace ───────────────────────────────────────
     trace: list[IterationRecord] = field(default_factory=list)

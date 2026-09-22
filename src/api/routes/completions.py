@@ -62,15 +62,16 @@ async def chat_completions(
     # Deployment-wide ceiling (MAX_TOKENS_PER_REQUEST) — the request model's
     # own bound is the protocol maximum, not what this deployment is willing
     # to serve; rejected up front rather than silently clamped.
-    max_tokens_ceiling = get_settings().max_tokens_per_request
-    if req.max_tokens > max_tokens_ceiling:
+    settings = get_settings()
+    max_tokens_ceiling = settings.max_tokens_per_request  # 0 = no deployment ceiling; the model's own limit applies
+    if max_tokens_ceiling > 0 and req.max_tokens > max_tokens_ceiling:
         raise HTTPException(
             status_code=422,
             detail=f"max_tokens={req.max_tokens} exceeds this deployment's limit of {max_tokens_ceiling}",
         )
 
     # Rate limit
-    rpm = api_key.rate_limit_override or 60
+    rpm = api_key.rate_limit_override or settings.default_requests_per_minute  # 0 = unlimited
     await check_request_rate(tenant.id, api_key.id, rpm)
 
     # Token budget pre-check

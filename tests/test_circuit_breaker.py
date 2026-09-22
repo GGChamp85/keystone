@@ -76,11 +76,22 @@ async def test_does_not_trip_below_quality_failure_limit():
 async def test_trips_on_wall_clock_timeout():
     import asyncio
 
-    breaker = CircuitBreaker(CircuitBreakerConfig(max_wall_clock_seconds=0))
+    breaker = CircuitBreaker(CircuitBreakerConfig(max_wall_clock_seconds=1))
     breaker.start()
-    await asyncio.sleep(0.05)
+    await asyncio.sleep(1.05)
     with pytest.raises(CircuitBreakerTripped, match="Wall-clock timeout"):
         await breaker.check(_state())
+
+
+async def test_zero_wall_clock_and_zero_token_budget_mean_no_cap():
+    import asyncio
+
+    breaker = CircuitBreaker(CircuitBreakerConfig(max_wall_clock_seconds=0, max_tokens_per_task=0))
+    breaker.start()
+    await asyncio.sleep(0.05)
+    state = _state()
+    state.total_prompt_tokens = 10_000_000  # far beyond any old default — still no trip
+    await breaker.check(state)
 
 
 async def test_healthy_state_does_not_trip():

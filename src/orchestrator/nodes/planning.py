@@ -15,6 +15,7 @@ import structlog
 
 from src.inference.client import get_inference_client
 from src.inference.model_router import resolve_model_name_for_client
+from src.orchestrator.nodes._shared import ensure_repo_map, get_or_clone_workspace
 from src.orchestrator.state import AgentPhase, AgentState, IterationRecord
 
 logger = structlog.get_logger(__name__)
@@ -63,6 +64,18 @@ async def planning_node(state: AgentState) -> AgentState:
 
     if state.repository_url:
         user_parts.append(f"\n## Repository\n{state.repository_url} (branch: {state.branch})")
+        # Clone now (the coding node would anyway — same sandbox, same clone,
+        # src/orchestrator/nodes/_shared.py) so the plan is made from the
+        # real repository's symbol map, not from the task text alone. A
+        # clone failure is a real task failure, surfaced here rather than
+        # one node later.
+        ws = await get_or_clone_workspace(state)
+        repo_map = await ensure_repo_map(state, ws)
+        if repo_map:
+            user_parts.append(
+                f"\n## Repository map\n{repo_map}\n\nName the real files above in each step's `files`; "
+                "the coding module works from this plan."
+            )
 
     if state.root_cause_notes:
         # Set when nodes/tool_execution.py's root-cause step decided a

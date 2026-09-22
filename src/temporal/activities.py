@@ -41,6 +41,7 @@ async def run_agent_task(
     enable_sandbox_testing: bool,
     user_id: str | None = None,
     user_slug: str | None = None,
+    quality_blocking_tools: list[str] | None = None,
 ) -> dict[str, Any]:
     """
     Runs the full Plan -> Code -> Review -> Test -> Fix loop for one task.
@@ -75,6 +76,7 @@ async def run_agent_task(
             context_files=context_files,
             user_id=UUID(user_id) if user_id else None,
             user_slug=user_slug,
+            quality_blocking_tools=quality_blocking_tools,
             heartbeat_callback=_heartbeat,
         )
     except Exception as exc:

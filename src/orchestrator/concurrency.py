@@ -5,9 +5,11 @@
 Keystone Agents — per-tenant task concurrency, with per-user fairness.
 
 `Tenant.max_concurrent_agents` (src/db/models.py) caps how many agent
-tasks a tenant may run at once — a real limit that was declared on the
-model but never actually enforced anywhere (grepped: zero hits before
-this). Enforced here via a Redis SET per tenant (membership = currently
+tasks a tenant may run at once — **0, the default, means no cap**: a
+team's throughput is bounded by the worker, sandbox and GPU capacity it
+deploys, not by a number in a row. A positive value is a deliberate
+admin choice (`POST /v1/admin/tenants`). When set, it is enforced here
+via a Redis SET per tenant (membership = currently
 running task ids, matching the same atomic-Lua-script pattern
 src/api/middleware/rate_limiter.py already uses for its own limits, not a
 second inconsistent approach) — SADD/SREM is idempotent, so a slot can
@@ -61,12 +63,16 @@ local user_max = tonumber(ARGV[3])
 local ttl = tonumber(ARGV[4])
 local has_user = ARGV[5] == '1'
 
-local tenant_count = redis.call('SCARD', tenant_key)
-if tenant_count >= tenant_max then
-    return 0
+-- A max of 0 means "no cap": membership is still recorded (observability, release
+-- bookkeeping) but nothing is ever rejected.
+if tenant_max > 0 then
+    local tenant_count = redis.call('SCARD', tenant_key)
+    if tenant_count >= tenant_max then
+        return 0
+    end
 end
 
-if has_user then
+if has_user and user_max > 0 then
     local user_count = redis.call('SCARD', user_key)
     if user_count >= user_max then
         return 0
@@ -92,7 +98,10 @@ def _user_key(tenant_id: UUID, user_id: UUID) -> str:
 
 
 def per_user_fair_share(tenant_max: int) -> int:
-    """No single user may hold more than half the tenant's capacity, rounded up."""
+    """No single user may hold more than half a *capped* tenant's capacity, rounded up.
+    An uncapped tenant (0) has no per-user share either — 0 means no cap."""
+    if tenant_max <= 0:
+        return 0
     return max(1, math.ceil(tenant_max / 2))
 
 
