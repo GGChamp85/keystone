@@ -147,7 +147,7 @@ class GVisorBackend(SandboxBackend):
         container = await asyncio.to_thread(client.containers.get, handle)
         t0 = time.monotonic()
 
-        async def _run() -> tuple[int, bytes]:
+        async def _run() -> Any:  # docker's untyped ExecResult namedtuple (exit_code, output)
             return await asyncio.to_thread(
                 container.exec_run,
                 ["sh", "-c", command],

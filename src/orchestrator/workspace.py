@@ -94,12 +94,12 @@ class Workspace:
 
     async def write_file(self, path: str, content: str) -> None:
         """`path` relative to the repo root, e.g. "src/app.py" — or the full `self._repo_cwd`-prefixed form."""
-        await self.ensure_sandbox()
-        await self._manager.write_file(self._handle, self._repo_relative(path), content)
+        handle = await self.ensure_sandbox()
+        await self._manager.write_file(handle, self._repo_relative(path), content)
 
     async def read_file(self, path: str) -> str:
-        await self.ensure_sandbox()
-        return await self._manager.read_file(self._handle, self._repo_relative(path))
+        handle = await self.ensure_sandbox()
+        return await self._manager.read_file(handle, self._repo_relative(path))
 
     async def run(
         self,

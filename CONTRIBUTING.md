@@ -32,6 +32,7 @@ cd web && npm install && npm run dev
 ```bash
 ruff check src/ tests/          # lint (no --fix in CI — fix locally, then commit)
 ruff format --check src/ tests/
+mypy                            # type check src/ — CI requires zero errors (config: pyproject.toml [tool.mypy])
 python -m pytest tests/ -v --tb=short
 helm lint helm/keystone
 cd web && npx tsc --noEmit && npm run build

@@ -20,6 +20,7 @@ from typing import Any
 
 import structlog
 from langgraph.graph import END, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 
 from src.orchestrator.circuit_breaker import (
     CircuitBreaker,
@@ -118,7 +119,7 @@ async def _wrap_with_circuit_breaker(
 def build_agent_graph(
     breaker_config: CircuitBreakerConfig | None = None,
     on_iteration: HeartbeatCallback | None = None,
-) -> StateGraph:
+) -> CompiledStateGraph:
     """
     Build and compile the Keystone Agents agent graph.
 
@@ -133,8 +134,10 @@ def build_agent_graph(
     breaker = CircuitBreaker(breaker_config)
     breaker.start()
 
-    # Define state schema for LangGraph as a dict
-    graph = StateGraph(dict)
+    # The state is the plain dict `_state_to_dict` produces from AgentState (the
+    # nodes read/write it by key); LangGraph's generics want a TypedDict/model
+    # class here, but a plain dict is what actually flows, so it's annotated as such.
+    graph: Any = StateGraph(dict)
 
     # ── Nodes (each wrapped with circuit breaker) ─────────────
 

@@ -81,6 +81,8 @@ async def poll_and_record_pr_feedback() -> list[dict[str, Any]]:
 
     written: list[dict[str, Any]] = []
     for task in tasks:
+        if task.repository_url is None or task.pr_number is None:
+            continue  # excluded by the query above; stated here so the types are honest
         if await _already_recorded(task.id):
             continue
 

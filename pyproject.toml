@@ -57,6 +57,7 @@ finetuning = [
 ]
 dev = [
     "ruff>=0.6.0",
+    "mypy>=1.14.0",
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
     "pytest-cov>=5.0.0",
@@ -90,6 +91,18 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "scripts/*" = ["S603", "S607"]  # CLI scripts intentionally shell out
+
+[tool.mypy]
+# `mypy src/` runs in CI's lint job and must report zero errors — no baseline,
+# no ratchet. Third-party packages without stubs (docker, gitpython, some of
+# the ML stack) are treated as `Any`; the code paths that touch them are
+# still checked where our own annotations say what they return.
+python_version = "3.12"
+files = ["src"]
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+exclude = ["src/db/migrations/versions/"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

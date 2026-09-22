@@ -176,9 +176,9 @@ def build_egress_policy(
     for url in (pip_index_url, npm_registry_url, go_proxy_url):
         if not url:
             continue
-        host = urlparse(url).hostname
-        if host:
-            policy.add_allow_rule(host, port=443, description=f"Configured package mirror: {host}")
+        mirror_host = urlparse(url).hostname
+        if mirror_host:
+            policy.add_allow_rule(mirror_host, port=443, description=f"Configured package mirror: {mirror_host}")
 
     return policy
 

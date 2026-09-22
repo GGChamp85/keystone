@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import inspect
 from functools import cache
+from typing import Any
 
 
 @cache
@@ -18,7 +19,7 @@ def _accepts(config_cls: type, parameter: str) -> bool:
     return parameter in inspect.signature(config_cls).parameters
 
 
-def warmup_kwargs(ratio: float, config_cls: type) -> dict[str, float]:
+def warmup_kwargs(ratio: float, config_cls: type) -> dict[str, Any]:
     """
     The warmup argument `config_cls` (TrainingArguments, or a trl subclass
     such as SFTConfig/DPOConfig) actually accepts for a warmup *ratio*.

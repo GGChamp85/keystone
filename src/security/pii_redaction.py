@@ -135,6 +135,8 @@ def redact_pii(text: str, *, types: set[PIIType] | None = None) -> RedactionResu
             found = _find_credit_cards(text)
         else:
             pattern = _DETECTORS[pii_type]
+            if pattern is None:  # only CREDIT_CARD has no regex, and it was handled above
+                continue
             found = list(pattern.finditer(text))
         for m in found:
             start, end = m.span()

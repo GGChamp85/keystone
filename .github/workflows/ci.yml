@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   lint:
-    name: Lint (ruff)
+    name: Lint (ruff) + type check (mypy)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,6 +24,8 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: ruff check src/ tests/ benchmarks/
       - run: ruff format --check src/ tests/ benchmarks/
+      - name: mypy (zero errors — configured in pyproject.toml [tool.mypy])
+        run: mypy
 
   test:
     name: Test (pytest, real Postgres/Redis/Qdrant/Docker sandbox)

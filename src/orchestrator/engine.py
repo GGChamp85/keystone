@@ -18,11 +18,12 @@ from __future__ import annotations
 import asyncio
 import time
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 from uuid import UUID, uuid4
 
 import structlog
 from sqlalchemy import update
+from sqlalchemy.engine import CursorResult
 from temporalio.client import Client, WorkflowHandle
 
 from src.config import get_settings
@@ -497,6 +498,9 @@ class KeystoneEngine:
             from src.git.host import get_git_host, parse_owner_repo
 
             repository_url = final_state.get("repository_url")
+            if not repository_url:
+                logger.info("keystone.git_workflow_pushed_no_repository_url", task_id=str(task_id))
+                return result
             owner, repo = parse_owner_repo(repository_url)
             host = get_git_host()
             base_branch = final_state.get("branch") or await host.get_default_branch(owner, repo)
@@ -612,7 +616,7 @@ class KeystoneEngine:
                     completed_at=datetime.now(UTC),
                 )
             )
-            cancelled = result.rowcount > 0
+            cancelled = cast("CursorResult[Any]", result).rowcount > 0
 
         if cancelled and workflow_id:
             client = await self._get_temporal_client()

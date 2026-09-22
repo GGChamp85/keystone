@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -35,7 +36,9 @@ from src.db.models import APIKey, APIKeyStatus, AuditLog, Tenant, TenantTier, Us
 router = APIRouter(prefix="/v1/admin", tags=["admin"], dependencies=[Depends(require_root_admin)])
 
 
-async def _audit(db: AsyncSession, request: Request, action: str, target_type: str, target_id: str, **metadata):
+async def _audit(
+    db: AsyncSession, request: Request, action: str, target_type: str, target_id: str | UUID, **metadata: Any
+) -> None:
     db.add(
         AuditLog(
             actor="root_admin",

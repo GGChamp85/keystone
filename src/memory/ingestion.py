@@ -335,7 +335,7 @@ class CodeIngestionPipeline:
             line_len = len(line) + 1
             if current_len + line_len > chunk_size and current_chunk:
                 chunks.append("\n".join(current_chunk))
-                overlap_lines = []
+                overlap_lines: list[str] = []
                 overlap_len = 0
                 for prev_line in reversed(current_chunk):
                     if overlap_len + len(prev_line) + 1 > overlap:

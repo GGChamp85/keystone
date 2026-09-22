@@ -24,6 +24,8 @@ def _get_engine() -> AsyncEngine:
     global _engine
     if _engine is None:
         settings = get_settings()
+        if settings.database_url is None:
+            raise RuntimeError("DATABASE_URL is not set (see .env.example / `keystone init`)")
         _engine = create_async_engine(
             settings.database_url,
             pool_size=20,

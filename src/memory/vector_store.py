@@ -22,6 +22,7 @@ from typing import Any
 import structlog
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.models import (
+    Condition,
     Distance,
     FieldCondition,
     Filter,
@@ -120,7 +121,7 @@ class VectorStore:
         await self.ensure_collection(tenant_id)
         collection = self._collection_name(tenant_id)
         query_embedding = await self._embedder.embed(query)
-        conditions = []
+        conditions: list[Condition] = []
         if repository:
             conditions.append(FieldCondition(key="repository", match=MatchValue(value=repository)))
         if language:

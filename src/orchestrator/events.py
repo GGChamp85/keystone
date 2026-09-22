@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 import structlog
@@ -102,7 +102,11 @@ async def read_task_events_from(task_id: UUID | str, last_id: str = "0-0") -> li
     """One-shot read of every event after `last_id` (replay use, "0-0" = from the start)."""
     redis = await get_redis()
     key = _stream_key(task_id)
-    entries = await redis.xrange(key, min=f"({last_id}" if last_id != "0-0" else "-", max="+")
+    # redis-py types stream replies as bytes-or-str unions; this client decodes responses, so they are str.
+    entries = cast(
+        "list[tuple[str, dict[str, str]]]",
+        await redis.xrange(key, min=f"({last_id}" if last_id != "0-0" else "-", max="+"),
+    )
     return [(entry_id, json.loads(fields["data"])) for entry_id, fields in entries]
 
 
@@ -112,7 +116,10 @@ async def block_for_next_event(
     """Block until the next event after `last_id`, or return None on timeout (caller re-polls/checks disconnect)."""
     redis = await get_redis()
     key = _stream_key(task_id)
-    result = await redis.xread({key: last_id}, count=1, block=timeout_ms)
+    result = cast(
+        "list[tuple[str, list[tuple[str, dict[str, str]]]]]",
+        await redis.xread({key: last_id}, count=1, block=timeout_ms),
+    )
     if not result:
         return None
     _key, entries = result[0]

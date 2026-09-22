@@ -134,13 +134,16 @@ class CircuitBreaker:
             await self._check_tenant_budget(state)
 
     async def _check_tenant_budget(self, state: AgentState) -> None:
+        limit = self.config.tenant_daily_limit
+        if limit is None:
+            return  # no budget configured — the caller already skips, this keeps the method self-contained
         try:
             r = await get_redis()
             day = time.strftime("%Y-%m-%d")
             daily_key = f"vs:tokens:daily:{state.tenant_id}:{day}"
             daily_used = int(await r.get(daily_key) or 0)
 
-            if daily_used >= self.config.tenant_daily_limit:
+            if daily_used >= limit:
                 raise self._trip(
                     "tenant_daily_budget",
                     f"Tenant daily token budget exhausted "

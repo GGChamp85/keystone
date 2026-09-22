@@ -49,9 +49,10 @@ api-key: ## Create an API key (interactive)
 test: ## Run tests
 	python -m pytest tests/ -v --tb=short
 
-lint: ## Lint with ruff
+lint: ## Lint with ruff, then type-check with mypy (same checks CI runs)
 	ruff check src/ tests/ --fix
 	ruff format src/ tests/
+	mypy
 
 health: ## Check platform health
 	curl -s http://localhost:8080/health | python -m json.tool

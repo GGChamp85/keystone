@@ -91,7 +91,7 @@ def build_sft_examples_from_git_history(
         if len(diff_text.encode()) > max_diff_size_kb * 1024:
             continue
 
-        changed_paths = [d.b_path or d.a_path for d in commit.diff(parent) if (d.b_path or d.a_path)]
+        changed_paths = [path for d in commit.diff(parent) if (path := d.b_path or d.a_path)]
         if _looks_generated(changed_paths):
             continue
 

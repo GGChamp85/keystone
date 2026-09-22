@@ -7,11 +7,11 @@ from __future__ import annotations
 import enum
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
-    Column,
     DateTime,
     Float,
     ForeignKey,
@@ -25,7 +25,7 @@ from sqlalchemy import (
     Enum as SAEnum,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import DeclarativeBase, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
@@ -117,28 +117,36 @@ class AdapterStatus(enum.StrEnum):
 class Tenant(Base):
     __tablename__ = "tenants"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    name = Column(String(255), nullable=False)
-    email = Column(String(255), nullable=False, unique=True)
-    tier = Column(SAEnum(TenantTier), default=TenantTier.FREE, nullable=False)
-    daily_token_limit = Column(BigInteger, nullable=False, default=5_000_000)
-    monthly_token_limit = Column(BigInteger, nullable=False, default=100_000_000)
-    max_concurrent_agents = Column(Integer, nullable=False, default=3)
-    subscription_status = Column(SAEnum(SubscriptionStatus), default=SubscriptionStatus.ACTIVE, nullable=False)
-    subscription_renews_at = Column(DateTime(timezone=True), nullable=True)
-    is_active = Column(Boolean, default=True, nullable=False)
-    metadata_ = Column("metadata", JSONB, default=dict)
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
-    updated_at = Column(
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    tier: Mapped[TenantTier] = mapped_column(SAEnum(TenantTier), default=TenantTier.FREE, nullable=False)
+    daily_token_limit: Mapped[int] = mapped_column(BigInteger, nullable=False, default=5_000_000)
+    monthly_token_limit: Mapped[int] = mapped_column(BigInteger, nullable=False, default=100_000_000)
+    max_concurrent_agents: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    subscription_status: Mapped[SubscriptionStatus] = mapped_column(
+        SAEnum(SubscriptionStatus), default=SubscriptionStatus.ACTIVE, nullable=False
+    )
+    subscription_renews_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    metadata_: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+    updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
 
-    api_keys = relationship("APIKey", back_populates="tenant", cascade="all, delete-orphan")
-    usage_records = relationship("UsageRecord", back_populates="tenant", cascade="all, delete-orphan")
-    agent_tasks = relationship("AgentTask", back_populates="tenant", cascade="all, delete-orphan")
-    users = relationship("User", back_populates="tenant", cascade="all, delete-orphan")
+    api_keys: Mapped[list[APIKey]] = relationship("APIKey", back_populates="tenant", cascade="all, delete-orphan")
+    usage_records: Mapped[list[UsageRecord]] = relationship(
+        "UsageRecord", back_populates="tenant", cascade="all, delete-orphan"
+    )
+    agent_tasks: Mapped[list[AgentTask]] = relationship(
+        "AgentTask", back_populates="tenant", cascade="all, delete-orphan"
+    )
+    users: Mapped[list[User]] = relationship("User", back_populates="tenant", cascade="all, delete-orphan")
 
 
 # ── User ──────────────────────────────────────────────────────
@@ -153,20 +161,24 @@ class User(Base):
     __tablename__ = "users"
     __table_args__ = (Index("ix_users_tenant", "tenant_id"),)
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
-    name = Column(String(255), nullable=False)
-    email = Column(String(255), nullable=False, unique=True)
-    role = Column(SAEnum(UserRole), default=UserRole.DEVELOPER, nullable=False)
-    is_active = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
-    updated_at = Column(
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    role: Mapped[UserRole] = mapped_column(SAEnum(UserRole), default=UserRole.DEVELOPER, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+    updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
 
-    tenant = relationship("Tenant", back_populates="users")
+    tenant: Mapped[Tenant] = relationship("Tenant", back_populates="users")
 
 
 # ── API Key ───────────────────────────────────────────────────
@@ -179,22 +191,30 @@ class APIKey(Base):
         Index("ix_api_keys_prefix", "key_prefix"),
     )
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    name = Column(String(255), nullable=False)
-    key_prefix = Column(String(12), nullable=False)  # "ks-xxxx" shown to user
-    key_hash = Column(String(128), nullable=False, unique=True)
-    status = Column(SAEnum(APIKeyStatus), default=APIKeyStatus.ACTIVE, nullable=False)
-    scopes = Column(JSONB, default=lambda: ["inference", "agent"])  # what this key can access
-    rate_limit_override = Column(Integer, nullable=True)  # req/min override
-    daily_token_limit_override = Column(BigInteger, nullable=True)
-    expires_at = Column(DateTime(timezone=True), nullable=True)
-    last_used_at = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    key_prefix: Mapped[str] = mapped_column(String(12), nullable=False)  # "ks-xxxx" shown to user
+    key_hash: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    status: Mapped[APIKeyStatus] = mapped_column(SAEnum(APIKeyStatus), default=APIKeyStatus.ACTIVE, nullable=False)
+    scopes: Mapped[list[str]] = mapped_column(
+        JSONB, default=lambda: ["inference", "agent"], nullable=False
+    )  # what this key can access
+    rate_limit_override: Mapped[int | None] = mapped_column(Integer, nullable=True)  # req/min override
+    daily_token_limit_override: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
 
-    tenant = relationship("Tenant", back_populates="api_keys")
-    user = relationship("User")
+    tenant: Mapped[Tenant] = relationship("Tenant", back_populates="api_keys")
+    user: Mapped[User | None] = relationship("User")
 
 
 # ── Usage Tracking ────────────────────────────────────────────
@@ -207,18 +227,22 @@ class UsageRecord(Base):
         Index("ix_usage_key_date", "api_key_id", "date"),
     )
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
-    api_key_id = Column(UUID(as_uuid=True), ForeignKey("api_keys.id", ondelete="SET NULL"), nullable=True)
-    date = Column(DateTime(timezone=True), nullable=False)
-    model_role = Column(SAEnum(ModelRole), nullable=False)
-    prompt_tokens = Column(BigInteger, default=0, nullable=False)
-    completion_tokens = Column(BigInteger, default=0, nullable=False)
-    total_tokens = Column(BigInteger, default=0, nullable=False)
-    request_count = Column(Integer, default=0, nullable=False)
-    estimated_cost_usd = Column(Float, default=0.0)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    api_key_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("api_keys.id", ondelete="SET NULL"), nullable=True
+    )
+    date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    model_role: Mapped[ModelRole] = mapped_column(SAEnum(ModelRole), nullable=False)
+    prompt_tokens: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    completion_tokens: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    total_tokens: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    request_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    estimated_cost_usd: Mapped[float | None] = mapped_column(Float, default=0.0)
 
-    tenant = relationship("Tenant", back_populates="usage_records")
+    tenant: Mapped[Tenant] = relationship("Tenant", back_populates="usage_records")
 
 
 # ── Agent Task ────────────────────────────────────────────────
@@ -228,59 +252,67 @@ class AgentTask(Base):
     __tablename__ = "agent_tasks"
     __table_args__ = (Index("ix_agent_tasks_tenant_status", "tenant_id", "status"),)
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
-    api_key_id = Column(UUID(as_uuid=True), ForeignKey("api_keys.id", ondelete="SET NULL"), nullable=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    api_key_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("api_keys.id", ondelete="SET NULL"), nullable=True
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
 
     # Task definition
-    task_description = Column(Text, nullable=False)
-    repository_url = Column(String(1024), nullable=True)
-    branch = Column(String(255), default="main")
-    file_paths = Column(JSONB, default=list)  # specific files to work on
+    task_description: Mapped[str] = mapped_column(Text, nullable=False)
+    repository_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    branch: Mapped[str | None] = mapped_column(String(255), default="main")
+    file_paths: Mapped[list[Any] | None] = mapped_column(JSONB, default=list)  # specific files to work on
 
     # Execution state
-    status = Column(SAEnum(TaskStatus), default=TaskStatus.PENDING, nullable=False)
-    current_step = Column(Integer, default=0)
-    max_steps = Column(Integer, default=15)
-    model_role = Column(SAEnum(ModelRole), default=ModelRole.CODING)
+    status: Mapped[TaskStatus] = mapped_column(SAEnum(TaskStatus), default=TaskStatus.PENDING, nullable=False)
+    current_step: Mapped[int | None] = mapped_column(Integer, default=0)
+    max_steps: Mapped[int | None] = mapped_column(Integer, default=15)
+    model_role: Mapped[ModelRole | None] = mapped_column(SAEnum(ModelRole), default=ModelRole.CODING)
 
     # Results
-    result_summary = Column(Text, nullable=True)
-    output_diff = Column(Text, nullable=True)
-    output_files = Column(JSONB, default=list)
-    error_message = Column(Text, nullable=True)
+    result_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    output_diff: Mapped[str | None] = mapped_column(Text, nullable=True)
+    output_files: Mapped[list[Any] | None] = mapped_column(JSONB, default=list)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Token accounting
-    total_prompt_tokens = Column(BigInteger, default=0)
-    total_completion_tokens = Column(BigInteger, default=0)
-    iteration_count = Column(Integer, default=0)
+    total_prompt_tokens: Mapped[int | None] = mapped_column(BigInteger, default=0)
+    total_completion_tokens: Mapped[int | None] = mapped_column(BigInteger, default=0)
+    iteration_count: Mapped[int | None] = mapped_column(Integer, default=0)
 
     # Sandbox
-    sandbox_id = Column(String(255), nullable=True)
+    sandbox_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Git workflow (src/orchestrator/workspace.py, src/git/) — the branch
     # the agent pushed its work to and the PR/MR opened against it, if any.
     # NULL until the task actually reaches the point of committing/pushing.
-    branch_name = Column(String(255), nullable=True)
-    commit_sha = Column(String(64), nullable=True)
-    pr_url = Column(String(1024), nullable=True)
-    pr_number = Column(Integer, nullable=True)
+    branch_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    commit_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    pr_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    pr_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Temporal workflow
-    temporal_workflow_id = Column(String(255), nullable=True)
-    temporal_run_id = Column(String(255), nullable=True)
+    temporal_workflow_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    temporal_run_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Timestamps
-    started_at = Column(DateTime(timezone=True), nullable=True)
-    completed_at = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
 
     # Full execution trace
-    execution_trace = Column(JSONB, default=list)
+    execution_trace: Mapped[list[Any] | None] = mapped_column(JSONB, default=list)
 
-    tenant = relationship("Tenant", back_populates="agent_tasks")
-    user = relationship("User")
+    tenant: Mapped[Tenant] = relationship("Tenant", back_populates="agent_tasks")
+    user: Mapped[User | None] = relationship("User")
 
 
 # ── Codebase Index ────────────────────────────────────────────
@@ -292,14 +324,16 @@ class CodebaseIndex(Base):
     __tablename__ = "codebase_indexes"
     __table_args__ = (UniqueConstraint("tenant_id", "repository_url", "file_path", name="uq_codebase_index"),)
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
-    repository_url = Column(String(1024), nullable=False)
-    file_path = Column(String(2048), nullable=False)
-    file_hash = Column(String(64), nullable=False)  # SHA-256 of file content
-    chunk_count = Column(Integer, default=0)
-    language = Column(String(50), nullable=True)
-    last_indexed_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    repository_url: Mapped[str] = mapped_column(String(1024), nullable=False)
+    file_path: Mapped[str] = mapped_column(String(2048), nullable=False)
+    file_hash: Mapped[str] = mapped_column(String(64), nullable=False)  # SHA-256 of file content
+    chunk_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    language: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    last_indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
 
 # ── Audit Log ─────────────────────────────────────────────────
@@ -311,14 +345,16 @@ class AuditLog(Base):
     __tablename__ = "audit_logs"
     __table_args__ = (Index("ix_audit_logs_created_at", "created_at"),)
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    actor = Column(String(255), nullable=False)  # "root_admin" or a tenant/key identifier
-    action = Column(String(100), nullable=False)  # e.g. "tenant.create", "api_key.revoke"
-    target_type = Column(String(50), nullable=True)  # "tenant" | "api_key"
-    target_id = Column(String(255), nullable=True)
-    metadata_ = Column("metadata", JSONB, default=dict)
-    source_ip = Column(String(64), nullable=True)
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    actor: Mapped[str] = mapped_column(String(255), nullable=False)  # "root_admin" or a tenant/key identifier
+    action: Mapped[str] = mapped_column(String(100), nullable=False)  # e.g. "tenant.create", "api_key.revoke"
+    target_type: Mapped[str | None] = mapped_column(String(50), nullable=True)  # "tenant" | "api_key"
+    target_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    metadata_: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSONB, default=dict)
+    source_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
 
 
 # ── Fine-Tune Job ─────────────────────────────────────────────
@@ -327,18 +363,22 @@ class AuditLog(Base):
 class FineTuneJob(Base):
     __tablename__ = "finetune_jobs"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
-    base_model = Column(String(255), nullable=False)
-    job_type = Column(String(50), nullable=False)  # "lora", "sft", "dpo"
-    status = Column(String(50), default="pending")
-    config = Column(JSONB, default=dict)
-    metrics = Column(JSONB, default=dict)
-    output_model_path = Column(String(1024), nullable=True)
-    started_at = Column(DateTime(timezone=True), nullable=True)
-    completed_at = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
-    error_message = Column(Text, nullable=True)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    base_model: Mapped[str] = mapped_column(String(255), nullable=False)
+    job_type: Mapped[str] = mapped_column(String(50), nullable=False)  # "lora", "sft", "dpo"
+    status: Mapped[str] = mapped_column(String(50), default="pending", nullable=False)
+    config: Mapped[dict[str, Any] | None] = mapped_column(JSONB, default=dict)
+    metrics: Mapped[dict[str, Any] | None] = mapped_column(JSONB, default=dict)
+    output_model_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 # ── Model Adapter ─────────────────────────────────────────────
@@ -355,30 +395,42 @@ class ModelAdapter(Base):
     __tablename__ = "model_adapters"
     __table_args__ = (Index("ix_model_adapters_tenant_base_model", "tenant_id", "base_model_id"),)
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
-    base_model_id = Column(String(255), nullable=False)  # e.g. "zai-org/GLM-5.3-Flash"
-    name = Column(String(255), nullable=False)
-    path = Column(String(1024), nullable=False)  # filesystem/volume path vLLM's --lora-modules points at
-    rank = Column(Integer, nullable=False)
-    job_type = Column(String(50), nullable=False)  # "lora" | "sft" | "dpo"
-    job_id = Column(UUID(as_uuid=True), ForeignKey("finetune_jobs.id", ondelete="SET NULL"), nullable=True)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    base_model_id: Mapped[str] = mapped_column(String(255), nullable=False)  # e.g. "zai-org/GLM-5.3-Flash"
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    path: Mapped[str] = mapped_column(
+        String(1024), nullable=False
+    )  # filesystem/volume path vLLM's --lora-modules points at
+    rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    job_type: Mapped[str] = mapped_column(String(50), nullable=False)  # "lora" | "sft" | "dpo"
+    job_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("finetune_jobs.id", ondelete="SET NULL"), nullable=True
+    )
     # No FK yet — benchmark_runs doesn't exist until Phase 6; a plain
     # nullable column now, upgraded to a real FK in that phase's migration
     # rather than inventing the table early just to satisfy this one.
-    benchmark_run_id = Column(UUID(as_uuid=True), nullable=True)
-    status = Column(SAEnum(AdapterStatus), default=AdapterStatus.CANDIDATE, nullable=False)
-    is_default = Column(Boolean, default=False, nullable=False)
-    metrics = Column(JSONB, default=dict)  # eval_loss, benchmark pass rate, etc. — whatever produced the verdict
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
-    updated_at = Column(
+    benchmark_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    status: Mapped[AdapterStatus] = mapped_column(
+        SAEnum(AdapterStatus), default=AdapterStatus.CANDIDATE, nullable=False
+    )
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    metrics: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB, default=dict
+    )  # eval_loss, benchmark pass rate, etc. — whatever produced the verdict
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+    updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
 
-    tenant = relationship("Tenant")
-    job = relationship("FineTuneJob")
+    tenant: Mapped[Tenant] = relationship("Tenant")
+    job: Mapped[FineTuneJob | None] = relationship("FineTuneJob")
 
 
 # ── Agent Memory ──────────────────────────────────────────────
@@ -398,20 +450,26 @@ class AgentMemory(Base):
         Index("ix_agent_memories_status", "status"),
     )
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
-    repository = Column(String(1024), nullable=True)
-    scope = Column(SAEnum(MemoryScope), nullable=False)
-    kind = Column(SAEnum(MemoryKind), nullable=False)
-    content = Column(Text, nullable=False)
-    source = Column(SAEnum(MemorySource), default=MemorySource.USER, nullable=False)
-    status = Column(SAEnum(MemoryStatus), default=MemoryStatus.APPROVED, nullable=False)
-    pinned = Column(Boolean, default=False, nullable=False)
-    confidence = Column(Float, default=1.0, nullable=False)
-    hit_count = Column(Integer, default=0, nullable=False)
-    created_by = Column(String(255), nullable=True)  # a user identifier, or "agent" for auto-proposed
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
-    updated_at = Column(
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    repository: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    scope: Mapped[MemoryScope] = mapped_column(SAEnum(MemoryScope), nullable=False)
+    kind: Mapped[MemoryKind] = mapped_column(SAEnum(MemoryKind), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[MemorySource] = mapped_column(SAEnum(MemorySource), default=MemorySource.USER, nullable=False)
+    status: Mapped[MemoryStatus] = mapped_column(SAEnum(MemoryStatus), default=MemoryStatus.APPROVED, nullable=False)
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
+    hit_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_by: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )  # a user identifier, or "agent" for auto-proposed
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+    updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
@@ -428,9 +486,13 @@ class TaskFeedback(Base):
     __tablename__ = "task_feedback"
     __table_args__ = (Index("ix_task_feedback_task", "task_id"),)
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    task_id = Column(UUID(as_uuid=True), ForeignKey("agent_tasks.id", ondelete="CASCADE"), nullable=False)
-    user_id = Column(String(255), nullable=True)
-    verdict = Column(SAEnum(FeedbackVerdict), nullable=False)
-    reason = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("agent_tasks.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    verdict: Mapped[FeedbackVerdict] = mapped_column(SAEnum(FeedbackVerdict), nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )

@@ -42,6 +42,8 @@ class CheckResult:
 async def check_postgres(settings: Settings) -> CheckResult:
     import asyncpg
 
+    if settings.database_url is None:
+        return CheckResult("Postgres", CheckStatus.FAIL, "DATABASE_URL is not set")
     dsn = settings.database_url.replace("postgresql+asyncpg://", "postgresql://", 1)
     try:
         conn = await asyncpg.connect(dsn, timeout=5.0)
