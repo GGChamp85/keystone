@@ -146,6 +146,13 @@ This brings up the full stack (no model backend chosen yet — see [What you nee
 # 1. Clone and configure
 git clone https://github.com/GGChamp85/keystone.git
 cd keystone
+
+# Either let `keystone init` generate a real, working .env for you (needs
+# a local Python env — python3 -m venv .venv && source .venv/bin/activate
+# && pip install -e ".[dev]", see CONTRIBUTING.md — then `keystone init`,
+# answer its prompts, and skip to step 2):
+keystone init
+# ...or do it by hand:
 cp .env.example .env
 # Edit .env: set POSTGRES_PASSWORD, REDIS_PASSWORD, QDRANT_API_KEY,
 # KEYSTONE_ROOT_ADMIN_TOKEN — the compose file refuses to start without them.
@@ -166,6 +173,7 @@ make api-key       # prompts for a tenant name, prints a ks-... key — save it
 
 # 6. Confirm it's alive
 curl http://localhost:8080/health
+# or, for a fuller diagnostic (git host, package mirrors, secret strength too): keystone doctor
 ```
 
 Expected output from step 6 is a JSON body with `"status": "ok"` and a `components` map showing each backing service (`postgres`, `redis`, `qdrant`, `vllm_coding`, ...) as `healthy` or `unhealthy` — an `unhealthy` vLLM component just means no model endpoint is reachable yet, which is expected until you've pointed one at real GPUs or an external endpoint.
