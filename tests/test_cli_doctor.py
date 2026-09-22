@@ -30,13 +30,16 @@ pytestmark = pytest.mark.integration
 
 
 def _settings(**overrides) -> Settings:
-    base = {
-        "database_url": "postgresql+asyncpg://keystone:testpass@localhost:15432/keystone",
-        "redis_url": "redis://localhost:16379/0",
-        "qdrant_host": "localhost",
-        "qdrant_port": 16333,
-        "qdrant_api_key": SecretStr("dev-local-test-key"),
-        "sandbox_daemon_url": "http://localhost:9000",
+    """
+    Settings() already reads DATABASE_URL/REDIS_URL/QDRANT_HOST/
+    QDRANT_PORT/QDRANT_API_KEY/SANDBOX_DAEMON_URL from the real ambient
+    environment (this dev machine's docker-compose port mappings, or
+    CI's — see .github/workflows/ci.yml's service containers, which use
+    different ports than any local dev setup) — so these checks must be
+    built against whatever's actually there, never hardcoded literal
+    connection details for one specific environment.
+    """
+    base: dict = {
         "postgres_password": SecretStr("testpass"),
         "keystone_root_admin_token": SecretStr("a-real-non-placeholder-token"),
     }
