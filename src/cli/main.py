@@ -35,6 +35,16 @@ from rich.table import Table
 
 from src.cli.doctor import CheckStatus, run_all_checks
 from src.cli.init import default_overrides, find_env_template, render_env_file
+from src.cli.ops import (
+    build_bundle_build_images_command,
+    build_bundle_download_models_command,
+    build_bundle_import_command,
+    build_down_command,
+    build_migrate_command,
+    build_sandbox_images_command,
+    build_up_command,
+    find_repo_root,
+)
 from src.config import get_settings
 
 app = typer.Typer(add_completion=False, help="Keystone — self-hosted LLM inference & autonomous coding agents.")
@@ -42,10 +52,12 @@ memory_app = typer.Typer(add_completion=False, help="Inspect and manage what the
 finetune_app = typer.Typer(add_completion=False, help="Start and manage fine-tuning jobs.")
 tenants_app = typer.Typer(add_completion=False, help="Bootstrap tenants (KEYSTONE_ROOT_ADMIN_TOKEN required).")
 users_app = typer.Typer(add_completion=False, help="Manage tenant users (KEYSTONE_ROOT_ADMIN_TOKEN required).")
+bundle_app = typer.Typer(add_completion=False, help="Build/import the air-gapped offline bundle (wraps airgap/*.sh).")
 app.add_typer(memory_app, name="memory")
 app.add_typer(finetune_app, name="finetune")
 app.add_typer(tenants_app, name="tenants")
 app.add_typer(users_app, name="users")
+app.add_typer(bundle_app, name="bundle")
 
 console = Console()
 error_console = Console(stderr=True, style="bold red")
@@ -417,6 +429,92 @@ def user_list(tenant_id: Annotated[str, typer.Argument()]):
         console.print("No users found.")
         return
     console.print(_users_table(users))
+
+
+def _require_repo_root():
+    root = find_repo_root()
+    if root is None:
+        error_console.print(
+            "Could not find docker-compose.yml — run this from inside a Keystone repo checkout "
+            "(or a subdirectory of one)."
+        )
+        raise typer.Exit(code=1)
+    return root
+
+
+def _run_streamed(cmd: list[str], *, cwd=None) -> None:
+    """Runs `cmd` with stdout/stderr inherited (not captured) so the user
+    sees the same real, live output the wrapped tool (docker compose, an
+    airgap/*.sh script) already produces — this is a thin wrapper, not a
+    reimplementation that would have to re-derive or summarize that
+    output itself."""
+    import subprocess
+
+    console.print(f"[dim]$ {' '.join(cmd)}[/dim]")
+    result = subprocess.run(cmd, cwd=cwd)  # noqa: S603 — argv built entirely from this module's own fixed strings
+    if result.returncode != 0:
+        raise typer.Exit(code=result.returncode)
+
+
+@app.command("up")
+def up(
+    dev: Annotated[
+        bool, typer.Option(help="Only infra (postgres/redis/qdrant) — no app/worker/sandbox-daemon")
+    ] = False,
+    migrate: Annotated[bool, typer.Option(help="Run alembic migrations once the stack is up")] = True,
+    sandbox_images: Annotated[bool, typer.Option(help="Build the sandbox runtime image too")] = True,
+):
+    """Bring up the Keystone stack — a real wrapper around `docker compose up -d`
+    (+ optionally the sandbox image build and migrations), matching what the README's
+    manual `make certs && make build && make up && make db-migrate` steps do in one command."""
+    root = _require_repo_root()
+    compose_file = root / "docker-compose.yml"
+
+    _run_streamed(build_up_command(compose_file, dev_only=dev), cwd=root)
+
+    if dev:
+        console.print("[green]Dev infra is up.[/green] (--dev skips sandbox-images/migrate too)")
+        return
+
+    if sandbox_images:
+        _run_streamed(build_sandbox_images_command(root), cwd=root)
+    if migrate:
+        _run_streamed(build_migrate_command(compose_file), cwd=root)
+
+    console.print(
+        "[green]Stack is up.[/green] Next: `keystone doctor`, then create an API key with `keystone keys-create`."
+    )
+
+
+@app.command("down")
+def down():
+    """Stop the Keystone stack — a real wrapper around `docker compose down`."""
+    root = _require_repo_root()
+    _run_streamed(build_down_command(root / "docker-compose.yml"), cwd=root)
+
+
+@bundle_app.command("download-models")
+def bundle_download_models(output_dir: Annotated[str, typer.Argument()] = "./airgap/models"):
+    """Download every model weight onto this (internet-connected) build machine — wraps airgap/download_models.sh."""
+    root = _require_repo_root()
+    _run_streamed(build_bundle_download_models_command(root, output_dir), cwd=root)
+
+
+@bundle_app.command("build-images")
+def bundle_build_images(output_dir: Annotated[str, typer.Argument()] = "./airgap/output/images"):
+    """Pull and tarball every container image onto this build machine — wraps airgap/build_image_bundle.sh."""
+    root = _require_repo_root()
+    _run_streamed(build_bundle_build_images_command(root, output_dir), cwd=root)
+
+
+@bundle_app.command("import")
+def bundle_import(
+    bundle_dir: Annotated[str | None, typer.Argument()] = None,
+    push: Annotated[bool, typer.Option(help="Also push each re-tagged image to the internal registry")] = False,
+):
+    """Load the transferred bundle on the air-gapped target — wraps airgap/import_bundle.sh."""
+    root = _require_repo_root()
+    _run_streamed(build_bundle_import_command(root, bundle_dir, push=push), cwd=root)
 
 
 @app.command("init")
