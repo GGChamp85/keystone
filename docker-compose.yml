@@ -2,7 +2,6 @@
 # Full stack (single-box dev tier): Keystone Inference (LLM serving) + Keystone Agents (coding agent)
 # For multi-node/production, see helm/keystone/ and infra/opentofu/.
 
-version: "3.9"
 
 x-common-env: &common-env
   VS_ENV: production
@@ -152,6 +151,35 @@ services:
   # than relying on a generic release to have full support yet. See
   # src/inference/config.py's coding_model_config() docstring for the
   # verified footprint/tool-parser details this command mirrors.
+  # demo-model — a real OpenAI-compatible backend that needs no GPU: llama.cpp's
+  # server pulling the official Apache-2.0 Qwen2.5-Coder-0.5B-Instruct GGUF
+  # (676 MB, Q8_0) straight from Hugging Face on first start, cached in the
+  # shared model-cache volume after that. Opt in with `--profile demo-model`
+  # (`make up-demo`) and point VLLM_CODING_URL=http://demo-model:8000/v1 at it.
+  # It exists so a laptop and CI can run every real code path — the gateway,
+  # tool calling, streaming with usage, structured output — against a real
+  # model; a 0.5B model's answers are not the point, and its tool-call
+  # reliability is not claimed. Real quality numbers come from the GPU tiers.
+  demo-model:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    container_name: keystone-demo-model
+    profiles: ["demo-model"]
+    restart: unless-stopped
+    environment:
+      LLAMA_CACHE: /root/.cache/llama.cpp
+    command: >
+      -hf Qwen/Qwen2.5-Coder-0.5B-Instruct-GGUF:Q8_0 --alias demo-coder
+      --jinja --host 0.0.0.0 --port 8000 -c 8192 --n-predict 2048
+    ports: ["8090:8000"]
+    volumes: [model-cache:/root/.cache/llama.cpp]
+    networks: [keystone-network]
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
+
   vllm-coding:
     image: vllm/vllm-openai:glm53-flash
     container_name: keystone-vllm-coding

@@ -22,6 +22,12 @@ up: ## Start full stack (detached)
 up-dev: ## Start only infra (postgres, redis, qdrant) for local dev
 	$(COMPOSE) up -d postgres redis qdrant
 
+up-demo: ## Start infra + the no-GPU demo model (llama.cpp, Qwen2.5-Coder-0.5B) — set VLLM_CODING_URL=http://demo-model:8000/v1
+	$(COMPOSE) --profile demo-model up -d postgres redis qdrant sandbox-daemon demo-model
+	@echo "Waiting for the demo model to load (first run downloads ~676 MB)..."
+	@until curl -sf http://localhost:8090/health >/dev/null; do sleep 3; done
+	@echo "demo-model ready at http://localhost:8090/v1 (inside compose: http://demo-model:8000/v1)"
+
 down: ## Stop all containers
 	$(COMPOSE) down
 

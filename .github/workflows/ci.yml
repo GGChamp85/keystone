@@ -63,6 +63,11 @@ jobs:
       VS_SECRET_KEY: ci-test-secret-key-64-characters-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       VS_ENV: development
       SANDBOX_DAEMON_URL: http://localhost:9000
+      # A real OpenAI-compatible model backend for the whole job: llama.cpp
+      # serving Qwen2.5-Coder-0.5B on CPU (see docker-compose.yml's
+      # demo-model profile). Tests that need a model run for real against it.
+      VLLM_CODING_URL: http://localhost:8090/v1
+      CODING_MODEL_ID: demo-coder
       PYTHONPATH: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@v4
@@ -77,6 +82,25 @@ jobs:
         run: |
           nohup python -m uvicorn src.sandbox.daemon:app --host 0.0.0.0 --port 9000 > sandbox-daemon.log 2>&1 &
           for i in $(seq 1 30); do curl -sf http://localhost:9000/health && break; sleep 1; done
+      - name: Cache the demo model GGUF (676 MB — downloaded once, reused across runs)
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/llama.cpp
+          key: llama-cpp-gguf-Qwen2.5-Coder-0.5B-Instruct-Q8_0
+      - name: Start demo model (real llama.cpp server, Qwen2.5-Coder-0.5B on CPU — the OpenAI-compatible backend every model-dependent test runs against)
+        run: |
+          mkdir -p ~/.cache/llama.cpp
+          docker run -d --name demo-model -p 8090:8000 \
+            -v ~/.cache/llama.cpp:/root/.cache/llama.cpp -e LLAMA_CACHE=/root/.cache/llama.cpp \
+            ghcr.io/ggml-org/llama.cpp:server \
+            -hf Qwen/Qwen2.5-Coder-0.5B-Instruct-GGUF:Q8_0 --alias demo-coder \
+            --jinja --host 0.0.0.0 --port 8000 -c 8192 --n-predict 2048
+          # First run downloads the GGUF; cached runs load in seconds. 503 while loading, 200 when ready.
+          for i in $(seq 1 120); do curl -sf http://localhost:8090/health && break; sleep 3; done
+          curl -sf http://localhost:8090/v1/models
+      - name: Demo model log (on failure)
+        if: failure()
+        run: docker logs demo-model 2>&1 | tail -50
       - name: pytest (unit + integration — integration tests self-skip only if a required service is unreachable)
         run: python -m pytest tests/ -v --tb=short
       - name: Sandbox daemon log (on failure)
