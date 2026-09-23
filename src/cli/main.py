@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
 from pathlib import Path
 from typing import Annotated
 
@@ -45,13 +46,20 @@ from src.cli.init import (
     render_env_file,
 )
 from src.cli.ops import (
+    CLOUDS,
     build_bundle_build_images_command,
     build_bundle_download_models_command,
     build_bundle_import_command,
     build_down_command,
+    build_helm_install_command,
     build_migrate_command,
     build_sandbox_images_command,
+    build_tofu_command,
+    build_tofu_output_command,
     build_up_command,
+    cloud_env_dir,
+    default_cloud_values_files,
+    find_iac_binary,
     find_repo_root,
 )
 from src.cli.runpod_serverless import GPU_TIER_24GB, GPU_TIER_80GB, RunPodServerless, explain_api_error
@@ -63,7 +71,10 @@ finetune_app = typer.Typer(add_completion=False, help="Start and manage fine-tun
 tenants_app = typer.Typer(add_completion=False, help="Bootstrap tenants (KEYSTONE_ROOT_ADMIN_TOKEN required).")
 users_app = typer.Typer(add_completion=False, help="Manage tenant users (KEYSTONE_ROOT_ADMIN_TOKEN required).")
 bundle_app = typer.Typer(add_completion=False, help="Build/import the air-gapped offline bundle (wraps airgap/*.sh).")
-deploy_app = typer.Typer(add_completion=False, help="Deploy a model backend to a cloud (RunPod Serverless today).")
+deploy_app = typer.Typer(
+    add_completion=False,
+    help="Deploy to a cloud: a RunPod Serverless model backend, or a GPU Kubernetes pilot on AWS/Azure/GCP.",
+)
 ide_app = typer.Typer(add_completion=False, help="Generate IDE configuration (VS Code via Continue).")
 app.add_typer(memory_app, name="memory")
 app.add_typer(finetune_app, name="finetune")
@@ -751,6 +762,118 @@ def deploy_runpod_serverless(
     console.print("  VLLM_CODING_API_KEY=${RUNPOD_API_KEY}")
     console.print(f"  CODING_MODEL_ID={deployment.served_model_name}")
     console.print("\nThen `keystone doctor` checks it, and `keystone deploy runpod-serverless --destroy` removes it.")
+
+
+@deploy_app.command("cloud")
+def deploy_cloud(
+    cloud: Annotated[str, typer.Option(help="aws | azure | gcp")],
+    env: Annotated[
+        str, typer.Option(help="Environment name — runs in infra/opentofu/environments/<cloud>-<env>")
+    ] = "pilot",
+    plan: Annotated[bool, typer.Option("--plan", help="init + plan, change nothing (the default)")] = False,
+    apply: Annotated[bool, typer.Option("--apply", help="init + apply — asks for the usual yes/no first")] = False,
+    destroy: Annotated[
+        bool, typer.Option("--destroy", help="init + destroy the whole environment — asks for yes/no first")
+    ] = False,
+    var_file: Annotated[
+        Path | None,
+        typer.Option(help="Extra -var-file (terraform.tfvars in the environment directory is loaded automatically)"),
+    ] = None,
+    helm_install: Annotated[
+        bool,
+        typer.Option(
+            "--helm-install",
+            help="Run `helm upgrade --install` with values-client-vpc.yaml + values-<cloud>.yaml against the "
+            "current kubeconfig context — after --apply, or on its own once the cluster exists",
+        ),
+    ] = False,
+):
+    """Stand up (or tear down) a GPU Kubernetes pilot on AWS, Azure or GCP — a thin wrapper around
+    `tofu -chdir=infra/opentofu/environments/<cloud>-<env> init|plan|apply|destroy` (Terraform is
+    used when OpenTofu is not installed) and, with --helm-install, the matching Helm install.
+    Every command is printed before it runs. See docs/guides/deploy-<cloud>.md for what you get,
+    what it costs, and what has and has not been verified."""
+    if cloud not in CLOUDS:
+        error_console.print(f"--cloud must be one of {', '.join(CLOUDS)}, not {cloud!r}.")
+        raise typer.Exit(code=1)
+    if sum([plan, apply, destroy]) > 1:
+        error_console.print("Pass at most one of --plan, --apply, --destroy.")
+        raise typer.Exit(code=1)
+    if destroy and helm_install:
+        error_console.print("--helm-install makes no sense with --destroy.")
+        raise typer.Exit(code=1)
+
+    root = _require_repo_root()
+    env_dir = cloud_env_dir(root, cloud, env)
+    if not env_dir.is_dir():
+        available = sorted(p.name for p in (root / "infra" / "opentofu" / "environments").iterdir() if p.is_dir())
+        error_console.print(f"No environment at {env_dir} — available: {', '.join(available)}.")
+        raise typer.Exit(code=1)
+
+    run_iac = apply or destroy or plan or not helm_install
+    if run_iac:
+        binary = find_iac_binary()
+        if binary is None:
+            error_console.print(
+                "Neither `tofu` nor `terraform` is on PATH. Install OpenTofu 1.6+ "
+                "(https://opentofu.org/docs/intro/install/ — `brew install opentofu` on macOS) "
+                "or Terraform 1.6+; the HCL under infra/opentofu works with either."
+            )
+            raise typer.Exit(code=1)
+        resolved_var_file: Path | None = None
+        if var_file is not None:
+            resolved_var_file = var_file.resolve()
+            if not resolved_var_file.is_file():
+                error_console.print(f"--var-file {var_file} does not exist.")
+                raise typer.Exit(code=1)
+        action = "apply" if apply else "destroy" if destroy else "plan"
+        _run_streamed(build_tofu_command(env_dir, "init", binary=binary), cwd=root)
+        _run_streamed(build_tofu_command(env_dir, action, resolved_var_file, binary=binary), cwd=root)
+
+        if action == "plan":
+            console.print(
+                f"\n[green]Plan only — nothing changed.[/green] Re-run with --apply to create the {cloud} {env} tier."
+            )
+            return
+        if action == "destroy":
+            console.print(
+                f"\n[green]Destroyed.[/green] Cloud billing for the {cloud} {env} tier stops with the last resource."
+            )
+            return
+
+        kubeconfig_cmd = _read_tofu_output(binary, env_dir, "kubeconfig_command", cwd=root)
+        console.print("\n[green]Cluster is up.[/green] Point kubectl/helm at it:")
+        console.print(f"  {kubeconfig_cmd}")
+        if not helm_install:
+            console.print("Then install the chart (or re-run this command with --helm-install):")
+            console.print(f"  {' '.join(build_helm_install_command(cloud, 'keystone', 'keystone'))}")
+            return
+
+    if shutil.which("helm") is None:
+        error_console.print("`helm` is not on PATH — install Helm 3 (https://helm.sh/docs/intro/install/).")
+        raise typer.Exit(code=1)
+    values_files = default_cloud_values_files(cloud, root / "helm" / "keystone")
+    _run_streamed(
+        build_helm_install_command(cloud, "keystone", "keystone", values_files, chart_dir=root / "helm" / "keystone"),
+        cwd=root,
+    )
+    console.print(
+        "\n[green]Chart installed.[/green] `kubectl -n keystone get pods` shows the rollout; the vLLM pod "
+        "downloads the model into the shared cache on first start."
+    )
+
+
+def _read_tofu_output(binary: str, env_dir: Path, name: str, *, cwd: Path) -> str:
+    """One captured `tofu output -raw <name>` — the only tofu call whose output the CLI reads
+    rather than streams, because it needs the string to print an instruction with it."""
+    import subprocess
+
+    result = subprocess.run(  # noqa: S603 — argv from build_tofu_output_command's fixed strings
+        build_tofu_output_command(env_dir, name, binary=binary), cwd=cwd, capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        return f"{binary} -chdir={env_dir} output -raw {name}   # ({result.stderr.strip()})"
+    return result.stdout.strip()
 
 
 @ide_app.command("continue-config")

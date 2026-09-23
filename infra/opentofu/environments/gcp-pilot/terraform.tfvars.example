@@ -1,0 +1,23 @@
+# Copy to terraform.tfvars (git-ignored) and edit. project_id is the only
+# value without a default.
+
+project_id   = "my-gcp-project" # gcloud config get-value project
+region       = "us-central1"
+location     = "us-central1-a" # zonal cluster; use "us-central1" for a regional one
+cluster_name = "keystone-pilot"
+
+# One NVIDIA L4 (24 GB) per node: g2-standard-8 = 8 vCPU / 32 GiB.
+gpu_machine_type      = "g2-standard-8"
+gpu_accelerator_count = 1
+gpu_node_count        = 1
+gpu_node_min          = 0
+gpu_node_max          = 2
+
+system_machine_type = "e2-standard-4"
+system_node_count   = 2
+
+labels = {
+  project     = "keystone"
+  environment = "pilot"
+  owner       = "you"
+}

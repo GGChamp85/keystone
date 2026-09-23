@@ -180,6 +180,44 @@ jobs:
         run: |
           helm template keystone-ci helm/keystone --set vllm.coding.enabled=true --set vllm.coding.nodeCount=2 > /dev/null
           helm template keystone-ci helm/keystone --set vllm.coding.enabled=true --set vllm.coding.replicas=3 --set vllm.coding.autoscaling.enabled=true > /dev/null
+      - name: helm lint + template — the AWS / Azure / GCP overlays stacked on values-client-vpc.yaml (what `keystone deploy cloud --helm-install` runs)
+        run: |
+          for cloud in aws azure gcp; do
+            helm lint helm/keystone -f helm/keystone/values-client-vpc.yaml -f "helm/keystone/values-${cloud}.yaml"
+            helm template keystone helm/keystone -f helm/keystone/values-client-vpc.yaml -f "helm/keystone/values-${cloud}.yaml" > "/tmp/render-${cloud}.yaml"
+            # The overlay must actually clear the client-VPC placeholders, not just render.
+            if grep -q "sandbox-capable" "/tmp/render-${cloud}.yaml"; then echo "values-${cloud}.yaml left the sandbox-capable nodeSelector in place" >&2; exit 1; fi
+            grep -q "storageClassName: keystone-" "/tmp/render-${cloud}.yaml"
+          done
+
+  iac-validate:
+    name: IaC (OpenTofu fmt + init -backend=false + validate, no cloud credentials)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: "1.12.6"
+      - name: tofu fmt -check (every module and environment)
+        run: tofu fmt -check -recursive -diff infra/opentofu
+      - name: tofu init -backend=false + validate — modules
+        run: |
+          for module in infra/opentofu/modules/aws-eks-gpu infra/opentofu/modules/azure-aks-gpu infra/opentofu/modules/gcp-gke-gpu; do
+            echo "== $module"
+            tofu -chdir="$module" init -backend=false -input=false -no-color
+            tofu -chdir="$module" validate -no-color
+          done
+      - name: tofu init -backend=false + validate — environments
+        # runpod-test is deliberately not in this list: its provider (runpod/runpod) ships a
+        # malformed data-source schema that makes `validate` fail before reading any HCL — see
+        # the comment in infra/opentofu/modules/runpod-gpu-pool/main.tf. Add it here once a
+        # provider release fixes that.
+        run: |
+          for env in infra/opentofu/environments/aws-pilot infra/opentofu/environments/azure-pilot infra/opentofu/environments/gcp-pilot; do
+            echo "== $env"
+            tofu -chdir="$env" init -backend=false -input=false -no-color
+            tofu -chdir="$env" validate -no-color
+          done
 
   shellcheck:
     name: Shellcheck (airgap/, pki/, scripts/)

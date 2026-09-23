@@ -1,0 +1,85 @@
+# Copyright 2024-2026 Gaurav Gupta / Keystone — Apache 2.0
+#
+# AWS EKS overlay — layered ON TOP of values-client-vpc.yaml, filling every
+# TODO there with what infra/opentofu/modules/aws-eks-gpu actually creates
+# (StorageClass names, the GPU node label, the taint the pods tolerate).
+# Sized for the aws-pilot environment: one g6.2xlarge node = one NVIDIA L4
+# (24 GB), so the coding role serves Qwen2.5-Coder-7B-Instruct on a single
+# GPU, exactly as values-runpod-test.yaml does — the 8-GPU GLM-5.3-Flash
+# production profile from values-client-vpc.yaml does not fit a pilot.
+#
+#   helm upgrade --install keystone helm/keystone --namespace keystone --create-namespace \
+#     -f helm/keystone/values-client-vpc.yaml -f helm/keystone/values-aws.yaml
+#
+# Verified: renders in CI (`helm template` with both files). Not yet
+# applied to a real EKS cluster — see docs/deployment/verification-log.md.
+
+global:
+  imageRegistry: "" # the pilot cluster has internet egress (NAT gateway): pull vllm/* from Docker Hub. Set the Harbor mirror back for an air-gapped install.
+
+app:
+  replicaCount: 2
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+
+# Block storage: the module's gp3 StorageClass (ebs.csi.aws.com, encrypted, WaitForFirstConsumer).
+postgres:
+  storageClassName: keystone-gp3
+redis:
+  storageClassName: keystone-gp3
+qdrant:
+  storageClassName: keystone-gp3
+openbao:
+  storageClassName: keystone-gp3
+
+sandboxDaemon:
+  backend: gvisor # EKS managed nodes expose no /dev/kvm to pods — Firecracker needs bare metal (i3.metal etc.); gVisor runs anywhere
+  nodeSelector: null # clears values-client-vpc.yaml's keystone.io/sandbox-capable label: the DaemonSet runs on every system node
+
+vllm:
+  coding:
+    enabled: true
+    gpuCount: 1
+    model: "Qwen/Qwen2.5-Coder-7B-Instruct"
+    servedModelName: qwen-coder-7b
+    maxModelLen: 16384
+    toolParser: hermes
+    image:
+      repository: vllm/vllm-openai
+      tag: v0.29.0
+    # The module labels GPU nodes nodepool=gpu-coding and taints them
+    # nvidia.com/gpu=present:NoSchedule; templates/vllm.yaml already adds a
+    # `nvidia.com/gpu` Exists/NoSchedule toleration to every vLLM pod.
+    nodeSelector:
+      nodepool: gpu-coding
+    # g6.2xlarge: 8 vCPU / 32 GiB. Leave headroom for the kubelet and the device plugin.
+    resources:
+      requests: { cpu: "4", memory: "20Gi", nvidia.com/gpu: "1" }
+      limits: { cpu: "7", memory: "26Gi", nvidia.com/gpu: "1" }
+  coding-fallback:
+    enabled: false # one GPU node in the pilot; enable with a second node group
+  reasoning:
+    enabled: false
+
+modelCache:
+  storage: 100Gi # EFS bills per GiB stored, not provisioned — this is only the PVC's request
+  storageClassName: keystone-efs-rwx # RWX: EFS access point via the EFS CSI driver, shared by every GPU node
+  hfOffline: false # the pilot downloads Qwen2.5-Coder-7B into the cache on first start
+
+training:
+  nodeSelector:
+    nodepool: gpu-coding
+  storageClassName: keystone-efs-rwx
+  defaultNumNodes: 1
+  gpusPerNode: 1
+  resourcesPerNode:
+    requests: { cpu: "4", memory: "20Gi", nvidia.com/gpu: "1" }
+    limits: { cpu: "7", memory: "26Gi", nvidia.com/gpu: "1" }
+
+ingress:
+  enabled: false # the module installs no ingress controller; reach the API with `kubectl -n keystone port-forward svc/keystone-app 8080:8080`, or install ingress-nginx / the AWS Load Balancer Controller and re-enable with your hostname
+
+secrets:
+  useOpenBao: false # the OpenBao SecretProviderClass path needs the Secrets Store CSI driver installed cluster-wide; the pilot uses the chart-generated Secret

@@ -1,0 +1,87 @@
+# Copyright 2024-2026 Gaurav Gupta / Keystone — Apache 2.0
+#
+# Google Cloud GKE overlay — layered ON TOP of values-client-vpc.yaml,
+# filling every TODO there with what infra/opentofu/modules/gcp-gke-gpu
+# actually creates (StorageClass names, the GPU node label, the taint the
+# pods tolerate). Sized for the gcp-pilot environment: one g2-standard-8
+# node = one NVIDIA L4 (24 GB), so the coding role serves
+# Qwen2.5-Coder-7B-Instruct on a single GPU, exactly as
+# values-runpod-test.yaml does — the 8-GPU GLM-5.3-Flash production
+# profile from values-client-vpc.yaml does not fit a pilot.
+#
+#   helm upgrade --install keystone helm/keystone --namespace keystone --create-namespace \
+#     -f helm/keystone/values-client-vpc.yaml -f helm/keystone/values-gcp.yaml
+#
+# Verified: renders in CI (`helm template` with both files). Not yet
+# applied to a real GKE cluster — see docs/deployment/verification-log.md.
+
+global:
+  imageRegistry: "" # the pilot cluster has internet egress (Cloud NAT): pull vllm/* from Docker Hub. Set the Harbor mirror back for an air-gapped install.
+
+app:
+  replicaCount: 2
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+
+# Block storage: the module's pd-balanced StorageClass (pd.csi.storage.gke.io, WaitForFirstConsumer).
+postgres:
+  storageClassName: keystone-pd-balanced
+redis:
+  storageClassName: keystone-pd-balanced
+qdrant:
+  storageClassName: keystone-pd-balanced
+openbao:
+  storageClassName: keystone-pd-balanced
+
+sandboxDaemon:
+  backend: gvisor # GKE nodes expose no /dev/kvm to pods; gVisor is what GKE Sandbox itself uses
+  nodeSelector: null # clears values-client-vpc.yaml's keystone.io/sandbox-capable label: the DaemonSet runs on every system node
+
+vllm:
+  coding:
+    enabled: true
+    gpuCount: 1
+    model: "Qwen/Qwen2.5-Coder-7B-Instruct"
+    servedModelName: qwen-coder-7b
+    maxModelLen: 16384
+    toolParser: hermes
+    image:
+      repository: vllm/vllm-openai
+      tag: v0.29.0
+    # The module labels GPU nodes nodepool=gpu-coding; GKE taints GPU pools
+    # nvidia.com/gpu=present:NoSchedule itself, and templates/vllm.yaml
+    # already adds a `nvidia.com/gpu` Exists/NoSchedule toleration to every
+    # vLLM pod.
+    nodeSelector:
+      nodepool: gpu-coding
+    # g2-standard-8: 8 vCPU / 32 GiB. Leave headroom for the kubelet and GKE's own GPU device plugin.
+    resources:
+      requests: { cpu: "4", memory: "20Gi", nvidia.com/gpu: "1" }
+      limits: { cpu: "7", memory: "26Gi", nvidia.com/gpu: "1" }
+  coding-fallback:
+    enabled: false # one GPU node in the pilot; enable with a second node pool
+  reasoning:
+    enabled: false
+
+modelCache:
+  storage: 100Gi # the Filestore CSI driver rounds this up to the tier minimum (1 TiB on Basic HDD) — one instance, billed at that size
+  storageClassName: keystone-filestore-rwx # RWX: a Filestore instance via the Filestore CSI driver, shared by every GPU node
+  hfOffline: false # the pilot downloads Qwen2.5-Coder-7B into the cache on first start
+
+training:
+  nodeSelector:
+    nodepool: gpu-coding
+  storageClassName: keystone-filestore-rwx
+  defaultNumNodes: 1
+  gpusPerNode: 1
+  resourcesPerNode:
+    requests: { cpu: "4", memory: "20Gi", nvidia.com/gpu: "1" }
+    limits: { cpu: "7", memory: "26Gi", nvidia.com/gpu: "1" }
+
+ingress:
+  enabled: false # the module installs no ingress controller; reach the API with `kubectl -n keystone port-forward svc/keystone-app 8080:8080`, or install ingress-nginx (or use the built-in `gce` class with a NodePort Service) and re-enable with your hostname
+
+secrets:
+  useOpenBao: false # the OpenBao SecretProviderClass path needs the Secrets Store CSI driver installed cluster-wide; the pilot uses the chart-generated Secret

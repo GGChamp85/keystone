@@ -47,6 +47,7 @@ Nothing leaves your network unless you choose to send it: not your code, not you
 | **Laptop** | none (a real 0.5 B model on CPU, and optionally a frontier model for the agent) | 10 minutes | [Quickstart](docs/getting-started/quickstart.md) |
 | **One GPU (24 GB)** | serves Qwen2.5-Coder-7B and fine-tunes it | 20 minutes | [Quickstart, Track B](docs/getting-started/quickstart.md) and [Hardware sizing](docs/getting-started/hardware-sizing.md) |
 | **Cloud GPUs by the hour** | RunPod Serverless, scaled to zero when idle | 15 minutes | [RunPod](docs/deployment/RUNPOD_SETUP.md) |
+| **AWS, Azure or Google Cloud pilot** | one 24 GB GPU node on a managed Kubernetes cluster, from `keystone deploy cloud` | an hour | [AWS](docs/guides/deploy-aws.md), [Azure](docs/guides/deploy-azure.md), [Google Cloud](docs/guides/deploy-gcp.md) — validated, not yet applied to a live account ([verification log](docs/deployment/verification-log.md)) |
 | **Production** | your Kubernetes cluster, multi-node, optionally air-gapped | half a day | [Kubernetes](docs/deployment/KUBERNETES_CLIENT_VPC.md), [Air-gapped install](docs/airgap/OFFLINE_INSTALL_RUNBOOK.md) |
 
 The laptop path, in full:
@@ -152,6 +153,7 @@ The full site builds with `mkdocs build --strict` in CI. Start at [`docs/index.m
 | [Fine-tune an SLM on your repo](docs/guides/fine-tune-slm-on-your-repo.md) | describe, plan and cost, approve, verdict, promote |
 | [Use it from VS Code](docs/guides/use-from-vscode.md) | chat, edit, autocomplete and memory in the editor |
 | [Benchmarks](docs/benchmarks/README.md) | how quality and cost are measured, and the real numbers so far |
+| [AWS](docs/guides/deploy-aws.md), [Azure](docs/guides/deploy-azure.md), [Google Cloud](docs/guides/deploy-gcp.md), [verification log](docs/deployment/verification-log.md) | stand up a GPU pilot on a managed cluster; what has really been applied |
 | [Kubernetes](docs/deployment/KUBERNETES_CLIENT_VPC.md), [RunPod](docs/deployment/RUNPOD_SETUP.md), [Air-gapped](docs/airgap/OFFLINE_INSTALL_RUNBOOK.md), [OpenCode](docs/deployment/OPENCODE_SETUP.md) | deploy for production |
 | [Open weights: risk and support](docs/enterprise/open-weights-risk-and-support.md) | decide whether self-hosted open-weight models fit your organisation |
 | [Troubleshooting](docs/troubleshooting.md) | fix an error message you are looking at |

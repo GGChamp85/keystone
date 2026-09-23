@@ -16,6 +16,7 @@ Every page here says what has been verified and by which test. A claim with no t
 | fine-tune a small model on my repositories | [Fine-tune an SLM on your repo](guides/fine-tune-slm-on-your-repo.md) |
 | use it from VS Code | [Use it from VS Code](guides/use-from-vscode.md) |
 | deploy on Kubernetes, RunPod, or with no internet | [Deployment](deployment/KUBERNETES_CLIENT_VPC.md), [RunPod](deployment/RUNPOD_SETUP.md), [Air-gapped](airgap/OFFLINE_INSTALL_RUNBOOK.md) |
+| stand up a GPU pilot on AWS, Azure or Google Cloud | [AWS](guides/deploy-aws.md), [Azure](guides/deploy-azure.md), [Google Cloud](guides/deploy-gcp.md) — validated, not yet applied ([verification log](deployment/verification-log.md)) |
 | decide whether open weights fit my organisation | [Open weights: risk and support](enterprise/open-weights-risk-and-support.md) |
 | see how quality and cost are measured | [Benchmarks](benchmarks/README.md) |
 | fix an error message | [Troubleshooting](troubleshooting.md) |

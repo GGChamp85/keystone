@@ -1,0 +1,23 @@
+# Copy to terraform.tfvars (git-ignored) and edit. subscription_id is the
+# only value without a default.
+
+subscription_id = "00000000-0000-0000-0000-000000000000" # az account show --query id -o tsv
+location        = "eastus"
+cluster_name    = "keystone-pilot"
+
+# One full NVIDIA A10 (24 GB) per node: 36 vCPU / 440 GiB.
+gpu_vm_size    = "Standard_NV36ads_A10_v5"
+gpu_node_count = 1
+gpu_node_min   = 0
+gpu_node_max   = 2
+
+system_vm_size    = "Standard_D4s_v5"
+system_node_count = 2
+
+sku_tier = "Free"
+
+tags = {
+  Project     = "keystone"
+  Environment = "pilot"
+  Owner       = "you@example.com"
+}
