@@ -1,0 +1,6 @@
+[project]
+name = "csv-quoted-fields-sample"
+version = "0.1.0"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

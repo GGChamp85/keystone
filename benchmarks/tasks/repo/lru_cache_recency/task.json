@@ -1,0 +1,13 @@
+{
+  "id": "lru_cache_recency",
+  "language": "python",
+  "instruction": "LRUCache in lru_cache.py evicts the wrong entry: get() returns a value but does not mark the key as recently used, so a key that was just read can be evicted before a key that has not been touched for a long time. Fix get() so reading a key refreshes its recency, without breaking the existing tests in tests/test_lru_cache.py.",
+  "test_command": "python -m pytest tests/ -v",
+  "fail_to_pass": [
+    "tests/test_lru_cache.py::test_get_refreshes_recency_so_a_just_read_key_survives_eviction"
+  ],
+  "pass_to_pass": [
+    "tests/test_lru_cache.py::test_put_evicts_the_least_recently_inserted_when_full",
+    "tests/test_lru_cache.py::test_put_of_existing_key_updates_value_and_recency"
+  ]
+}

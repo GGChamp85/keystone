@@ -71,7 +71,9 @@ async def tenant_and_key():
     async with get_db_context() as db:
         db.add(Tenant(id=tid, name="completions-adapter-test", email=f"{tid}@test.dev", tier=TenantTier.FREE))
         await db.flush()
-        db.add(APIKey(tenant_id=tid, name="test-key", key_prefix=prefix, key_hash=key_hash, scopes=["inference"]))
+        db.add(
+            APIKey(tenant_id=tid, name="test-key", key_prefix=prefix, key_hash=key_hash, scopes=["inference", "agent"])
+        )
         await db.flush()
     yield tid, full_key
     async with get_db_context() as db:
@@ -252,3 +254,36 @@ async def test_streaming_estimates_with_tiktoken_when_the_backend_sends_no_usage
 
 async def _noop():
     return {}
+
+
+async def test_a_completion_lands_in_the_usage_ledger_with_dollars(tenant_and_key, monkeypatch):
+    """Gateway -> ledger -> GET /v1/keystone/usage: the real tokens and the operator's price, end to end."""
+    from src.config import get_settings
+
+    monkeypatch.setenv("MODEL_PRICES_PER_MILLION", '{"coding": 2.0}')
+    get_settings.cache_clear()
+    _tenant_id, api_key = tenant_and_key
+    fake_client = _ScriptedInferenceClient()
+    try:
+        with patch("src.api.routes.completions.get_model_router", return_value=_ScriptedModelRouter(fake_client)):
+            async with running_client() as client:
+                resp = await client.post(
+                    "/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    json={"model": "coding", "messages": [{"role": "user", "content": "hi"}]},
+                )
+                assert resp.status_code == 200, resp.text
+                usage = await client.get("/v1/keystone/usage?days=1", headers={"Authorization": f"Bearer {api_key}"})
+        assert usage.status_code == 200, usage.text
+        body = usage.json()
+        assert body["pricing_configured"] is True
+        assert body["totals"] == {
+            "prompt_tokens": 5,
+            "completion_tokens": 2,
+            "total_tokens": 7,
+            "request_count": 1,
+            "estimated_cost_usd": pytest.approx(7 / 1_000_000 * 2.0),
+        }
+        assert body["rows"][0]["model_role"] == "coding"
+    finally:
+        get_settings.cache_clear()

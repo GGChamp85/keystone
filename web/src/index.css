@@ -811,3 +811,49 @@ button:disabled {
   background: #0f172a;
   color: #e2e8f0;
 }
+
+
+/* Spend (usage ledger) */
+
+.spend-range {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.nav-link-active {
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+.spend-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elevated);
+}
+
+.spend-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.spend-table th,
+.spend-table td {
+  text-align: right;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.spend-table th:first-child,
+.spend-table td:first-child,
+.spend-table th:nth-child(2),
+.spend-table td:nth-child(2) {
+  text-align: left;
+}
+
+.spend-table tbody tr:last-child td {
+  border-bottom: none;
+}

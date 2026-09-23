@@ -446,8 +446,10 @@ class KeystoneEngine:
             total_tokens = final_state.get("total_prompt_tokens", 0) + final_state.get("total_completion_tokens", 0)
             if total_tokens > 0:
                 from src.api.middleware.rate_limiter import record_token_usage
+                from src.billing.ledger import record_task_usage
 
                 await record_token_usage(tenant_id, total_tokens)
+                await record_task_usage(tenant_id, api_key_id, final_state.get("trace", []))
 
             logger.info(
                 "keystone.task_complete",

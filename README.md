@@ -72,6 +72,7 @@ In short: if you want frontier-quality output, Keystone can still give it to you
   - [Watch it write code](#watch-it-write-code)
   - [Interactive terminal](#interactive-terminal--use-it-just-like-the-codex-cli-and-similar-terminal-agents)
   - [Submit a background task](#submit-a-background-task)
+  - [Many developers, many repos, in parallel — no policy limits](#many-developers-many-repos-in-parallel--no-policy-limits)
   - [Connect your own git server](#connect-your-own-git-server)
   - [Redact PII before it reaches a frontier model](#redact-pii-before-it-reaches-a-frontier-model)
   - [Run the benchmark suite](#run-the-benchmark-suite)
@@ -378,7 +379,7 @@ curl -X POST http://localhost:8080/v1/keystone/tasks \
 
 Every task is independent: its own sandbox container, its own clone on its own branch (`keystone/<user>/<task_id>`), its own PR. Nothing serialises on a repository, so a team can submit as many tasks against as many repos as it likes; throughput is bounded by the GPU, worker and sandbox capacity you deploy — Temporal workers and sandbox daemons scale horizontally, vLLM autoscales on queue depth — never by a number in a config file.
 
-There are **no policy limits by default**: no per-tenant concurrency cap, no daily/monthly token budget, no request-rate limit, no `max_tokens` ceiling, no per-task token cap, no wall clock. Each is `0 = unlimited` and only becomes a limit when an admin deliberately sets one (`POST /v1/admin/tenants` for tenant caps, `MAX_*`/`DEFAULT_*` in `.env` for deployment-wide ones — see `.env.example`). The single per-task safety bound is `max_iterations` (a runaway fix/test loop stops there), which you set per task with no ceiling. Nothing the agent produces is truncated in storage — full test output, full diffs, full quality findings, full install logs live on the task record; the only fitting that ever happens is into one model prompt, sized from the model's real context (`AGENT_MAX_CONTEXT_TOKENS`) and always stating what was omitted and where to read the rest.
+There are **no policy limits by default**: no per-tenant concurrency cap, no daily/monthly token budget, no request-rate limit, no `max_tokens` ceiling, no per-task token cap, no wall clock. Each is `0 = unlimited` and only becomes a limit when an admin deliberately sets one (`POST /v1/admin/tenants` for tenant caps, `MAX_*`/`DEFAULT_*` in `.env` for deployment-wide ones — see `.env.example`). The single per-task safety bound is `max_iterations` (a runaway fix/test loop stops there), which you set per task with no ceiling. Every token spent — gateway requests and agent tasks alike — is written to a durable per-tenant ledger with the dollars it cost at your own configured price per model role (`MODEL_PRICES_PER_MILLION`), visible at `GET /v1/keystone/usage` and in the web UI's **Spend** view. Nothing the agent produces is truncated in storage — full test output, full diffs, full quality findings, full install logs live on the task record; the only fitting that ever happens is into one model prompt, sized from the model's real context (`AGENT_MAX_CONTEXT_TOKENS`) and always stating what was omitted and where to read the rest.
 
 ### Connect your own git server
 

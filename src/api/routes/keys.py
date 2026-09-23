@@ -29,6 +29,7 @@ from src.api.models.responses import (
     TokenBudgetResponse,
     UserResponse,
 )
+from src.billing.ledger import usage_summary
 from src.config import get_settings
 from src.db.connection import get_db
 from src.db.models import APIKey, APIKeyStatus, AuditLog, Tenant, TenantTier, User, UserRole
@@ -49,6 +50,14 @@ async def _audit(
             source_ip=request.client.host if request.client else None,
         )
     )
+
+
+@router.get("/tenants/{tenant_id}/usage")
+async def tenant_usage_admin(tenant_id: UUID, days: int = 30, db: AsyncSession = Depends(get_db)):
+    """A tenant's spend ledger (src/billing/ledger.py) for the root admin — same shape as the tenant's own view."""
+    if await db.get(Tenant, tenant_id) is None:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    return await usage_summary(tenant_id, days=max(1, min(days, 3650)))
 
 
 @router.post("/tenants", response_model=TenantResponse, status_code=201)

@@ -1,0 +1,14 @@
+{
+  "id": "backoff_cap",
+  "language": "python",
+  "instruction": "delay_for_attempt() in backoff.py is supposed to cap the exponential delay at max_delay, but it ignores max_delay entirely, so late retries wait for minutes. Fix it so the returned delay never exceeds max_delay, without breaking the existing tests in tests/test_backoff.py.",
+  "test_command": "python -m pytest tests/ -v",
+  "fail_to_pass": [
+    "tests/test_backoff.py::test_delay_is_capped_at_max_delay"
+  ],
+  "pass_to_pass": [
+    "tests/test_backoff.py::test_first_attempts_grow_exponentially",
+    "tests/test_backoff.py::test_negative_attempt_is_rejected",
+    "tests/test_backoff.py::test_cap_does_not_affect_small_delays"
+  ]
+}

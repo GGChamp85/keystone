@@ -2,11 +2,12 @@ import { useState } from 'react'
 import { ApiKeyBar } from './components/ApiKeyBar'
 import { FineTunePanel } from './components/FineTunePanel'
 import { MemoryPanel } from './components/MemoryPanel'
+import { SpendPanel } from './components/SpendPanel'
 import { TaskSubmitForm } from './components/TaskSubmitForm'
 import { TaskStreamView } from './components/TaskStreamView'
 import { TeamTaskList } from './components/TeamTaskList'
 
-type View = 'memory' | 'team' | 'finetune'
+type View = 'memory' | 'team' | 'finetune' | 'spend'
 
 function taskIdFromUrl(): string | null {
   return new URLSearchParams(window.location.search).get('task')
@@ -14,7 +15,7 @@ function taskIdFromUrl(): string | null {
 
 function viewFromUrl(): View | null {
   const v = new URLSearchParams(window.location.search).get('view')
-  return v === 'memory' || v === 'team' || v === 'finetune' ? v : null
+  return v === 'memory' || v === 'team' || v === 'finetune' || v === 'spend' ? v : null
 }
 
 export default function App() {
@@ -63,6 +64,11 @@ export default function App() {
                   Fine-tune
                 </button>
               )}
+              {view !== 'spend' && (
+                <button className="nav-link" onClick={() => setView('spend')}>
+                  Spend
+                </button>
+              )}
             </>
           )}
           <ApiKeyBar />
@@ -76,6 +82,8 @@ export default function App() {
           <TeamTaskList onOpenTask={setTaskId} />
         ) : view === 'finetune' ? (
           <FineTunePanel onBack={() => setView(null)} />
+        ) : view === 'spend' ? (
+          <SpendPanel onBack={() => setView(null)} />
         ) : taskId ? (
           <TaskStreamView taskId={taskId} onBack={() => setTaskId(null)} />
         ) : (

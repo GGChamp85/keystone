@@ -229,6 +229,16 @@ class UsageRecord(Base):
     __table_args__ = (
         Index("ix_usage_tenant_date", "tenant_id", "date"),
         Index("ix_usage_key_date", "api_key_id", "date"),
+        # The ledger's upsert bucket (src/billing/ledger.py): NULL api_key_id is one bucket, not many.
+        Index(
+            "uq_usage_bucket",
+            "tenant_id",
+            "api_key_id",
+            "date",
+            "model_role",
+            unique=True,
+            postgresql_nulls_not_distinct=True,
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -413,10 +423,10 @@ class ModelAdapter(Base):
     job_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("finetune_jobs.id", ondelete="SET NULL"), nullable=True
     )
-    # No FK yet — benchmark_runs doesn't exist until Phase 6; a plain
-    # nullable column now, upgraded to a real FK in that phase's migration
-    # rather than inventing the table early just to satisfy this one.
-    benchmark_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # The benchmark run (below) that produced this adapter's verdict, if any.
+    benchmark_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("benchmark_runs.id", ondelete="SET NULL"), nullable=True
+    )
     status: Mapped[AdapterStatus] = mapped_column(
         SAEnum(AdapterStatus), default=AdapterStatus.CANDIDATE, nullable=False
     )
@@ -435,6 +445,41 @@ class ModelAdapter(Base):
 
     tenant: Mapped[Tenant] = relationship("Tenant")
     job: Mapped[FineTuneJob | None] = relationship("FineTuneJob")
+
+
+# ── Benchmark Run ─────────────────────────────────────────────
+
+
+class BenchmarkRun(Base):
+    """One repo-task benchmark result (benchmarks/agent_runner.py --persist): which task, which backend
+    (a label such as "coding", "frontier", "base+rag", or an adapter name), whether the held-out
+    fail_to_pass/pass_to_pass tests passed on the pushed branch, and what it cost. The persisted,
+    reproducible evidence behind docs/benchmarks/latest.md (benchmarks/report.py)."""
+
+    __tablename__ = "benchmark_runs"
+    __table_args__ = (Index("ix_benchmark_runs_suite_backend_created", "suite", "backend_label", "created_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    suite: Mapped[str] = mapped_column(String(50), nullable=False)  # "repo"
+    task_id: Mapped[str] = mapped_column(String(255), nullable=False)  # benchmarks/tasks/repo/<id>
+    backend_label: Mapped[str] = mapped_column(String(255), nullable=False)
+    model_id: Mapped[str | None] = mapped_column(String(255), nullable=True)  # the served model behind the label
+    agent_task_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("agent_tasks.id", ondelete="SET NULL"), nullable=True
+    )
+    status: Mapped[str] = mapped_column(String(50), nullable=False)  # completed | failed | timeout | ...
+    solved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    fail_to_pass: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    pass_to_pass: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    prompt_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    completion_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    pr_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    details: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)  # the full runner result
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
 
 
 # ── Agent Memory ──────────────────────────────────────────────

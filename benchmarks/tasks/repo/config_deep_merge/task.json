@@ -1,0 +1,14 @@
+{
+  "id": "config_deep_merge",
+  "language": "python",
+  "instruction": "merge_config() in config_merge.py is meant to deep-merge an override into a base configuration, but it replaces nested dictionaries wholesale, so overriding one key under \\\"database\\\" drops every other database setting. Fix it to merge nested dictionaries recursively (non-dict values in the override still replace the base value) without mutating either input, keeping the existing tests in tests/test_config_merge.py passing.",
+  "test_command": "python -m pytest tests/ -v",
+  "fail_to_pass": [
+    "tests/test_config_merge.py::test_nested_dicts_are_merged_not_replaced"
+  ],
+  "pass_to_pass": [
+    "tests/test_config_merge.py::test_top_level_override_replaces_value",
+    "tests/test_config_merge.py::test_new_keys_are_added",
+    "tests/test_config_merge.py::test_inputs_are_not_mutated"
+  ]
+}

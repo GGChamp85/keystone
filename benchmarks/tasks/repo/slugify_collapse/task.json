@@ -1,0 +1,14 @@
+{
+  "id": "slugify_collapse",
+  "language": "python",
+  "instruction": "slugify() in slug.py produces slugs with runs of dashes and dashes at the ends (\\\"hello---world-\\\") when the input has punctuation or spaces next to each other. Fix it so consecutive separators collapse to a single dash and the slug never starts or ends with a dash, keeping the existing tests in tests/test_slug.py passing.",
+  "test_command": "python -m pytest tests/ -v",
+  "fail_to_pass": [
+    "tests/test_slug.py::test_collapses_runs_of_separators",
+    "tests/test_slug.py::test_no_leading_or_trailing_dash"
+  ],
+  "pass_to_pass": [
+    "tests/test_slug.py::test_lowercases_and_replaces_spaces",
+    "tests/test_slug.py::test_keeps_digits"
+  ]
+}

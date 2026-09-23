@@ -78,6 +78,8 @@ include = ["src*"]
 [tool.ruff]
 line-length = 120
 target-version = "py311"
+# Benchmark task repositories are fixtures with deliberate bugs, not project code.
+extend-exclude = ["benchmarks/tasks/repo/*/repo"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "ASYNC", "S", "C4", "PERF", "SIM", "RUF"]

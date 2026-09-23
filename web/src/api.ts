@@ -403,3 +403,40 @@ export async function streamFineTuneJob(
     }
   }
 }
+
+
+// ── Usage ledger (src/billing/ledger.py, GET /v1/keystone/usage) ─────────────
+
+export interface UsageRow {
+  day: string
+  model_role: string
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  request_count: number
+  estimated_cost_usd: number
+}
+
+export interface UsageSummary {
+  tenant_id: string
+  days: number
+  since: string
+  pricing_configured: boolean
+  prices_per_million: Record<string, number>
+  rows: UsageRow[]
+  totals: {
+    prompt_tokens: number
+    completion_tokens: number
+    total_tokens: number
+    request_count: number
+    estimated_cost_usd: number
+  }
+}
+
+export async function getUsage(days = 30): Promise<UsageSummary> {
+  const resp = await fetch(`/v1/keystone/usage?days=${days}`, { headers: authHeaders() })
+  if (!resp.ok) {
+    throw new Error(`Failed to load usage (${resp.status})`)
+  }
+  return resp.json()
+}

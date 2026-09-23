@@ -1,0 +1,15 @@
+{
+  "id": "pagination_last_page",
+  "language": "python",
+  "instruction": "page_count() in pagination.py drops the final partial page: 11 items at 5 per page reports 2 pages, so the last item is never shown. Fix page_count() (and keep page_bounds() consistent with it) so a partial last page is counted, without breaking the existing tests in tests/test_pagination.py.",
+  "test_command": "python -m pytest tests/ -v",
+  "fail_to_pass": [
+    "tests/test_pagination.py::test_partial_last_page_is_counted",
+    "tests/test_pagination.py::test_bounds_of_the_partial_last_page"
+  ],
+  "pass_to_pass": [
+    "tests/test_pagination.py::test_exact_multiple",
+    "tests/test_pagination.py::test_zero_items_zero_pages",
+    "tests/test_pagination.py::test_invalid_arguments"
+  ]
+}

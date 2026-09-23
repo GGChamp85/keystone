@@ -1,0 +1,14 @@
+{
+  "id": "inventory_negative_stock",
+  "language": "python",
+  "instruction": "Inventory.remove() in inventory.py lets stock go negative: removing more units than are on hand silently leaves a negative quantity. It must raise an InsufficientStock error (already defined in the module) and leave the quantity unchanged. Fix it without breaking the existing tests in tests/test_inventory.py.",
+  "test_command": "python -m pytest tests/ -v",
+  "fail_to_pass": [
+    "tests/test_inventory.py::test_removing_more_than_on_hand_raises_and_leaves_stock_unchanged",
+    "tests/test_inventory.py::test_removing_from_an_unknown_sku_raises"
+  ],
+  "pass_to_pass": [
+    "tests/test_inventory.py::test_add_and_remove_within_stock",
+    "tests/test_inventory.py::test_non_positive_quantities_are_rejected"
+  ]
+}

@@ -177,6 +177,13 @@ class Settings(BaseSettings):
     agent_tool_timeout_seconds: int = 1_800  # ceiling for run_command's own timeout argument
     agent_max_wall_clock_seconds: int = 0  # whole-task wall clock (0 = none; max_iterations is the bound)
 
+    # ── Usage ledger pricing (src/billing/ledger.py) ─────────────────
+    # USD per 1,000,000 tokens per model role, from your own GPU economics (see
+    # benchmarks/cost_model.py for the calculator). JSON, e.g.
+    #   MODEL_PRICES_PER_MILLION='{"coding": 0.40, "coding_fallback": 0.20, "reasoning": 1.20}'
+    # Unpriced roles are recorded with cost 0 and the usage API says pricing is not configured.
+    model_prices_per_million: dict[str, float] = Field(default_factory=dict)
+
     # ── Coding agent behaviour (src/orchestrator/nodes/) ──────────
     # Which quality-gate tools send a task back to fixing on a finding (nodes/quality.py).
     # bandit (high/medium) and mypy by default; add "ruff", "eslint", "tsc", "go", "cargo"

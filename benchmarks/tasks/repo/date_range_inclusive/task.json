@@ -1,0 +1,14 @@
+{
+  "id": "date_range_inclusive",
+  "language": "python",
+  "instruction": "dates_between() in date_range.py is documented as inclusive of both the start and the end date, but it omits the end date, so a report for Monday to Friday only covers four days. Fix it so both ends are included (a range where start == end yields exactly that one date), keeping the existing tests in tests/test_date_range.py passing.",
+  "test_command": "python -m pytest tests/ -v",
+  "fail_to_pass": [
+    "tests/test_date_range.py::test_range_includes_the_end_date",
+    "tests/test_date_range.py::test_single_day_range_has_one_date"
+  ],
+  "pass_to_pass": [
+    "tests/test_date_range.py::test_reversed_range_is_rejected",
+    "tests/test_date_range.py::test_range_starts_at_start"
+  ]
+}

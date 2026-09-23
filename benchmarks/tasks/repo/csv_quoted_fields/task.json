@@ -1,0 +1,14 @@
+{
+  "id": "csv_quoted_fields",
+  "language": "python",
+  "instruction": "parse_line() in csv_line.py splits a CSV line on every comma, so a quoted field containing a comma (\\\"Doe, Jane\\\") is broken into two fields. Fix parse_line() to honour double-quoted fields (a comma inside quotes is part of the field, and the surrounding quotes are removed) without breaking the existing tests in tests/test_csv_line.py. Do not use the csv module \u2014 the point of this module is to have no dependency on it.",
+  "test_command": "python -m pytest tests/ -v",
+  "fail_to_pass": [
+    "tests/test_csv_line.py::test_quoted_field_with_comma_stays_one_field",
+    "tests/test_csv_line.py::test_quotes_are_removed_from_a_plain_quoted_field"
+  ],
+  "pass_to_pass": [
+    "tests/test_csv_line.py::test_simple_fields",
+    "tests/test_csv_line.py::test_empty_fields_are_preserved"
+  ]
+}

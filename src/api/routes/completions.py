@@ -23,6 +23,7 @@ from src.api.middleware.rate_limiter import (
 )
 from src.api.models.requests import CompletionRequest
 from src.api.models.responses import ModelInfo, ModelListResponse
+from src.billing.ledger import record_usage
 from src.config import get_settings
 from src.db.models import APIKey, Tenant
 from src.inference.model_router import get_model_router, resolve_model_name_for_client
@@ -117,6 +118,13 @@ async def chat_completions(
     total_tokens = usage.get("total_tokens") or (usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0))
     if total_tokens > 0:
         await record_token_usage(tenant.id, total_tokens, model_role=resolved_role)
+        await record_usage(
+            tenant.id,
+            model_role=resolved_role,
+            prompt_tokens=usage.get("prompt_tokens", 0),
+            completion_tokens=usage.get("completion_tokens", 0),
+            api_key_id=api_key.id,
+        )
 
     return response
 
@@ -164,7 +172,9 @@ async def _stream_completion(client, messages, req, tenant, api_key, role, model
         yield sse
 
     if usage:
-        total_tokens = usage.get("total_tokens") or (usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0))
+        prompt_tokens = int(usage.get("prompt_tokens", 0))
+        completion_tokens = int(usage.get("completion_tokens", 0))
+        total_tokens = usage.get("total_tokens") or (prompt_tokens + completion_tokens)
     else:
         prompt_tokens = count_messages_tokens(messages)
         completion_tokens = count_tokens("".join(content_parts))
@@ -179,3 +189,10 @@ async def _stream_completion(client, messages, req, tenant, api_key, role, model
         )
     if total_tokens > 0:
         await record_token_usage(tenant.id, total_tokens, model_role=role)
+        await record_usage(
+            tenant.id,
+            model_role=role,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            api_key_id=api_key.id,
+        )

@@ -21,6 +21,7 @@ from src.api.models.responses import (
     AgentTaskSummaryResponse,
     TaskFeedbackResponse,
 )
+from src.billing.ledger import usage_summary
 from src.db.connection import get_db_context
 from src.db.models import AgentTask, APIKey, FeedbackVerdict, TaskFeedback, Tenant, User
 from src.memory.ingestion import CodeIngestionPipeline, InvalidRepositoryURLError
@@ -92,6 +93,18 @@ async def get_task(
     if result is None:
         raise HTTPException(status_code=404, detail="Task not found")
     return AgentTaskResponse(**result)
+
+
+@router.get("/usage")
+async def tenant_usage(
+    days: int = 30,
+    auth: tuple = Depends(require_scope("agent")),
+):
+    """This tenant's spend — tokens, requests and dollars per day and model role (src/billing/ledger.py),
+    for the last `days` days, plus totals. `pricing_configured` is false until the operator sets
+    MODEL_PRICES_PER_MILLION; cost is then 0 rather than a made-up number."""
+    tenant: Tenant = auth[1]
+    return await usage_summary(tenant.id, days=max(1, min(days, 3650)))
 
 
 @router.get("/tasks/{task_id}/stream")

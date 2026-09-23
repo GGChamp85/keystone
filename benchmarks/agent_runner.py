@@ -43,6 +43,7 @@ import asyncio
 import base64
 import json
 import sys
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -69,11 +70,17 @@ def load_repo_tasks(only: str | None = None) -> list[dict[str, Any]]:
     return tasks
 
 
+_SEED_SKIP_DIRS = {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"}
+
+
 def _list_repo_files(repo_source_dir: Path) -> list[tuple[str, str]]:
+    """Every file of the task's repo except local tool caches — a seeded repo must be exactly the source."""
     return [
         (path.relative_to(repo_source_dir).as_posix(), base64.b64encode(path.read_bytes()).decode())
         for path in sorted(repo_source_dir.rglob("*"))
         if path.is_file()
+        and not (set(path.relative_to(repo_source_dir).parts[:-1]) & _SEED_SKIP_DIRS)
+        and path.suffix != ".pyc"
     ]
 
 
@@ -196,6 +203,7 @@ async def run_one_task(task: dict[str, Any], *, max_iterations: int, timeout_sec
     tenant_id, api_key_id = await _create_benchmark_tenant_and_key()
 
     engine = KeystoneEngine()
+    started = time.monotonic()
     agent_task_id = await engine.submit_task(
         tenant_id=tenant_id,
         api_key_id=api_key_id,
@@ -210,7 +218,13 @@ async def run_one_task(task: dict[str, Any], *, max_iterations: int, timeout_sec
     try:
         final = await _wait_for_terminal_status(agent_task_id, timeout_seconds)
     except TimeoutError as exc:
-        return {"task_id": task["id"], "agent_task_id": str(agent_task_id), "status": "timeout", "error": str(exc)}
+        return {
+            "task_id": task["id"],
+            "agent_task_id": str(agent_task_id),
+            "status": "timeout",
+            "error": str(exc),
+            "duration_ms": int((time.monotonic() - started) * 1000),
+        }
 
     result: dict[str, Any] = {
         "task_id": task["id"],
@@ -221,6 +235,7 @@ async def run_one_task(task: dict[str, Any], *, max_iterations: int, timeout_sec
         "error_message": final.error_message,
         "total_prompt_tokens": final.total_prompt_tokens,
         "total_completion_tokens": final.total_completion_tokens,
+        "duration_ms": int((time.monotonic() - started) * 1000),
     }
 
     if final.status.value != "completed" or not final.branch_name:
@@ -262,6 +277,14 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-iterations", type=int, default=10)
     parser.add_argument("--timeout-seconds", type=int, default=900)
     parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument(
+        "--persist", action="store_true", help="Write every result to the benchmark_runs table (benchmarks/runs.py)"
+    )
+    parser.add_argument(
+        "--backend-label",
+        default="coding",
+        help="How to tag persisted runs: the backend behind the coding role (e.g. coding, frontier, my-adapter)",
+    )
     return parser
 
 
@@ -275,6 +298,13 @@ async def _main() -> int:
     if args.output:
         args.output.write_text(json.dumps(results, indent=2))
         print(f"Full report written to {args.output}")
+
+    if args.persist:
+        from benchmarks.runs import persist_results
+        from src.config import get_settings
+
+        ids = await persist_results(results, backend_label=args.backend_label, model_id=get_settings().coding_model_id)
+        print(f"Persisted {len(ids)} run(s) to benchmark_runs as backend {args.backend_label!r}")
 
     return 0
 
