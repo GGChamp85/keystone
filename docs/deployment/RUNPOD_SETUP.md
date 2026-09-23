@@ -12,6 +12,8 @@ Two ways to run a model on RunPod, and which to pick:
 | Provisioned with | RunPod's REST API — one command, idempotent by name | `tofu apply` |
 | Best for | Trying Keystone, CI-like verification runs, low-traffic teams | Sustained load, fine-tuning jobs |
 
+Fine-tuning on RunPod is a third, automatic case: with `FINETUNE_BACKEND=runpod_pod` Keystone itself launches a short-lived on-demand pod per job through the same REST API, the adapter lands on a network volume (`RUNPOD_NETWORK_VOLUME_ID`, mounted at `/runpod-volume`) that a serverless endpoint created with that volume serves, and the pod is deleted when the result is in — see `docs/guides/fine-tune-slm-on-your-repo.md` § 5 for the settings and for what has and has not been verified (no pod has been launched: the account has no credit).
+
 ## Option A — Serverless endpoint, scale-to-zero (one command)
 
 Prerequisites: a [RunPod](https://runpod.io) account **with credit on it** (RunPod refuses to create an endpoint on an unfunded account — the CLI tells you so in plain words) and its API key in `.env` as `RUNPOD_API_KEY` (RunPod console → Settings → API Keys).

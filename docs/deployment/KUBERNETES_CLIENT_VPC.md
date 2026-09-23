@@ -7,28 +7,36 @@
   `helm/keystone/values-client-vpc.yaml`'s `TODO` markers for the
   StorageClass/nodeSelector values that need filling in once known.
 - An NVIDIA GPU device plugin installed (`nvidia.com/gpu` resources must be
-  schedulable) if `vllm.*.enabled=true` or `training.enabled=true`.
+  schedulable) if `vllm.*.enabled=true` or `training.ray.enabled=true`.
 - An RWX-capable StorageClass (NFS/EFS/Filestore or equivalent) for
-  `modelCache` and `training.storage` — model weights and training data are
+  `modelCache` and `training.output` — model weights and adapters are
   shared across multiple GPU nodes, which plain block storage can't do.
-- (Optional, for `training.enabled=true`) The Kubeflow Trainer controller
-  installed cluster-wide — **not** part of this chart, since it's shared
-  cluster infrastructure, not something a single tenant/release should own:
+- (Optional, for `training.ray.enabled=true`) The
+  [KubeRay](https://github.com/ray-project/kuberay) operator installed
+  cluster-wide — **not** part of this chart, since it's shared cluster
+  infrastructure, not something a single tenant/release should own (ADR
+  0002: one Ray for multi-node serving and for training, not a second
+  scheduler):
 
   ```bash
-  # Real, current install command for the project's v2.3.0 release —
-  # verify against github.com/kubeflow/training-operator for newer tags.
-  kubectl apply --server-side -k \
-    "github.com/kubeflow/training-operator/manifests/base?ref=v2.3.0"
+  # The operator's own Helm chart, pinned to the release whose image airgap/build_image_bundle.sh bundles
+  # (quay.io/kuberay/operator:v1.7.1) — bump both together.
+  helm repo add kuberay https://ray-project.github.io/kuberay-helm/
+  helm install kuberay-operator kuberay/kuberay-operator --version 1.7.1 --namespace kuberay --create-namespace
   ```
 
-  This chart's `templates/training-runtime.yaml` only defines Keystone's
-  own `ClusterTrainingRuntime` (our fine-tuning image + GPU placement) on
-  top of that shared controller — it does not install the controller
-  itself.
+  This chart's `templates/kuberay.yaml` then declares Keystone's own
+  `RayCluster` (`ray.io/v1`): a head without a GPU and a GPU worker group,
+  both running the training image (`docker/training.Dockerfile`, published
+  as `training.image`), with the model cache and the fine-tuning output
+  PVC mounted on every pod. With it enabled the ConfigMap sets
+  `FINETUNE_BACKEND=ray` and `RAY_ADDRESS=http://<release>-training-head-svc:8265`,
+  so every fine-tune job is submitted to the cluster over Ray's Jobs API
+  (`src/finetuning/backends/ray_train.py`); nothing else changes for the
+  API, the CLI or the wizard.
 - (Optional, for any `vllm.*.autoscaling.enabled=true`) [KEDA](https://keda.sh)
   installed cluster-wide — same shared-infrastructure reasoning as the
-  Kubeflow Trainer controller above, so this chart's `ScaledObject`
+  KubeRay operator above, so this chart's `ScaledObject`
   resources (`templates/vllm.yaml`) assume it's already there rather than
   installing it themselves:
 
@@ -140,6 +148,12 @@ handoff:
   (single-node, multi-node, autoscaling) render correctly through `helm
   lint`/`helm template` in CI, but none has been scheduled onto a real
   GPU node or multi-node cluster.
-- `training.enabled=true` (`ClusterTrainingRuntime` + submitting a real
-  `TrainJob` — needs both GPU nodes and the Trainer controller installed).
+- `training.ray.enabled=true`: the `RayCluster` renders in CI (head, GPU
+  worker group, both PVCs, the ConfigMap's `FINETUNE_BACKEND=ray` /
+  `RAY_ADDRESS`), and the `TorchTrainer` configuration the job submits is
+  unit-tested and constructs the real Ray objects where `ray[train]` is
+  installed — but no RayCluster has been scheduled and no job has run on
+  one: that needs GPU nodes and the KubeRay operator, neither available
+  here. See `docs/guides/fine-tune-slm-on-your-repo.md` § 5 for exactly
+  what the Ray backend's tests cover.
 - Multi-node NCCL/Infiniband networking for the training node pool.

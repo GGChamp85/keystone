@@ -101,7 +101,9 @@ Qwen2.5-Coder-32B-Instruct (fallback) cover the same ground.
 | Log aggregation | `grafana/loki:3.2.0`, `grafana/promtail:3.2.0` | AGPL-3.0 (same Grafana Labs monorepo/license as Grafana core — same "don't modify and redistribute" caveat as finding #2; unmodified stock images, same low-risk treatment) |
 | Sandbox (fallback) | gVisor (`runsc`) | Apache-2.0 |
 | Sandbox (primary) | Firecracker | Apache-2.0 |
-| Multi-node training | Kubeflow Trainer | Apache-2.0 |
+| Multi-GPU training (optional) | KubeRay operator (`quay.io/kuberay/operator:v1.7.1`) + Ray (`ray[train]`, the training image) | Apache-2.0 (both; verified against the upstream `LICENSE` files at github.com/ray-project/kuberay and github.com/ray-project/ray) |
+| Adapter export to GGUF | llama.cpp's `convert_hf_to_gguf.py`, `conversion/` and `gguf-py/`, vendored into the training image at a pinned commit (`docker/training.Dockerfile`); the `gguf` and `sentencepiece` packages | MIT (llama.cpp and gguf-py, `Copyright (c) 2023 Georgi Gerganov`, the `gguf-py/LICENSE` vendored with it); Apache-2.0 (sentencepiece, verified against the upstream `LICENSE` at github.com/google/sentencepiece — its PyPI metadata carries no classifier) |
+| Adapter export to AWQ (optional, GPU only) | `autoawq` — not installed by default, not part of any image | MIT |
 | Autoscaling (optional, vLLM roles) | KEDA | Apache-2.0 (verified against the real upstream `LICENSE` at github.com/kedacore/keda) |
 | Infra tooling | OpenTofu | MPL-2.0 |
 | Infra tooling | Helm | Apache-2.0 |

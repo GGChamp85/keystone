@@ -26,7 +26,7 @@ One GKE Standard cluster sized for a Keystone GPU pilot. Used by `environments/g
 | `rwx_storage_class` | `keystone-filestore-rwx` | `modelCache.storageClassName`, `training.storageClassName` |
 | `block_storage_class` | `keystone-pd-balanced` | `postgres/redis/qdrant/openbao.storageClassName` |
 | `gpu_node_selector` | `{ nodepool = "gpu-coding" }` | `vllm.*.nodeSelector`, `training.nodeSelector` |
-| `gpu_toleration` | `nvidia.com/gpu=present:NoSchedule` | already tolerated by `templates/vllm.yaml` and `templates/training-runtime.yaml` (`operator: Exists`) |
+| `gpu_toleration` | `nvidia.com/gpu=present:NoSchedule` | already tolerated by `templates/vllm.yaml` and `templates/kuberay.yaml` (`operator: Exists`) |
 | `kubeconfig_command` | `gcloud container clusters get-credentials … --location … --project …` | step 1 after apply (needs the `gke-gcloud-auth-plugin` gcloud component) |
 | `helm_install_command` | the `helm upgrade --install … -f values-client-vpc.yaml -f values-gcp.yaml` line | step 2 after apply |
 

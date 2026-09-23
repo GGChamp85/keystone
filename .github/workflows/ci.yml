@@ -173,8 +173,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: azure/setup-helm@v4
-      - run: helm lint helm/keystone --set training.enabled=true --set observability.enabled=true
-      - run: helm template keystone-ci helm/keystone --set observability.enabled=true --set training.enabled=true > /dev/null
+      - run: helm lint helm/keystone --set training.ray.enabled=true --set observability.enabled=true
+      - run: helm template keystone-ci helm/keystone --set observability.enabled=true --set training.ray.enabled=true > /dev/null
+      - name: helm template — the KubeRay training cluster (ADR 0002) renders a RayCluster with a GPU worker group
+        run: |
+          helm template keystone-ci helm/keystone --set training.ray.enabled=true > /tmp/render-ray.yaml
+          grep -q "kind: RayCluster" /tmp/render-ray.yaml
+          grep -q "apiVersion: ray.io/v1" /tmp/render-ray.yaml
+          grep -q "nvidia.com/gpu" /tmp/render-ray.yaml
+          grep -q "keystone-ci-finetuning-output" /tmp/render-ray.yaml
+          grep -q 'FINETUNE_BACKEND: "ray"' /tmp/render-ray.yaml
+          # The Kubeflow runtime is gone (ADR 0002), not merely disabled.
+          if grep -q "trainer.kubeflow.org" /tmp/render-ray.yaml; then echo "Kubeflow runtime still rendered" >&2; exit 1; fi
       - name: helm template — single-node vLLM roles enabled (the default replicas=1/nodeCount=1 path)
         run: |
           helm lint helm/keystone --set vllm.coding.enabled=true --set vllm.coding-fallback.enabled=true --set vllm.reasoning.enabled=true

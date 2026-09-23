@@ -38,6 +38,7 @@ IMAGES=(
   "grafana/grafana:11.2.0"
   "grafana/loki:3.2.0"
   "grafana/promtail:3.2.0"
+  "quay.io/kuberay/operator:v1.7.1" # KubeRay operator — the RayCluster in helm/keystone/templates/kuberay.yaml (ADR 0002); installed once per cluster
 )
 
 echo "== Keystone air-gap image bundle build =="

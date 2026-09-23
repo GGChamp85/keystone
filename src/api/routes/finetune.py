@@ -25,12 +25,13 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 
 from src.api.middleware.auth import require_scope
-from src.api.models.requests import ApprovePlanRequest, GuidedPlanRequest, StartFineTuneRequest
+from src.api.models.requests import ApprovePlanRequest, ExportFineTuneRequest, GuidedPlanRequest, StartFineTuneRequest
 from src.api.models.responses import FineTuneJobResponse
 from src.db.connection import get_db_context
 from src.db.models import AdapterStatus, APIKey, AuditLog, FineTuneJob, ModelAdapter, Tenant, User, UserRole
 from src.finetuning import guided
-from src.finetuning.runner import _JOB_TYPE_CONFIGS, start_finetune_job
+from src.finetuning.export import DEFAULT_GGUF_QUANT, GGUF_QUANT_TYPES
+from src.finetuning.runner import _JOB_TYPE_CONFIGS, export_root_for, start_finetune_export, start_finetune_job
 from src.finetuning.verdict import compute_verdict
 from src.hardware import GPU, detect_gpus
 from src.inference.catalog import CATALOG, default_slm
@@ -349,6 +350,40 @@ async def rollback_job(job_id: UUID, auth: tuple = Depends(require_scope("finetu
         adapter.status = AdapterStatus.RETIRED
         adapter.is_default = False
     return _to_response(job)
+
+
+@router.post("/jobs/{job_id}/export", status_code=202)
+async def export_job(job_id: UUID, req: ExportFineTuneRequest, auth: tuple = Depends(require_scope("finetune"))):
+    """Export a completed job's adapter (src/finetuning/export.py): `merged` (folded into the base
+    weights), `gguf` (llama.cpp's converter, `quant` = f32/f16/bf16/q8_0) or `awq` (4-bit, CUDA only).
+    Runs in the background through the same mechanism as training (Temporal, or the asyncio fallback);
+    the outcome — path and size, or the error — lands under the job's `metrics.exports.<format>`."""
+    tenant: Tenant = auth[1]
+    job = await _get_owned_job(job_id, tenant.id)
+    if job.status != "completed" or not job.output_model_path:
+        raise HTTPException(status_code=409, detail="Only a completed job with an adapter on disk can be exported")
+    quant = req.quant
+    if req.format == "gguf":
+        quant = quant or DEFAULT_GGUF_QUANT
+        if quant not in GGUF_QUANT_TYPES:
+            raise HTTPException(
+                status_code=422, detail=f"Unsupported GGUF quant {quant!r}; expected one of {list(GGUF_QUANT_TYPES)}"
+            )
+    elif quant is not None:
+        raise HTTPException(status_code=422, detail=f"`quant` applies to the gguf format only, not {req.format}")
+    current = ((job.metrics or {}).get("exports") or {}).get(req.format) or {}
+    if current.get("status") == "running":
+        raise HTTPException(status_code=409, detail=f"A {req.format} export of this job is already running")
+
+    execution = await start_finetune_export(job_id, req.format, quant)
+    return {
+        "job_id": str(job_id),
+        "format": req.format,
+        "quant": quant,
+        "status": "started",
+        "execution": execution,
+        "export_root": export_root_for(job.output_model_path),
+    }
 
 
 @router.get("/jobs/{job_id}/stream")

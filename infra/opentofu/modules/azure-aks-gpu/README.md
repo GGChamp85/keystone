@@ -26,7 +26,7 @@ One AKS cluster sized for a Keystone GPU pilot. Used by `environments/azure-pilo
 | `rwx_storage_class` | `keystone-azurefile-nfs` | `modelCache.storageClassName`, `training.storageClassName` |
 | `block_storage_class` | `keystone-managed-premium` | `postgres/redis/qdrant/openbao.storageClassName` |
 | `gpu_node_selector` | `{ nodepool = "gpu-coding" }` | `vllm.*.nodeSelector`, `training.nodeSelector` |
-| `gpu_toleration` | `nvidia.com/gpu=present:NoSchedule` | already tolerated by `templates/vllm.yaml` and `templates/training-runtime.yaml` (`operator: Exists`) |
+| `gpu_toleration` | `nvidia.com/gpu=present:NoSchedule` | already tolerated by `templates/vllm.yaml` and `templates/kuberay.yaml` (`operator: Exists`) |
 | `kubeconfig_command` | `az aks get-credentials --resource-group … --name …` | step 1 after apply |
 | `helm_install_command` | the `helm upgrade --install … -f values-client-vpc.yaml -f values-azure.yaml` line | step 2 after apply |
 

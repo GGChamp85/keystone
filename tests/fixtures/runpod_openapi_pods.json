@@ -1,0 +1,1350 @@
+{
+ "_provenance": {
+  "source": "https://rest.runpod.io/v1/openapi.json",
+  "fetched": "2026-09-23",
+  "openapi": "3.0.3",
+  "info": {
+   "title": "Runpod API",
+   "description": "Public Rest API for managing Runpod programmatically.",
+   "version": "0.1.0",
+   "contact": {
+    "name": "help",
+    "url": "https://contact.runpod.io/hc/requests/new",
+    "email": "help@runpod.io"
+   }
+  },
+  "note": "Verbatim subset (pods paths and their schemas) of RunPod's published OpenAPI document; regenerate by re-fetching the URL and trimming to the same keys."
+ },
+ "paths": {
+  "/pods": {
+   "post": {
+    "tags": [
+     "pods"
+    ],
+    "summary": "Create a new Pod",
+    "description": "Creates a new [Pod](#/components/schemas/Pod) and optionally deploys it.",
+    "operationId": "CreatePod",
+    "requestBody": {
+     "description": "Input for Pod creation.",
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/PodCreateInput"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "description": "Pod successfully created.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Pod"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "Invalid input."
+     }
+    }
+   },
+   "get": {
+    "tags": [
+     "pods"
+    ],
+    "summary": "List Pods",
+    "description": "Returns a list of Pods.",
+    "operationId": "ListPods",
+    "parameters": [
+     {
+      "name": "computeType",
+      "in": "query",
+      "schema": {
+       "type": "string",
+       "enum": [
+        "GPU",
+        "CPU"
+       ],
+       "example": "CPU",
+       "description": "Filter to only GPU or only CPU Pods."
+      }
+     },
+     {
+      "name": "cpuFlavorId",
+      "in": "query",
+      "schema": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       },
+       "example": [
+        "cpu3c",
+        "cpu5g"
+       ],
+       "description": "Filter to CPU Pods with any of the listed CPU flavors."
+      }
+     },
+     {
+      "name": "dataCenterId",
+      "in": "query",
+      "schema": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       },
+       "example": [
+        "EU-RO-1"
+       ],
+       "description": "Filter to Pods located in any of the provided Runpod data centers."
+      }
+     },
+     {
+      "name": "desiredStatus",
+      "in": "query",
+      "schema": {
+       "type": "string",
+       "example": "RUNNING",
+       "enum": [
+        "RUNNING",
+        "EXITED",
+        "TERMINATED"
+       ],
+       "description": "Filter to Pods currently in the provided state."
+      }
+     },
+     {
+      "name": "endpointId",
+      "in": "query",
+      "schema": {
+       "type": "string",
+       "maxLength": 191,
+       "description": "Filter to workers on the provided Serverless endpoint (note that endpoint workers are not included in the response by default, set includeWorkers to true to include them)."
+      },
+      "required": false
+     },
+     {
+      "name": "gpuTypeId",
+      "in": "query",
+      "schema": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       },
+       "example": [
+        "NVIDIA GeForce RTX 4090",
+        "NVIDIA RTX A5000"
+       ],
+       "description": "Filter to Pods with any of the listed GPU types attached."
+      }
+     },
+     {
+      "name": "id",
+      "in": "query",
+      "schema": {
+       "type": "string",
+       "example": "xedezhzb9la3ye",
+       "description": "Filter to a specific Pod."
+      },
+      "required": false
+     },
+     {
+      "name": "imageName",
+      "in": "query",
+      "schema": {
+       "type": "string",
+       "example": "runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04",
+       "description": "Filter to Pods created with the provided image."
+      },
+      "required": false
+     },
+     {
+      "name": "includeMachine",
+      "in": "query",
+      "schema": {
+       "type": "boolean",
+       "default": false,
+       "example": true,
+       "description": "Include information about the machine the Pod is running on."
+      }
+     },
+     {
+      "name": "includeNetworkVolume",
+      "in": "query",
+      "schema": {
+       "type": "boolean",
+       "default": false,
+       "example": true,
+       "description": "Include information about the network volume attached to the returned Pod, if any."
+      }
+     },
+     {
+      "name": "includeSavingsPlans",
+      "in": "query",
+      "schema": {
+       "type": "boolean",
+       "default": false,
+       "example": true,
+       "description": "Include information about the savings plans applied to the Pod."
+      }
+     },
+     {
+      "name": "includeTemplate",
+      "in": "query",
+      "schema": {
+       "type": "boolean",
+       "default": false,
+       "example": true,
+       "description": "Include information about the template the Pod uses, if any."
+      }
+     },
+     {
+      "name": "includeWorkers",
+      "in": "query",
+      "schema": {
+       "type": "boolean",
+       "default": false,
+       "example": true,
+       "description": "Set to true to also list Pods which are Serverless workers."
+      }
+     },
+     {
+      "name": "name",
+      "in": "query",
+      "schema": {
+       "type": "string",
+       "maxLength": 191,
+       "description": "Filter to Pods with the provided name."
+      },
+      "required": false
+     },
+     {
+      "name": "networkVolumeId",
+      "in": "query",
+      "schema": {
+       "type": "string",
+       "example": "agv6w2qcg7",
+       "description": "Filter to Pods with the provided network volume attached."
+      }
+     },
+     {
+      "name": "templateId",
+      "in": "query",
+      "schema": {
+       "type": "string",
+       "example": "30zmvf89kd",
+       "description": "Filter to Pods created from the provided template."
+      },
+      "required": false
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful operation.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Pods"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "Invalid ID supplied."
+     },
+     "404": {
+      "description": "Pod not found."
+     }
+    }
+   }
+  },
+  "/pods/{podId}": {
+   "get": {
+    "tags": [
+     "pods"
+    ],
+    "summary": "Find a Pod by ID",
+    "description": "Returns a single Pod.",
+    "operationId": "GetPod",
+    "parameters": [
+     {
+      "name": "includeMachine",
+      "in": "query",
+      "schema": {
+       "type": "boolean",
+       "default": false,
+       "example": true,
+       "description": "Include information about the machine the Pod is running on."
+      }
+     },
+     {
+      "name": "includeNetworkVolume",
+      "in": "query",
+      "schema": {
+       "type": "boolean",
+       "default": false,
+       "example": true,
+       "description": "Include information about the network volume attached to the returned Pod, if any."
+      }
+     },
+     {
+      "name": "includeSavingsPlans",
+      "in": "query",
+      "schema": {
+       "type": "boolean",
+       "default": false,
+       "example": true,
+       "description": "Include information about the savings plans applied to the Pod."
+      }
+     },
+     {
+      "name": "includeTemplate",
+      "in": "query",
+      "schema": {
+       "type": "boolean",
+       "default": false,
+       "example": true,
+       "description": "Include information about the template the Pod uses, if any."
+      }
+     },
+     {
+      "name": "includeWorkers",
+      "in": "query",
+      "schema": {
+       "type": "boolean",
+       "default": false,
+       "example": true,
+       "description": "Set to true to also list Pods which are Serverless workers."
+      }
+     },
+     {
+      "name": "podId",
+      "in": "path",
+      "description": "ID of Pod to return.",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful operation.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Pod"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "Invalid ID supplied."
+     },
+     "404": {
+      "description": "Pod not found."
+     }
+    }
+   },
+   "patch": {
+    "tags": [
+     "pods"
+    ],
+    "summary": "Update a Pod",
+    "description": "Update a Pod, potentially triggering a reset.",
+    "operationId": "UpdatePod",
+    "requestBody": {
+     "description": "Form data to update a Pod.",
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/PodUpdateInput"
+       }
+      }
+     },
+     "required": true
+    },
+    "parameters": [
+     {
+      "name": "podId",
+      "in": "path",
+      "description": "ID of Pod that needs to be updated.",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Pod successfully updated.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Pod"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "Invalid input."
+     }
+    }
+   },
+   "delete": {
+    "tags": [
+     "pods"
+    ],
+    "summary": "Delete a Pod",
+    "description": "Delete a Pod.",
+    "operationId": "DeletePod",
+    "parameters": [
+     {
+      "name": "podId",
+      "in": "path",
+      "description": "Pod ID to delete.",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "204": {
+      "description": "Pod successfully deleted."
+     },
+     "400": {
+      "description": "Invalid Pod ID."
+     },
+     "401": {
+      "description": "Unauthorized."
+     }
+    }
+   }
+  },
+  "/pods/{podId}/stop": {
+   "post": {
+    "tags": [
+     "pods"
+    ],
+    "summary": "Stop a Pod",
+    "description": "Stop a Pod.",
+    "operationId": "StopPod",
+    "parameters": [
+     {
+      "name": "podId",
+      "in": "path",
+      "description": "Pod ID to stop.",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Pod successfully stopped."
+     },
+     "400": {
+      "description": "Invalid Pod ID."
+     },
+     "401": {
+      "description": "Unauthorized."
+     }
+    }
+   }
+  },
+  "/pods/{podId}/start": {
+   "post": {
+    "tags": [
+     "pods"
+    ],
+    "summary": "Start or resume a Pod",
+    "description": "Start or resume a Pod.",
+    "operationId": "StartPod",
+    "parameters": [
+     {
+      "name": "podId",
+      "in": "path",
+      "description": "Pod ID to start.",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Pod successfully started."
+     },
+     "400": {
+      "description": "Invalid Pod ID."
+     },
+     "401": {
+      "description": "Unauthorized."
+     }
+    }
+   }
+  }
+ },
+ "components": {
+  "schemas": {
+   "PodCreateInput": {
+    "type": "object",
+    "properties": {
+     "allowedCudaVersions": {
+      "type": "array",
+      "description": "If the created Pod is a GPU Pod, a list of acceptable CUDA versions on the [Pod](#/components/schemas/Pod). If not set, any CUDA version is acceptable.",
+      "items": {
+       "type": "string",
+       "enum": [
+        "13.0",
+        "12.9",
+        "12.8",
+        "12.7",
+        "12.6",
+        "12.5",
+        "12.4",
+        "12.3",
+        "12.2",
+        "12.1",
+        "12.0",
+        "11.8"
+       ]
+      }
+     },
+     "cloudType": {
+      "type": "string",
+      "default": "SECURE",
+      "enum": [
+       "SECURE",
+       "COMMUNITY"
+      ],
+      "description": "Set to SECURE to create the Pod in Secure Cloud. Set to COMMUNITY to create the Pod in Community Cloud. To determine which one suits your needs, see https://docs.runpod.io/pods/overview#pod-types."
+     },
+     "computeType": {
+      "type": "string",
+      "default": "GPU",
+      "enum": [
+       "GPU",
+       "CPU"
+      ],
+      "description": "Set to GPU to create a GPU Pod. Set to CPU to create a CPU Pod. If set to CPU, the Pod will not have a GPU attached and properties related to GPUs such as gpuTypeIds will be ignored. If set to GPU, the Pod will have a GPU attached and properties related to CPUs such as cpuFlavorIds will be ignored."
+     },
+     "containerDiskInGb": {
+      "type": "integer",
+      "default": 50,
+      "nullable": true,
+      "description": "The amount of disk space, in gigabytes (GB), to allocate on the container disk for the created Pod. The data on the container disk is wiped when the Pod restarts. To persist data across Pod restarts, set volumeInGb to configure the Pod network volume."
+     },
+     "containerRegistryAuthId": {
+      "type": "string",
+      "description": "Registry credentials ID.",
+      "example": "clzdaifot0001l90809257ynb"
+     },
+     "countryCodes": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "A list of country codes where the created Pod can be located. If not set, the Pod can be located in any country."
+     },
+     "cpuFlavorIds": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "enum": [
+        "cpu3c",
+        "cpu3g",
+        "cpu3m",
+        "cpu5c",
+        "cpu5g",
+        "cpu5m"
+       ]
+      },
+      "description": "If the created Pod is a CPU Pod, a list of Runpod CPU flavors which can be attached to the Pod. The order of the list determines the order to rent CPU flavors. See cpuFlavorPriority for how the order of the list affects Pod creation."
+     },
+     "cpuFlavorPriority": {
+      "type": "string",
+      "default": "availability",
+      "enum": [
+       "availability",
+       "custom"
+      ],
+      "description": "If the created Pod is a CPU Pod, set to availability to respond to current CPU flavor availability. Set to custom to always try to rent CPU flavors in the order specified in cpuFlavorIds."
+     },
+     "dataCenterIds": {
+      "type": "array",
+      "example": [
+       "EU-RO-1",
+       "CA-MTL-1"
+      ],
+      "default": [
+       "EU-RO-1",
+       "CA-MTL-1",
+       "EU-SE-1",
+       "US-IL-1",
+       "EUR-IS-1",
+       "EU-CZ-1",
+       "US-TX-3",
+       "EUR-IS-2",
+       "US-KS-2",
+       "US-GA-2",
+       "US-WA-1",
+       "US-TX-1",
+       "CA-MTL-3",
+       "EU-NL-1",
+       "US-TX-4",
+       "US-CA-2",
+       "US-NC-1",
+       "OC-AU-1",
+       "US-DE-1",
+       "EUR-IS-3",
+       "CA-MTL-2",
+       "AP-JP-1",
+       "EUR-NO-1",
+       "EU-FR-1",
+       "US-KS-3",
+       "US-GA-1",
+       "AP-IN-1",
+       "US-MD-1"
+      ],
+      "items": {
+       "type": "string",
+       "enum": [
+        "EU-RO-1",
+        "CA-MTL-1",
+        "EU-SE-1",
+        "US-IL-1",
+        "EUR-IS-1",
+        "EU-CZ-1",
+        "US-TX-3",
+        "EUR-IS-2",
+        "US-KS-2",
+        "US-GA-2",
+        "US-WA-1",
+        "US-TX-1",
+        "CA-MTL-3",
+        "EU-NL-1",
+        "US-TX-4",
+        "US-CA-2",
+        "US-NC-1",
+        "OC-AU-1",
+        "US-DE-1",
+        "EUR-IS-3",
+        "CA-MTL-2",
+        "AP-JP-1",
+        "EUR-NO-1",
+        "EU-FR-1",
+        "US-KS-3",
+        "US-GA-1",
+        "AP-IN-1",
+        "US-MD-1"
+       ]
+      },
+      "description": "A list of Runpod data center IDs where the created Pod can be located. See `dataCenterPriority` for information on how the order of the list affects Pod creation."
+     },
+     "dataCenterPriority": {
+      "type": "string",
+      "default": "availability",
+      "enum": [
+       "availability",
+       "custom"
+      ],
+      "description": "Set to availability to respond to current machine availability. Set to custom to always try to rent machines from data centers in the order specified in dataCenterIds."
+     },
+     "dockerEntrypoint": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "default": [],
+      "description": "If specified, overrides the ENTRYPOINT for the Docker image run on the created Pod. If [], uses the ENTRYPOINT defined in the image."
+     },
+     "dockerStartCmd": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "default": [],
+      "description": "If specified, overrides the start CMD for the Docker image run on the created Pod. If [], uses the start CMD defined in the image."
+     },
+     "env": {
+      "type": "object",
+      "items": {
+       "type": "string"
+      },
+      "example": {
+       "ENV_VAR": "value"
+      },
+      "default": {}
+     },
+     "globalNetworking": {
+      "type": "boolean",
+      "default": false,
+      "example": true,
+      "description": "Set to true to enable global networking for the created Pod. Currently only available for On-Demand GPU Pods on some Secure Cloud data centers."
+     },
+     "gpuCount": {
+      "type": "integer",
+      "default": 1,
+      "description": "If the created Pod is a GPU Pod, the number of GPUs attached to the created Pod.",
+      "minimum": 1
+     },
+     "gpuTypeIds": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "enum": [
+        "AMD Instinct MI300X OAM",
+        "NVIDIA A100 80GB PCIe",
+        "NVIDIA A100-SXM4-40GB",
+        "NVIDIA A100-SXM4-80GB",
+        "NVIDIA A40",
+        "NVIDIA B200",
+        "NVIDIA B300 SXM6 AC",
+        "NVIDIA B300 SXM6 AC MIG 1g.34gb",
+        "NVIDIA GeForce RTX 3070",
+        "NVIDIA GeForce RTX 3080",
+        "NVIDIA GeForce RTX 3080 Ti",
+        "NVIDIA GeForce RTX 3090",
+        "NVIDIA GeForce RTX 3090 Ti",
+        "NVIDIA GeForce RTX 4070 Ti",
+        "NVIDIA GeForce RTX 4080",
+        "NVIDIA GeForce RTX 4080 SUPER",
+        "NVIDIA GeForce RTX 4090",
+        "NVIDIA GeForce RTX 5080",
+        "NVIDIA GeForce RTX 5090",
+        "NVIDIA H100 80GB HBM3",
+        "NVIDIA H100 NVL",
+        "NVIDIA H100 PCIe",
+        "NVIDIA H200",
+        "NVIDIA H200 NVL",
+        "NVIDIA L4",
+        "NVIDIA L40",
+        "NVIDIA L40S",
+        "NVIDIA RTX 2000 Ada Generation",
+        "NVIDIA RTX 4000 Ada Generation",
+        "NVIDIA RTX 4000 SFF Ada Generation",
+        "NVIDIA RTX 5000 Ada Generation",
+        "NVIDIA RTX 6000 Ada Generation",
+        "NVIDIA RTX A2000",
+        "NVIDIA RTX A4000",
+        "NVIDIA RTX A4500",
+        "NVIDIA RTX A5000",
+        "NVIDIA RTX A6000",
+        "NVIDIA RTX PRO 4000 Blackwell",
+        "NVIDIA RTX PRO 4500 Blackwell",
+        "NVIDIA RTX PRO 5000 Blackwell",
+        "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+        "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+        "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+        "Tesla V100-PCIE-16GB",
+        "Tesla V100-SXM2-16GB"
+       ]
+      },
+      "description": "If the created Pod is a GPU Pod, a list of Runpod GPU types which can be attached to the created Pod. The order of the list determines the order to rent GPU types. See `gpuTypePriority` for information on how the order of the list affects Pod creation."
+     },
+     "gpuTypePriority": {
+      "type": "string",
+      "default": "availability",
+      "enum": [
+       "availability",
+       "custom"
+      ],
+      "description": "If the created Pod is a GPU Pod, set to availability to respond to current GPU type availability. Set to custom to always try to rent GPU types in the order specified in gpuTypeIds."
+     },
+     "imageName": {
+      "type": "string",
+      "example": "runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04",
+      "description": "The image tag for the container run on the created Pod."
+     },
+     "interruptible": {
+      "type": "boolean",
+      "default": false,
+      "description": "Set to true to create an interruptible or spot Pod. An interruptible Pod can be rented at a lower cost but can be stopped at any time to free up resources for another Pod. A reserved Pod is rented at a higher cost but runs until it exits or is manually stopped."
+     },
+     "locked": {
+      "type": "boolean",
+      "default": false,
+      "description": "Set to true to lock a Pod. Locking a Pod disables stopping or resetting the Pod."
+     },
+     "minDiskBandwidthMBps": {
+      "type": "number",
+      "description": "The minimum disk bandwidth, in megabytes per second (MBps), for the created Pod."
+     },
+     "minDownloadMbps": {
+      "type": "number",
+      "description": "The minimum download speed, in megabits per second (Mbps), for the created Pod."
+     },
+     "minRAMPerGPU": {
+      "type": "integer",
+      "default": 8,
+      "description": "If the created Pod is a GPU Pod, the minimum amount of RAM, in gigabytes (GB), allocated to the created Pod for each GPU attached to the Pod."
+     },
+     "minUploadMbps": {
+      "type": "number",
+      "description": "The minimum upload speed, in megabits per second (Mbps), for the created Pod."
+     },
+     "minVCPUPerGPU": {
+      "type": "integer",
+      "default": 2,
+      "description": "If the created Pod is a GPU Pod, the minimum number of virtual CPUs allocated to the created Pod for each GPU attached to the Pod."
+     },
+     "name": {
+      "type": "string",
+      "default": "my pod",
+      "description": "A user-defined name for the created Pod. The name does not need to be unique.",
+      "maxLength": 191
+     },
+     "networkVolumeId": {
+      "type": "string",
+      "description": "The unique string identifying the network volume to attach to the created Pod. If attached, a network volume replaces the Pod network volume."
+     },
+     "ports": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "example": [
+       "8888/http",
+       "22/tcp"
+      ],
+      "default": "8888/http,22/tcp",
+      "description": "A list of ports exposed on the created Pod. Each port is formatted as [port number]/[protocol]. Protocol can be either http or tcp."
+     },
+     "supportPublicIp": {
+      "type": "boolean",
+      "example": true,
+      "description": "If the created Pod is on Community Cloud, set to true if you need the Pod to expose a public IP address. If null, the Pod might not have a public IP address. On Secure Cloud, the Pod will always have a public IP address."
+     },
+     "templateId": {
+      "type": "string",
+      "example": null,
+      "description": "If the Pod is created with a template, the unique string identifying that template."
+     },
+     "vcpuCount": {
+      "type": "integer",
+      "default": 2,
+      "description": "If the created Pod is a CPU Pod, the number of vCPUs allocated to the Pod."
+     },
+     "volumeInGb": {
+      "type": "integer",
+      "default": 20,
+      "nullable": true,
+      "description": "The amount of disk space, in gigabytes (GB), to allocate on the Pod volume for the created Pod. The data on the Pod volume is persisted across Pod restarts. To persist data so that future Pods can access it, create a network volume and set networkVolumeId to attach it to the Pod."
+     },
+     "volumeMountPath": {
+      "type": "string",
+      "default": "/workspace",
+      "description": "If either a Pod volume or a network volume is attached to a Pod, the absolute path where the network volume will be mounted in the filesystem."
+     }
+    }
+   },
+   "Pod": {
+    "type": "object",
+    "properties": {
+     "adjustedCostPerHr": {
+      "type": "number",
+      "example": 0.69,
+      "description": "The effective cost in Runpod credits per hour of running a Pod, adjusted by active Savings Plans."
+     },
+     "aiApiId": {
+      "type": "string",
+      "example": null,
+      "description": "Synonym for endpointId (legacy name)."
+     },
+     "consumerUserId": {
+      "type": "string",
+      "example": "user_2PyTJrLzeuwfZilRZ7JhCQDuSqo",
+      "description": "A unique string identifying the Runpod user who rents a Pod."
+     },
+     "containerDiskInGb": {
+      "type": "integer",
+      "example": 50,
+      "description": "The amount of disk space, in gigabytes (GB), to allocate on the container disk for a Pod. The data on the container disk is wiped when the Pod restarts. To persist data across Pod restarts, set volumeInGb to configure the Pod network volume."
+     },
+     "containerRegistryAuthId": {
+      "type": "string",
+      "example": "clzdaifot0001l90809257ynb",
+      "description": "If a Pod is created with a container registry auth, the unique string identifying that container registry auth."
+     },
+     "costPerHr": {
+      "type": "number",
+      "example": "0.74",
+      "format": "currency",
+      "description": "The cost in Runpod credits per hour of running a Pod. Note that the actual cost may be lower if Savings Plans are applied."
+     },
+     "cpuFlavorId": {
+      "type": "string",
+      "example": "cpu3c",
+      "description": "If the Pod is a CPU Pod, the unique string identifying the CPU flavor the Pod is running on."
+     },
+     "desiredStatus": {
+      "type": "string",
+      "enum": [
+       "RUNNING",
+       "EXITED",
+       "TERMINATED"
+      ],
+      "description": "The current expected status of a Pod."
+     },
+     "dockerEntrypoint": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "If specified, overrides the ENTRYPOINT for the Docker image run on the created Pod. If [], uses the ENTRYPOINT defined in the image."
+     },
+     "dockerStartCmd": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "If specified, overrides the start CMD for the Docker image run on the created Pod. If [], uses the start CMD defined in the image."
+     },
+     "endpointId": {
+      "type": "string",
+      "example": null,
+      "description": "If the Pod is a Serverless worker, a unique string identifying the associated endpoint."
+     },
+     "env": {
+      "type": "object",
+      "items": {
+       "type": "string"
+      },
+      "example": {
+       "ENV_VAR": "value"
+      },
+      "default": {}
+     },
+     "gpu": {
+      "type": "object",
+      "properties": {
+       "id": {
+        "type": "string"
+       },
+       "count": {
+        "type": "integer",
+        "example": 1,
+        "description": "The number of GPUs attached to a Pod."
+       },
+       "displayName": {
+        "type": "string"
+       },
+       "securePrice": {
+        "type": "number"
+       },
+       "communityPrice": {
+        "type": "number"
+       },
+       "oneMonthPrice": {
+        "type": "number"
+       },
+       "threeMonthPrice": {
+        "type": "number"
+       },
+       "sixMonthPrice": {
+        "type": "number"
+       },
+       "oneWeekPrice": {
+        "type": "number"
+       },
+       "communitySpotPrice": {
+        "type": "number"
+       },
+       "secureSpotPrice": {
+        "type": "number"
+       }
+      }
+     },
+     "id": {
+      "type": "string",
+      "example": "xedezhzb9la3ye",
+      "description": "A unique string identifying a [Pod](#/components/schema/Pod)."
+     },
+     "image": {
+      "type": "string",
+      "example": "runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04",
+      "description": "The image tag for the container run on a Pod."
+     },
+     "interruptible": {
+      "type": "boolean",
+      "example": false,
+      "description": "Describes how a Pod is rented. An interruptible Pod can be rented at a lower cost but can be stopped at any time to free up resources for another Pod. A reserved Pod is rented at a higher cost but runs until it exits or is manually stopped."
+     },
+     "lastStartedAt": {
+      "type": "string",
+      "example": "2024-07-12T19:14:40.144Z",
+      "description": "The UTC timestamp when a Pod was last started."
+     },
+     "lastStatusChange": {
+      "type": "string",
+      "example": "Rented by User: Fri Jul 12 2024 15:14:40 GMT-0400 (Eastern Daylight Time)",
+      "description": "A string describing the last lifecycle event on a Pod."
+     },
+     "locked": {
+      "type": "boolean",
+      "example": false,
+      "description": "Set to true to lock a Pod. Locking a Pod disables stopping or resetting the Pod."
+     },
+     "machine": {
+      "type": "object",
+      "properties": {
+       "minPodGpuCount": {
+        "type": "integer"
+       },
+       "gpuTypeId": {
+        "type": "string"
+       },
+       "gpuType": {
+        "type": "object",
+        "properties": {
+         "id": {
+          "type": "string"
+         },
+         "count": {
+          "type": "integer",
+          "example": 1,
+          "description": "The number of GPUs attached to a Pod."
+         },
+         "displayName": {
+          "type": "string"
+         },
+         "securePrice": {
+          "type": "number"
+         },
+         "communityPrice": {
+          "type": "number"
+         },
+         "oneMonthPrice": {
+          "type": "number"
+         },
+         "threeMonthPrice": {
+          "type": "number"
+         },
+         "sixMonthPrice": {
+          "type": "number"
+         },
+         "oneWeekPrice": {
+          "type": "number"
+         },
+         "communitySpotPrice": {
+          "type": "number"
+         },
+         "secureSpotPrice": {
+          "type": "number"
+         }
+        }
+       },
+       "cpuCount": {
+        "type": "integer"
+       },
+       "cpuTypeId": {
+        "type": "string"
+       },
+       "cpuType": {
+        "type": "object",
+        "properties": {
+         "id": {
+          "type": "string"
+         },
+         "displayName": {
+          "type": "string"
+         },
+         "cores": {
+          "type": "number"
+         },
+         "threadsPerCore": {
+          "type": "number"
+         },
+         "groupId": {
+          "type": "string"
+         }
+        }
+       },
+       "location": {
+        "type": "string"
+       },
+       "dataCenterId": {
+        "type": "string"
+       },
+       "diskThroughputMBps": {
+        "type": "integer"
+       },
+       "maxDownloadSpeedMbps": {
+        "type": "integer"
+       },
+       "maxUploadSpeedMbps": {
+        "type": "integer"
+       },
+       "supportPublicIp": {
+        "type": "boolean"
+       },
+       "secureCloud": {
+        "type": "boolean"
+       },
+       "maintenanceStart": {
+        "type": "string"
+       },
+       "maintenanceEnd": {
+        "type": "string"
+       },
+       "maintenanceNote": {
+        "type": "string"
+       },
+       "note": {
+        "type": "string"
+       },
+       "costPerHr": {
+        "type": "number"
+       },
+       "currentPricePerGpu": {
+        "type": "number"
+       },
+       "gpuAvailable": {
+        "type": "integer"
+       },
+       "gpuDisplayName": {
+        "type": "string"
+       }
+      },
+      "description": "Information about the machine a Pod is running on (see [Machine](#/components/schemas/Machine))."
+     },
+     "machineId": {
+      "type": "string",
+      "example": "s194cr8pls2z",
+      "description": "A unique string identifying the host machine a Pod is running on."
+     },
+     "memoryInGb": {
+      "type": "number",
+      "example": 62,
+      "description": "The amount of RAM, in gigabytes (GB), attached to a Pod."
+     },
+     "name": {
+      "type": "string",
+      "maxLength": 191,
+      "description": "A user-defined name for the created Pod. The name does not need to be unique."
+     },
+     "networkVolume": {
+      "type": "object",
+      "properties": {
+       "id": {
+        "type": "string",
+        "example": "agv6w2qcg7",
+        "description": "A unique string identifying a network volume."
+       },
+       "name": {
+        "type": "string",
+        "example": "my network volume",
+        "description": "A user-defined name for a network volume. The name does not need to be unique."
+       },
+       "size": {
+        "type": "integer",
+        "example": 50,
+        "description": "The amount of disk space, in gigabytes (GB), allocated to a network volume."
+       },
+       "dataCenterId": {
+        "type": "string",
+        "example": "EU-RO-1",
+        "description": "The Runpod data center ID where a network volume is located."
+       }
+      },
+      "description": "If a network volume is attached to a Pod, information about the network volume (see [network volume schema](#/components/schemas/NetworkVolume))."
+     },
+     "portMappings": {
+      "type": "object",
+      "nullable": true,
+      "items": {
+       "type": "integer"
+      },
+      "example": {
+       "22": 10341
+      },
+      "description": "A mapping of internal ports to public ports on a Pod. For example, { \"22\": 10341 } means that port 22 on the Pod is mapped to port 10341 and is publicly accessible at [public ip]:10341. If the Pod is still initializing, this mapping is not yet determined and will be empty."
+     },
+     "ports": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "example": [
+       "8888/http",
+       "22/tcp"
+      ],
+      "description": "A list of ports exposed on a Pod. Each port is formatted as [port number]/[protocol]. Protocol can be either http or tcp."
+     },
+     "publicIp": {
+      "type": "string",
+      "example": "100.65.0.119",
+      "format": "ipv4",
+      "nullable": true,
+      "description": "The public IP address of a Pod. If the Pod is still initializing, this IP is not yet determined and will be empty."
+     },
+     "savingsPlans": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/SavingsPlan"
+      },
+      "description": "The list of active Savings Plans applied to a Pod (see [Savings Plans](#/components/schemas/SavingsPlan)). If none are applied, the list is empty."
+     },
+     "slsVersion": {
+      "type": "integer",
+      "example": 0,
+      "description": "If the Pod is a Serverless worker, the version of the associated endpoint (see [Endpoint Version](#/components/schemas/Endpoint/version))."
+     },
+     "templateId": {
+      "type": "string",
+      "example": null,
+      "description": "If a Pod is created with a template, the unique string identifying that template."
+     },
+     "vcpuCount": {
+      "type": "number",
+      "example": 24,
+      "description": "The number of virtual CPUs attached to a Pod."
+     },
+     "volumeEncrypted": {
+      "type": "boolean",
+      "example": false,
+      "description": "Set to true if the local network volume of a Pod is encrypted. Can only be set when creating a Pod."
+     },
+     "volumeInGb": {
+      "type": "integer",
+      "example": 20,
+      "description": "The amount of disk space, in gigabytes (GB), to allocate on the Pod volume for a Pod. The data on the Pod volume is persisted across Pod restarts. To persist data so that future Pods can access it, create a network volume and set networkVolumeId to attach it to the Pod."
+     },
+     "volumeMountPath": {
+      "type": "string",
+      "example": "/workspace",
+      "description": "If either a Pod volume or a network volume is attached to a Pod, the absolute path where the network volume is mounted in the filesystem."
+     }
+    }
+   },
+   "Pods": {
+    "type": "array",
+    "items": {
+     "$ref": "#/components/schemas/Pod"
+    }
+   },
+   "PodUpdateInput": {
+    "type": "object",
+    "description": "Input for updating a Pod which will trigger a reset.",
+    "properties": {
+     "containerDiskInGb": {
+      "type": "integer",
+      "default": 50,
+      "nullable": true,
+      "description": "The amount of disk space, in gigabytes (GB), to allocate on the container disk for the created Pod. The data on the container disk is wiped when the Pod restarts. To persist data across Pod restarts, set volumeInGb to configure the Pod network volume."
+     },
+     "containerRegistryAuthId": {
+      "type": "string",
+      "description": "Registry credentials ID.",
+      "example": "clzdaifot0001l90809257ynb"
+     },
+     "dockerEntrypoint": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "default": [],
+      "description": "If specified, overrides the ENTRYPOINT for the Docker image run on the created Pod. If [], uses the ENTRYPOINT defined in the image."
+     },
+     "dockerStartCmd": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "default": [],
+      "description": "If specified, overrides the start CMD for the Docker image run on the created Pod. If [], uses the start CMD defined in the image."
+     },
+     "env": {
+      "type": "object",
+      "items": {
+       "type": "string"
+      },
+      "example": {
+       "ENV_VAR": "value"
+      },
+      "default": {}
+     },
+     "globalNetworking": {
+      "type": "boolean",
+      "default": false,
+      "example": true,
+      "description": "Set to true to enable global networking for the created Pod. Currently only available for On-Demand GPU Pods on some Secure Cloud data centers."
+     },
+     "imageName": {
+      "type": "string",
+      "example": "runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04",
+      "description": "The image tag for the container run on the created Pod."
+     },
+     "locked": {
+      "type": "boolean",
+      "default": false,
+      "description": "Set to true to lock a Pod. Locking a Pod disables stopping or resetting the Pod."
+     },
+     "name": {
+      "type": "string",
+      "default": "my pod",
+      "description": "A user-defined name for the created Pod. The name does not need to be unique.",
+      "maxLength": 191
+     },
+     "ports": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "example": [
+       "8888/http",
+       "22/tcp"
+      ],
+      "default": "8888/http,22/tcp",
+      "description": "A list of ports exposed on the created Pod. Each port is formatted as [port number]/[protocol]. Protocol can be either http or tcp."
+     },
+     "volumeInGb": {
+      "type": "integer",
+      "default": 20,
+      "nullable": true,
+      "description": "The amount of disk space, in gigabytes (GB), to allocate on the Pod volume for the created Pod. The data on the Pod volume is persisted across Pod restarts. To persist data so that future Pods can access it, create a network volume and set networkVolumeId to attach it to the Pod."
+     },
+     "volumeMountPath": {
+      "type": "string",
+      "default": "/workspace",
+      "description": "If either a Pod volume or a network volume is attached to a Pod, the absolute path where the network volume will be mounted in the filesystem."
+     }
+    }
+   },
+   "SavingsPlan": {
+    "type": "object",
+    "properties": {
+     "costPerHr": {
+      "type": "number",
+      "example": 0.21
+     },
+     "endTime": {
+      "type": "string",
+      "example": "2024-07-12T19:14:40.144Z"
+     },
+     "gpuTypeId": {
+      "type": "string",
+      "example": "NVIDIA GeForce RTX 4090"
+     },
+     "id": {
+      "type": "string",
+      "example": "clkrb4qci0000mb09c7sualzo"
+     },
+     "podId": {
+      "type": "string",
+      "example": "xedezhzb9la3ye"
+     },
+     "startTime": {
+      "type": "string",
+      "example": "2024-05-12T19:14:40.144Z"
+     }
+    }
+   }
+  }
+ }
+}

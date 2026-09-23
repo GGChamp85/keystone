@@ -249,6 +249,19 @@ class ApprovePlanRequest(BaseModel):
     force: bool = Field(default=False, description="Start even if the planner says it does not fit")
 
 
+class ExportFineTuneRequest(BaseModel):
+    format: Literal["merged", "gguf", "awq"] = Field(
+        default="gguf",
+        description=(
+            "merged = the adapter folded into the base weights (a plain Hugging Face checkpoint); "
+            "gguf = that checkpoint converted with llama.cpp's converter; awq = AWQ 4-bit (needs a CUDA GPU)"
+        ),
+    )
+    quant: str | None = Field(
+        default=None, description="GGUF only: the converter's --outtype (f32, f16, bf16, q8_0); default q8_0"
+    )
+
+
 class StartFineTuneRequest(BaseModel):
     base_model: str = Field(
         default="Qwen/Qwen2.5-Coder-7B-Instruct",

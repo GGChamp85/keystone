@@ -27,6 +27,7 @@ import asyncio
 import json
 import os
 import shutil
+import time
 from pathlib import Path
 from typing import Annotated
 
@@ -462,6 +463,43 @@ def finetune_rollback(job_id: Annotated[str, typer.Argument()]):
     """Retire a promoted job's adapter — routing falls back to the base model."""
     job = _request_one("POST", f"/v1/finetune/jobs/{job_id}/rollback")
     console.print(f"[yellow]Rolled back[/yellow] {job['id']} — routing now falls back to the base model.")
+
+
+@finetune_app.command("export")
+def finetune_export(
+    job_id: Annotated[str, typer.Argument()],
+    fmt: Annotated[str, typer.Option("--format", help="merged | gguf | awq")] = "gguf",
+    quant: Annotated[str | None, typer.Option(help="GGUF only: f32 | f16 | bf16 | q8_0 (default q8_0)")] = None,
+    wait: Annotated[bool, typer.Option("--wait", help="Poll until the export finishes and print the artifact")] = False,
+    poll_seconds: Annotated[float, typer.Option(help="Polling interval with --wait")] = 5.0,
+):
+    """Export a completed job's adapter: merged Hugging Face checkpoint, GGUF (llama.cpp), or AWQ 4-bit.
+
+    Runs on the server in the background; the artifact's path and size land
+    under the job's metrics.exports.<format>. --wait polls until then.
+    """
+    body: dict = {"format": fmt}
+    if quant:
+        body["quant"] = quant
+    started = _request_one("POST", f"/v1/finetune/jobs/{job_id}/export", json=body)
+    console.print(
+        f"Export [bold]{started['format']}[/bold]"
+        + (f" ({started['quant']})" if started.get("quant") else "")
+        + f" started for {started['job_id']} via {started['execution']} — output under {started['export_root']}"
+    )
+    if not wait:
+        console.print(f"Follow it with: keystone finetune status {job_id}")
+        return
+    while True:
+        job = _request_one("GET", f"/v1/finetune/jobs/{job_id}")
+        entry = ((job.get("metrics") or {}).get("exports") or {}).get(fmt) or {}
+        if entry.get("status") == "completed":
+            console.print(f"[green]Done[/green] {entry['path']}  ({entry['size_bytes']:,} bytes)")
+            return
+        if entry.get("status") == "failed":
+            error_console.print(f"Export failed: {entry.get('error')}")
+            raise typer.Exit(code=1)
+        time.sleep(poll_seconds)
 
 
 @finetune_app.command("watch")
