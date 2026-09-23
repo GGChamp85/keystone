@@ -722,3 +722,92 @@ button:disabled {
   gap: 10px;
   margin-top: 12px;
 }
+
+
+/* Live steps (step events — src/orchestrator/events.py STEP_EVENT_TYPES) */
+
+.steps-card {
+  margin-top: 20px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  box-shadow: var(--shadow-sm);
+}
+
+.steps-card h3 {
+  margin: 0 0 4px;
+}
+
+.steps-hint,
+.steps-empty {
+  color: var(--text-dim);
+  font-size: 14px;
+  margin: 0 0 10px;
+}
+
+.steps-scroll {
+  max-height: 520px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.step-line {
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+}
+
+.step-line:last-child {
+  border-bottom: none;
+}
+
+.step-line summary {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 7px 12px;
+  cursor: pointer;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.step-kind,
+.trace-kind {
+  background: #e2e8f0;
+  color: #1e293b;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  flex: none;
+}
+
+.step-ok .step-kind {
+  background: #bbf7d0;
+  color: #14532d;
+}
+
+.step-error .step-kind {
+  background: #fecaca;
+  color: #7f1d1d;
+}
+
+.step-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.step-body {
+  margin: 0;
+  padding: 10px 12px 12px;
+  max-height: 420px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 13px;
+  background: #0f172a;
+  color: #e2e8f0;
+}

@@ -7,8 +7,11 @@ Keystone Inference — Chat completions endpoint (OpenAI-compatible).
 
 from __future__ import annotations
 
+import json
 import time
+from typing import Any
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
@@ -23,6 +26,9 @@ from src.api.models.responses import ModelInfo, ModelListResponse
 from src.config import get_settings
 from src.db.models import APIKey, Tenant
 from src.inference.model_router import get_model_router, resolve_model_name_for_client
+from src.orchestrator.context import count_messages_tokens, count_tokens
+
+logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/v1", tags=["inference"])
 
@@ -108,16 +114,28 @@ async def chat_completions(
     )
 
     usage = response.get("usage", {})
-    total_tokens = usage.get("total_tokens", 0)
+    total_tokens = usage.get("total_tokens") or (usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0))
     if total_tokens > 0:
-        await record_token_usage(tenant.id, total_tokens)
+        await record_token_usage(tenant.id, total_tokens, model_role=resolved_role)
 
     return response
 
 
 async def _stream_completion(client, messages, req, tenant, api_key, role, model_override=None):
-    total_tokens = 0
-    async for chunk in client.stream(
+    """
+    Streams the backend's SSE through unchanged and bills REAL usage: the
+    backend is always asked for `stream_options.include_usage` (vLLM and
+    llama.cpp both honor it), the usage-only final chunk is recorded — and
+    forwarded only if the caller asked for it, since an OpenAI client that
+    did not may not expect a chunk with no choices. If the backend sends no
+    usage at all, prompt and completion tokens are counted with the same
+    tokenizer the agent uses and logged as an estimate, never as ~1 token
+    per chunk (the previous accounting under-billed by orders of magnitude).
+    """
+    forward_usage = bool((req.stream_options or {}).get("include_usage"))
+    usage: dict[str, Any] | None = None
+    content_parts: list[str] = []
+    async for sse in client.stream(
         messages=messages,
         temperature=req.temperature,
         max_tokens=req.max_tokens,
@@ -126,11 +144,38 @@ async def _stream_completion(client, messages, req, tenant, api_key, role, model
         frequency_penalty=req.frequency_penalty,
         presence_penalty=req.presence_penalty,
         model_override=model_override,
+        include_usage=True,
     ):
-        yield chunk
-        # Estimate tokens from streamed content
-        if "content" in chunk:
-            total_tokens += 1
+        raw = sse[len("data: ") :].strip() if sse.startswith("data: ") else ""
+        if raw and raw != "[DONE]":
+            try:
+                chunk = json.loads(raw)
+            except json.JSONDecodeError:
+                chunk = None
+            if isinstance(chunk, dict):
+                if chunk.get("usage"):
+                    usage = chunk["usage"]
+                for choice in chunk.get("choices") or []:
+                    text = (choice.get("delta") or {}).get("content")
+                    if text:
+                        content_parts.append(text)
+                if not chunk.get("choices") and chunk.get("usage") and not forward_usage:
+                    continue  # the backend's usage-only chunk was for our accounting; the client did not ask for it
+        yield sse
 
+    if usage:
+        total_tokens = usage.get("total_tokens") or (usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0))
+    else:
+        prompt_tokens = count_messages_tokens(messages)
+        completion_tokens = count_tokens("".join(content_parts))
+        total_tokens = prompt_tokens + completion_tokens
+        logger.warning(
+            "completions.stream_usage_estimated",
+            tenant_id=str(tenant.id),
+            role=role,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            detail="backend sent no usage chunk despite stream_options.include_usage; counted with tiktoken",
+        )
     if total_tokens > 0:
-        await record_token_usage(tenant.id, max(total_tokens, 10))
+        await record_token_usage(tenant.id, total_tokens, model_role=role)

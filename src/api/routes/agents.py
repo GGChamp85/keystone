@@ -26,7 +26,7 @@ from src.db.models import AgentTask, APIKey, FeedbackVerdict, TaskFeedback, Tena
 from src.memory.ingestion import CodeIngestionPipeline, InvalidRepositoryURLError
 from src.orchestrator.concurrency import ConcurrencyLimitExceeded
 from src.orchestrator.engine import get_keystone_engine
-from src.orchestrator.events import TERMINAL_PHASES, block_for_next_event, read_task_events_from
+from src.orchestrator.events import block_for_next_event, is_final_event, read_task_events_from
 from src.orchestrator.nodes._shared import slugify_for_branch
 
 router = APIRouter(prefix="/v1/keystone", tags=["keystone"])
@@ -116,7 +116,7 @@ async def stream_task(
         for entry_id, payload in history:
             last_id = entry_id
             yield f"id: {entry_id}\ndata: {json.dumps(payload)}\n\n"
-            if payload.get("phase") in TERMINAL_PHASES:
+            if is_final_event(payload):
                 return  # task already finished before this client connected
 
         while True:
@@ -129,7 +129,7 @@ async def stream_task(
             entry_id, payload = result
             last_id = entry_id
             yield f"id: {entry_id}\ndata: {json.dumps(payload)}\n\n"
-            if payload.get("phase") in TERMINAL_PHASES:
+            if is_final_event(payload):
                 break
 
     return StreamingResponse(

@@ -33,6 +33,7 @@ from src.config import get_settings
 from src.inference.client import get_inference_client
 from src.inference.model_router import resolve_model_name_for_client
 from src.orchestrator.context import Summarizer, fit_to_tokens, trim_turns_to_budget_async
+from src.orchestrator.events import publish_task_step
 from src.orchestrator.nodes._shared import ensure_repo_map, get_or_clone_workspace
 from src.orchestrator.nodes.quality import _is_blocking
 from src.orchestrator.state import (
@@ -258,8 +259,8 @@ def _make_turn_summarizer(state: AgentState) -> Summarizer:
     return summarize
 
 
-async def _run_agentic_loop(state: AgentState, ws: Workspace) -> tuple[bool, str, list[str]]:
-    """Returns (model_signaled_done, final_summary_text, paths_touched_this_call)."""
+async def _run_agentic_loop(state: AgentState, ws: Workspace) -> tuple[bool, str, list[str], list[dict]]:
+    """Returns (model_signaled_done, final_summary_text, paths_touched_this_call, step_events)."""
     client = get_inference_client(state.primary_model)
     model_name = await resolve_model_name_for_client(client, state.tenant_id)
     protocol = get_tool_protocol(state.tool_protocol)
@@ -280,6 +281,11 @@ async def _run_agentic_loop(state: AgentState, ws: Workspace) -> tuple[bool, str
     touched: set[str] = set()
     summary = ""
     completed = False
+    steps: list[dict] = []
+
+    async def step(event_type: str, payload: dict) -> None:
+        steps.append(await publish_task_step(state.task_id, event_type, "coding", payload, phase="coding"))
+
     summarizer = _make_turn_summarizer(state)
     stream_turns = get_settings().agent_stream_turns
 
@@ -299,6 +305,8 @@ async def _run_agentic_loop(state: AgentState, ws: Workspace) -> tuple[bool, str
         message = response["choices"][0]["message"]
         calls = protocol.parse_tool_calls(message)
         turn = [protocol.format_assistant_turn(message, calls)]
+        if message.get("content"):
+            await step("model_text", {"turn": _step, "content": message["content"], "final": not calls})
 
         if not calls:
             summary = (message.get("content") or "").strip()
@@ -308,10 +316,16 @@ async def _run_agentic_loop(state: AgentState, ws: Workspace) -> tuple[bool, str
 
         for call in calls:
             if isinstance(call, ToolCallError):
+                await step("tool_call", {"turn": _step, "name": getattr(call, "name", ""), "error": call.error})
                 turn.extend(protocol.format_tool_result(call, f"ERROR: {call.error}"))
                 continue
+            await step("tool_call", {"turn": _step, "name": call.name, "arguments": call.arguments})
             result = await dispatch_tool_call(
                 ws, call.name, call.arguments, touched_paths=sorted(touched | set(state.files_touched))
+            )
+            await step(
+                "tool_result",
+                {"turn": _step, "name": call.name, "ok": result.ok, "output": result.output, "error": result.error},
             )
             turn.extend(protocol.format_tool_result(call, _wrapped_tool_content(call.name, call.arguments, result)))
             path = touched_path(call.name, call.arguments, result)
@@ -321,7 +335,7 @@ async def _run_agentic_loop(state: AgentState, ws: Workspace) -> tuple[bool, str
     else:
         summary = f"Reached the {state.max_tool_steps}-turn tool budget before signaling completion."
 
-    return completed, summary, sorted(touched)
+    return completed, summary, sorted(touched), steps
 
 
 async def _code_with_tools(state: AgentState) -> AgentState:
@@ -332,7 +346,7 @@ async def _code_with_tools(state: AgentState) -> AgentState:
     try:
         ws = await get_or_clone_workspace(state)
         await ensure_repo_map(state, ws)
-        completed, summary, touched = await _run_agentic_loop(state, ws)
+        completed, summary, touched, steps = await _run_agentic_loop(state, ws)
 
         for path in touched:
             if path not in state.files_touched:
@@ -354,6 +368,7 @@ async def _code_with_tools(state: AgentState) -> AgentState:
                 prompt_tokens=state.total_prompt_tokens - prompt_tokens_before,
                 completion_tokens=state.total_completion_tokens - completion_tokens_before,
                 files_changed=touched,
+                steps=steps,
                 duration_ms=int((time.monotonic() - t0) * 1000),
             )
         )

@@ -262,6 +262,7 @@ def _state_to_dict(state: AgentState) -> dict[str, Any]:
                 "test_results": r.test_results,
                 "review_comments": r.review_comments,
                 "quality_findings": r.quality_findings,
+                "steps": r.steps,
                 "error": r.error,
                 "duration_ms": r.duration_ms,
             }
@@ -383,6 +384,7 @@ def _dict_to_state(d: dict[str, Any]) -> AgentState:
             test_results=t.get("test_results", []),
             review_comments=t.get("review_comments", []),
             quality_findings=t.get("quality_findings", []),
+            steps=t.get("steps", []),
             error=t.get("error"),
             duration_ms=t.get("duration_ms", 0),
         )

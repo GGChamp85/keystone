@@ -302,3 +302,31 @@ async def test_agentic_loop_routes_to_the_tenants_promoted_adapter(repo_workspac
             row = await db.get(Tenant, tenant_id)
             if row is not None:
                 await db.delete(row)
+
+
+@requires_sandbox
+async def test_agentic_loop_records_every_step_in_full_on_the_iteration_record(repo_workspace):
+    """The durable copy of the live trace: each tool call, its complete result, and the model's
+    final message land on the coding IterationRecord's `steps`, in order, untruncated."""
+    _task_id, ws = repo_workspace
+    state = _make_state()
+    script = ScriptedClient(
+        [
+            _tool_call_response("read_file", {"path": "app.py"}),
+            _tool_call_response("apply_patch", {"path": "app.py", "search": "hello {name}", "replace": "HI {name}"}),
+            _final_response("Changed the greeting."),
+        ]
+    )
+    with (
+        patch("src.orchestrator.nodes.coding.get_inference_client", return_value=script),
+        patch("src.orchestrator.nodes._shared.Workspace", return_value=ws),
+    ):
+        result = await coding_node(state)
+
+    steps = result.trace[-1].steps
+    assert [s["event_type"] for s in steps] == ["tool_call", "tool_result", "tool_call", "tool_result", "model_text"]
+    assert steps[0]["name"] == "read_file" and steps[0]["arguments"] == {"path": "app.py"}
+    assert steps[1]["ok"] is True and steps[1]["output"] == "def greet(name):\n    return f'hello {name}'\n"
+    assert steps[3]["ok"] is True and "Updated app.py" in steps[3]["output"]
+    assert steps[4]["content"] == "Changed the greeting." and steps[4]["final"] is True
+    assert all(s["node"] == "coding" and s["timestamp"] > 0 for s in steps)

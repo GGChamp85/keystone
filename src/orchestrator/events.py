@@ -35,10 +35,29 @@ logger = structlog.get_logger(__name__)
 
 _STREAM_PREFIX = "keystone:task:"
 _STREAM_SUFFIX = ":events"
-_STREAM_MAXLEN = 500  # a task capped at circuit-breaker's max_iterations=hundreds of nodes, generously bounded
-_STREAM_TTL_SECONDS = 24 * 3600  # events outlive the task by a day so a late-loading UI can still replay them
+# No MAXLEN on the stream: every step of every task is kept for the live feed's lifetime
+# (a trimmed stream would silently lose the earliest tool calls of a long task). The
+# durable copy is the task's execution trace in Postgres (IterationRecord.steps).
+_STREAM_TTL_SECONDS = 7 * 24 * 3600  # the live feed outlives the task by a week for late-loading/replaying UIs
 
 TERMINAL_PHASES = {"complete", "failed", "cancelled"}
+
+# Step-level event types (event_type field). "node" is the per-node summary that
+# has always been published; the rest are what happened INSIDE a node, as it happens.
+STEP_EVENT_TYPES = frozenset(
+    {
+        "tool_call",  # the model asked for a tool: name, arguments
+        "tool_result",  # what the tool returned: ok, output (full) or error
+        "model_text",  # the model's own prose for a turn (its final summary, or reasoning between calls)
+        "test_output",  # a test command: command, exit_code, stdout, stderr, duration_ms, passed
+        "quality_findings",  # every finding from the quality gate, and which ones block
+        "deps_install",  # the repo's dependency install: command, ok, output
+        "repo_map",  # the ranked symbol map the planner and coder were given
+        "route_decision",  # model="auto" resolved to a role, and why
+        "diff",  # the final working-tree diff, commit sha, branch
+        "pr",  # the pull request opened
+    }
+)
 
 
 def _stream_key(task_id: UUID | str) -> str:
@@ -61,6 +80,7 @@ def _summarize(node_name: str, state: dict[str, Any]) -> dict[str, Any]:
     test_results = state.get("test_results") or []
 
     return {
+        "event_type": "node",
         "node": node_name,
         "phase": str(phase),
         "iteration": state.get("iteration", 0),
@@ -88,14 +108,80 @@ async def publish_task_event(task_id: UUID | str, node_name: str, state: dict[st
     matches how graph.py already treats `on_iteration` heartbeat failures
     as log-and-continue, not fatal.
     """
+    await _append(task_id, _summarize(node_name, state), node_name)
+
+
+async def publish_task_step(
+    task_id: UUID | str,
+    event_type: str,
+    node: str,
+    payload: dict[str, Any],
+    *,
+    phase: str | None = None,
+) -> dict[str, Any]:
+    """
+    Append one step-level event (see STEP_EVENT_TYPES) — what is happening
+    inside a node, published the moment it happens, with the FULL payload:
+    a tool's whole output, a test run's whole stdout, the whole diff. No
+    payload cap; the live trace is the record, not a preview of it. Never
+    raises. Returns the event as published so a node can also keep it on
+    its IterationRecord (the durable copy in Postgres).
+    """
+    if event_type not in STEP_EVENT_TYPES:
+        raise ValueError(f"unknown step event type {event_type!r}; one of {sorted(STEP_EVENT_TYPES)}")
+    event = {"event_type": event_type, "node": node, "phase": phase or node, "timestamp": time.time(), **payload}
+    await _append(task_id, event, node)
+    return event
+
+
+async def publish_task_final(
+    task_id: UUID | str,
+    status: str,
+    *,
+    result_summary: str = "",
+    error_message: str | None = None,
+    git_result: dict[str, Any] | None = None,
+) -> None:
+    """
+    The last event of a task, published by the engine after the graph AND
+    the git workflow (commit/push/PR) have finished — so a client sees the
+    diff and the PR before the stream closes. `final: True` is what the SSE
+    route stops on (`is_final_event`), not the graph's own terminal phase.
+    Never raises.
+    """
+    git = git_result or {}
+    event = {
+        "event_type": "node",
+        "node": "finalize",
+        "phase": status,
+        "final": True,
+        "result_summary": result_summary,
+        "error_message": error_message,
+        "branch_name": git.get("branch_name"),
+        "commit_sha": git.get("commit_sha"),
+        "pr_url": git.get("pr_url"),
+        "pr_number": git.get("pr_number"),
+        "timestamp": time.time(),
+    }
+    await _append(task_id, event, "finalize")
+
+
+def is_final_event(payload: dict[str, Any]) -> bool:
+    """True for the engine's `final` event; also for a terminal-phase event with no `event_type`
+    (recorded before step events existed) so an old task's replay still closes."""
+    if payload.get("final"):
+        return True
+    return "event_type" not in payload and payload.get("phase") in TERMINAL_PHASES
+
+
+async def _append(task_id: UUID | str, event: dict[str, Any], node: str) -> None:
     try:
         redis = await get_redis()
         key = _stream_key(task_id)
-        payload = _summarize(node_name, state)
-        await redis.xadd(key, {"data": json.dumps(payload)}, maxlen=_STREAM_MAXLEN, approximate=True)
+        await redis.xadd(key, {"data": json.dumps(event, default=str)})
         await redis.expire(key, _STREAM_TTL_SECONDS)
     except Exception as exc:
-        logger.warning("task_events.publish_failed", task_id=str(task_id), node=node_name, error=str(exc))
+        logger.warning("task_events.publish_failed", task_id=str(task_id), node=node, error=str(exc))
 
 
 async def read_task_events_from(task_id: UUID | str, last_id: str = "0-0") -> list[tuple[str, dict[str, Any]]]:

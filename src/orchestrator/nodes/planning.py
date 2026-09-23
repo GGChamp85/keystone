@@ -142,6 +142,7 @@ async def planning_node(state: AgentState) -> AgentState:
                 iteration=state.iteration,
                 phase="planning",
                 model_role=state.primary_model,
+                steps=list(state.setup_steps),
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
                 duration_ms=int((time.monotonic() - t0) * 1000),

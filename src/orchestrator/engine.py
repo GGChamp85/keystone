@@ -38,7 +38,7 @@ from src.orchestrator.concurrency import (
     release_task_slot,
     try_acquire_task_slot,
 )
-from src.orchestrator.events import publish_task_event
+from src.orchestrator.events import publish_task_event, publish_task_final, publish_task_step
 from src.orchestrator.graph import HeartbeatCallback, _state_to_dict, build_agent_graph
 from src.orchestrator.state import AgentPhase, AgentState
 from src.orchestrator.workspace import Workspace
@@ -158,6 +158,17 @@ class KeystoneEngine:
                 "engine.auto_model_resolved",
                 task_id=str(task_id),
                 resolved_role=resolved_role,
+            )
+            await publish_task_step(
+                task_id,
+                "route_decision",
+                "submit",
+                {
+                    "requested": "auto",
+                    "resolved_role": resolved_role,
+                    "complexity_routing_enabled": get_settings().task_complexity_routing_enabled,
+                },
+                phase="pending",
             )
             model = resolved_role
 
@@ -423,6 +434,14 @@ class KeystoneEngine:
                     )
                 )
 
+            await publish_task_final(
+                task_id,
+                status.value,
+                result_summary=final_state.get("result_summary", ""),
+                error_message=final_state.get("error_message"),
+                git_result=git_result,
+            )
+
             # Record token usage to Redis
             total_tokens = final_state.get("total_prompt_tokens", 0) + final_state.get("total_completion_tokens", 0)
             if total_tokens > 0:
@@ -458,6 +477,7 @@ class KeystoneEngine:
                         completed_at=datetime.now(UTC),
                     )
                 )
+            await publish_task_final(task_id, TaskStatus.FAILED.value, error_message=f"Circuit breaker: {exc.reason}")
             logger.error("keystone.circuit_breaker", task_id=str(task_id), reason=exc.reason)
             return {"task_id": str(task_id), "status": TaskStatus.FAILED.value, "error": exc.reason}
 
@@ -472,6 +492,7 @@ class KeystoneEngine:
                         completed_at=datetime.now(UTC),
                     )
                 )
+            await publish_task_final(task_id, TaskStatus.FAILED.value, error_message=str(exc))
             logger.error("keystone.unhandled_error", task_id=str(task_id), error=str(exc))
             return {"task_id": str(task_id), "status": TaskStatus.FAILED.value, "error": str(exc)}
 
@@ -525,6 +546,13 @@ class KeystoneEngine:
             result["commit_sha"] = commit_sha
 
             await ws.push(working_branch)
+            await publish_task_step(
+                task_id,
+                "diff",
+                "finalize",
+                {"diff": diff, "branch_name": working_branch, "commit_sha": commit_sha},
+                phase="complete",
+            )
 
             if not settings.git_host_token:
                 logger.info("keystone.git_workflow_pushed_no_token", task_id=str(task_id), branch=working_branch)
@@ -549,6 +577,9 @@ class KeystoneEngine:
             )
             result["pr_url"] = pr.html_url
             result["pr_number"] = pr.number
+            await publish_task_step(
+                task_id, "pr", "finalize", {"pr_url": pr.html_url, "pr_number": pr.number}, phase="complete"
+            )
             logger.info("keystone.git_workflow_pr_opened", task_id=str(task_id), pr_url=pr.html_url)
 
         except Exception as exc:

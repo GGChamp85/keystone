@@ -28,10 +28,12 @@ Two modes, chosen by whether the task has a `repository_url`:
 from __future__ import annotations
 
 import time
+from uuid import UUID
 
 import structlog
 
 from src.config import get_settings
+from src.orchestrator.events import publish_task_step
 from src.orchestrator.nodes._shared import detect_profile, get_or_clone_workspace
 from src.orchestrator.state import (
     AgentPhase,
@@ -86,6 +88,7 @@ async def _test_in_repo_workspace(state: AgentState) -> AgentState:
         profile = await detect_profile(ws)
 
         state.test_results = []
+        steps: list[dict] = []
         if not profile.test_cmd:
             state.test_results.append(
                 TestResult(
@@ -103,10 +106,18 @@ async def _test_in_repo_workspace(state: AgentState) -> AgentState:
             all_passed = True
             if scoped:
                 all_passed = await _run_command_as_test(
-                    ws, f"related: {scoped}", scoped, state.test_results, no_tests_collected_ok=True
+                    ws,
+                    f"related: {scoped}",
+                    scoped,
+                    state.test_results,
+                    no_tests_collected_ok=True,
+                    task_id=state.task_id,
+                    steps=steps,
                 )
             if all_passed:
-                all_passed = await _run_command_as_test(ws, profile.test_cmd, profile.test_cmd, state.test_results)
+                all_passed = await _run_command_as_test(
+                    ws, profile.test_cmd, profile.test_cmd, state.test_results, task_id=state.task_id, steps=steps
+                )
 
         state.tests_passed = all_passed
         state.sandbox_output = "\n".join(
@@ -132,6 +143,7 @@ async def _test_in_repo_workspace(state: AgentState) -> AgentState:
                 test_results=[
                     {"test_name": tr.test_name, "passed": tr.passed, "error": tr.error} for tr in state.test_results
                 ],
+                steps=steps,
                 duration_ms=int((time.monotonic() - t0) * 1000),
             )
         )
@@ -158,13 +170,37 @@ async def _test_in_repo_workspace(state: AgentState) -> AgentState:
 
 
 async def _run_command_as_test(
-    ws: Workspace, name: str, command: str, results: list[TestResult], *, no_tests_collected_ok: bool = False
+    ws: Workspace,
+    name: str,
+    command: str,
+    results: list[TestResult],
+    *,
+    no_tests_collected_ok: bool = False,
+    task_id: UUID | str | None = None,
+    steps: list[dict] | None = None,
 ) -> bool:
     try:
         result = await ws.run(command, timeout=get_settings().agent_test_timeout_seconds, check=False)
         # pytest exits 5 when it collected nothing — for a scoped run that means "no related
         # tests after all", not a failure; the full suite that follows is the real verdict.
         passed = result["exit_code"] == 0 or (no_tests_collected_ok and result["exit_code"] == 5)
+        if task_id is not None:
+            event = await publish_task_step(
+                task_id,
+                "test_output",
+                "testing",
+                {
+                    "name": name,
+                    "command": command,
+                    "exit_code": result["exit_code"],
+                    "passed": passed,
+                    "stdout": result.get("stdout", ""),
+                    "stderr": result.get("stderr", ""),
+                    "duration_ms": result.get("duration_ms", 0),
+                },
+            )
+            if steps is not None:
+                steps.append(event)
         results.append(
             TestResult(
                 test_name=name,

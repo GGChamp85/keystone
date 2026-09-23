@@ -28,10 +28,12 @@ from __future__ import annotations
 import json
 import re
 import time
+from typing import Any
 
 import structlog
 
 from src.config import get_settings
+from src.orchestrator.events import publish_task_step
 from src.orchestrator.nodes._shared import get_or_clone_workspace, next_gate_phase
 from src.orchestrator.repo_profile import detect_repo_profile
 from src.orchestrator.state import AgentPhase, AgentState, IterationRecord, QualityFinding
@@ -124,6 +126,17 @@ def _findings_for_command(command: str, output: str) -> list[QualityFinding]:
     return _parse_generic(tool, output)
 
 
+def _finding_dict(f: QualityFinding) -> dict[str, Any]:
+    return {
+        "tool": f.tool,
+        "path": f.path,
+        "line": f.line,
+        "severity": f.severity,
+        "code": f.code,
+        "message": f.message,
+    }
+
+
 def _is_blocking(finding: QualityFinding, blocking_tools: list[str] | tuple[str, ...] = ("bandit", "mypy")) -> bool:
     """A finding blocks when its tool is in `blocking_tools` (Settings.quality_gate_blocking_tools,
     or the task's own list). bandit's low-severity findings are informational even then; every
@@ -161,6 +174,17 @@ async def quality_node(state: AgentState) -> AgentState:
 
         state.quality_findings = all_findings
         blocking = [f for f in all_findings if _is_blocking(f, state.quality_blocking_tools)]
+        step = await publish_task_step(
+            state.task_id,
+            "quality_findings",
+            "quality",
+            {
+                "commands": commands,
+                "blocking_tools": list(state.quality_blocking_tools),
+                "findings": [_finding_dict(f) for f in all_findings],
+                "blocking": [_finding_dict(f) for f in blocking],
+            },
+        )
 
         if blocking:
             state.consecutive_quality_failures += 1
@@ -177,6 +201,7 @@ async def quality_node(state: AgentState) -> AgentState:
                 iteration=state.iteration,
                 phase="quality",
                 model_role="tools",
+                steps=[step],
                 quality_findings=[
                     {
                         "tool": f.tool,

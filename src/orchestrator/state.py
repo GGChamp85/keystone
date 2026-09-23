@@ -75,6 +75,9 @@ class IterationRecord:
     test_results: list[dict] = field(default_factory=list)
     review_comments: list[dict] = field(default_factory=list)
     quality_findings: list[dict] = field(default_factory=list)
+    # Step-level events (src/orchestrator/events.py STEP_EVENT_TYPES) that happened inside
+    # this node, in order and in full — the durable copy of the live trace.
+    steps: list[dict] = field(default_factory=list)
     error: str | None = None
     duration_ms: int = 0
 
@@ -184,6 +187,9 @@ class AgentState:
     # loop so neither starts from a blind `list_dir`. Empty for standalone
     # (no-repository) tasks or if the map could not be built.
     repo_map: str = ""
+    # Step events produced while setting the task up (dependency install, repo map) before any
+    # node has an IterationRecord of its own — the planning node records them on its record.
+    setup_steps: list[dict] = field(default_factory=list)
     # Real token budget for the loop's own conversation (src/orchestrator/context.py's
     # trim_turns_to_budget), independent of `max_tokens_per_task` (the whole task's
     # spend cap). Conservative default with headroom below a 32K context model for the
@@ -277,6 +283,10 @@ class AgentState:
                     "prompt_tokens": r.prompt_tokens,
                     "completion_tokens": r.completion_tokens,
                     "files_changed": r.files_changed,
+                    "test_results": r.test_results,
+                    "review_comments": r.review_comments,
+                    "quality_findings": r.quality_findings,
+                    "steps": r.steps,
                     "error": r.error,
                     "duration_ms": r.duration_ms,
                 }

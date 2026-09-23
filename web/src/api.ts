@@ -168,26 +168,64 @@ export async function listTasks(params: ListTasksParams = {}): Promise<AgentTask
   return resp.json()
 }
 
-// Mirrors src/orchestrator/events.py's _summarize() payload exactly —
-// keep these two in sync.
-export interface TaskEvent {
+// Mirrors src/orchestrator/events.py exactly — keep these in sync.
+// A node event is the per-node summary (_summarize); the engine's last one carries
+// `final: true` plus the git results (publish_task_final).
+export interface NodeEvent {
+  event_type?: 'node' // absent on events recorded before step events existed
   node: string
   phase: string
-  iteration: number
-  max_iterations: number | null
-  plan: string
-  plan_steps: string[]
-  current_plan_step: number
-  files_changed: string[]
-  review_passed: boolean | null
-  review_comment_count: number
-  tests_passed: boolean | null
-  test_pass_count: number
-  test_total_count: number
-  total_tokens: number
-  result_summary: string
-  error_message: string | null
+  final?: boolean
+  iteration?: number
+  max_iterations?: number | null
+  plan?: string
+  plan_steps?: string[]
+  current_plan_step?: number
+  files_changed?: string[]
+  review_passed?: boolean | null
+  review_comment_count?: number
+  tests_passed?: boolean | null
+  test_pass_count?: number
+  test_total_count?: number
+  total_tokens?: number
+  result_summary?: string
+  error_message?: string | null
+  branch_name?: string | null
+  commit_sha?: string | null
+  pr_url?: string | null
+  pr_number?: number | null
   timestamp: number
+}
+
+// What happened INSIDE a node, as it happened, with the full payload (STEP_EVENT_TYPES).
+export type StepEventType =
+  | 'tool_call'
+  | 'tool_result'
+  | 'model_text'
+  | 'test_output'
+  | 'quality_findings'
+  | 'deps_install'
+  | 'repo_map'
+  | 'route_decision'
+  | 'diff'
+  | 'pr'
+
+export interface StepEvent {
+  event_type: StepEventType
+  node: string
+  phase: string
+  timestamp: number
+  [key: string]: unknown
+}
+
+export type TaskEvent = NodeEvent | StepEvent
+
+export function isStepEvent(ev: TaskEvent): ev is StepEvent {
+  return typeof ev.event_type === 'string' && ev.event_type !== 'node'
+}
+
+export function isNodeEvent(ev: TaskEvent): ev is NodeEvent {
+  return !isStepEvent(ev)
 }
 
 export const TERMINAL_PHASES = new Set(['complete', 'failed', 'cancelled'])

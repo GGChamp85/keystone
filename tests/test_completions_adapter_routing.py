@@ -36,12 +36,24 @@ class _ScriptedInferenceClient:
     def __init__(self):
         self.calls: list[dict] = []
 
+    send_usage_chunk = True  # a backend that honors stream_options.include_usage
+
     async def complete(self, messages, **kwargs):
         self.calls.append(kwargs)
         return {
             "choices": [{"message": {"role": "assistant", "content": "hi"}, "finish_reason": "stop"}],
             "usage": {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7},
         }
+
+    async def stream(self, messages, **kwargs):
+        """The real SSE line shape InferenceClient.stream() yields, with vLLM's usage-only final chunk."""
+        self.calls.append(kwargs)
+        for piece in ("hel", "lo ", "there"):
+            yield f'data: {{"choices":[{{"index":0,"delta":{{"content":"{piece}"}},"finish_reason":null}}]}}\n\n'
+        yield 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n'
+        if kwargs.get("include_usage") and self.send_usage_chunk:
+            yield 'data: {"choices":[],"usage":{"prompt_tokens":40,"completion_tokens":3,"total_tokens":43}}\n\n'
+        yield "data: [DONE]\n\n"
 
 
 class _ScriptedModelRouter:
@@ -158,3 +170,85 @@ async def test_chat_completions_rejects_max_tokens_above_a_configured_deployment
 
     assert fake_client.calls == []
     get_settings.cache_clear()
+
+
+async def _stream_frames(client: httpx.AsyncClient, api_key: str, body: dict) -> list[str]:
+    frames: list[str] = []
+    async with client.stream(
+        "POST", "/v1/chat/completions", headers={"Authorization": f"Bearer {api_key}"}, json=body
+    ) as resp:
+        assert resp.status_code == 200, await resp.aread()
+        frames.extend([line[len("data: ") :] async for line in resp.aiter_lines() if line.startswith("data: ")])
+    return frames
+
+
+async def test_streaming_bills_the_backends_real_usage_and_hides_the_usage_chunk_unless_asked(tenant_and_key):
+    """The old path billed ~1 token per streamed chunk and never counted the prompt. The backend is
+    now always asked for stream_options.include_usage; its usage chunk is what gets recorded."""
+    _tenant_id, api_key = tenant_and_key
+    fake_client = _ScriptedInferenceClient()
+    recorded: list[tuple[int, str]] = []
+
+    async def fake_record(tenant_id, tokens, model_role="unknown"):
+        recorded.append((tokens, model_role))
+        return {}
+
+    with (
+        patch("src.api.routes.completions.get_model_router", return_value=_ScriptedModelRouter(fake_client)),
+        patch("src.api.routes.completions.record_token_usage", fake_record),
+    ):
+        async with running_client() as client:
+            frames = await _stream_frames(
+                client, api_key, {"model": "coding", "messages": [{"role": "user", "content": "hi"}], "stream": True}
+            )
+    assert fake_client.calls[0]["include_usage"] is True  # always requested from the backend
+    assert recorded == [(43, "coding")]  # the backend's real total, not 3 chunks
+    assert not any('"usage"' in f for f in frames)  # the client did not ask for it, so it is not forwarded
+    assert frames[-1] == "[DONE]" and any("hello" in f or "hel" in f for f in frames)
+
+
+async def test_streaming_forwards_the_usage_chunk_when_the_client_asks(tenant_and_key):
+    _tenant_id, api_key = tenant_and_key
+    fake_client = _ScriptedInferenceClient()
+    with (
+        patch("src.api.routes.completions.get_model_router", return_value=_ScriptedModelRouter(fake_client)),
+        patch("src.api.routes.completions.record_token_usage", lambda *a, **k: _noop()),
+    ):
+        async with running_client() as client:
+            frames = await _stream_frames(
+                client,
+                api_key,
+                {
+                    "model": "coding",
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "stream": True,
+                    "stream_options": {"include_usage": True},
+                },
+            )
+    assert any('"usage"' in f and '"total_tokens":43' in f for f in frames)
+
+
+async def test_streaming_estimates_with_tiktoken_when_the_backend_sends_no_usage(tenant_and_key):
+    _tenant_id, api_key = tenant_and_key
+    fake_client = _ScriptedInferenceClient()
+    fake_client.send_usage_chunk = False
+    recorded: list[int] = []
+
+    async def fake_record(tenant_id, tokens, model_role="unknown"):
+        recorded.append(tokens)
+        return {}
+
+    with (
+        patch("src.api.routes.completions.get_model_router", return_value=_ScriptedModelRouter(fake_client)),
+        patch("src.api.routes.completions.record_token_usage", fake_record),
+    ):
+        async with running_client() as client:
+            await _stream_frames(
+                client, api_key, {"model": "coding", "messages": [{"role": "user", "content": "hi"}], "stream": True}
+            )
+    # prompt ("hi" + per-message overhead) + completion ("hello there") — a real count, more than 3 chunks
+    assert recorded and recorded[0] >= 7
+
+
+async def _noop():
+    return {}

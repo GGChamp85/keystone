@@ -20,6 +20,7 @@ import re
 import structlog
 
 from src.config import Settings, get_settings
+from src.orchestrator.events import publish_task_step
 from src.orchestrator.repo_map import build_repo_map
 from src.orchestrator.repo_profile import RepoProfile, detect_repo_profile
 from src.orchestrator.state import AgentPhase, AgentState
@@ -142,8 +143,9 @@ async def install_dependencies(state: AgentState, ws: Workspace) -> None:
         state.deps_install_error = f"`{profile.install_cmd}` could not run: {exc}"
         logger.warning("deps.install_errored", task_id=str(state.task_id), error=str(exc))
         return
-    if result.get("exit_code") != 0:
-        output = (result.get("stderr") or result.get("stdout") or "").strip()
+    ok = result.get("exit_code") == 0
+    output = ((result.get("stdout") or "") + "\n" + (result.get("stderr") or "")).strip()
+    if not ok:
         state.deps_install_error = f"`{profile.install_cmd}` exited {result.get('exit_code')}:\n{output}"
         logger.warning("deps.install_failed", task_id=str(state.task_id), command=profile.install_cmd)
     else:
@@ -153,6 +155,20 @@ async def install_dependencies(state: AgentState, ws: Workspace) -> None:
             command=profile.install_cmd,
             duration_ms=result.get("duration_ms"),
         )
+    state.setup_steps.append(
+        await publish_task_step(
+            state.task_id,
+            "deps_install",
+            "planning",
+            {
+                "command": profile.install_cmd,
+                "ok": ok,
+                "exit_code": result.get("exit_code"),
+                "output": output,
+                "duration_ms": result.get("duration_ms", 0),
+            },
+        )
+    )
 
 
 async def ensure_repo_map(state: AgentState, ws: Workspace) -> str:
@@ -168,6 +184,9 @@ async def ensure_repo_map(state: AgentState, ws: Workspace) -> str:
     try:
         state.repo_map = await build_repo_map(ws)
         logger.info("repo_map.built", task_id=str(state.task_id), chars=len(state.repo_map))
+        state.setup_steps.append(
+            await publish_task_step(state.task_id, "repo_map", "planning", {"map": state.repo_map})
+        )
     except Exception as exc:  # any failure here must not fail the task
         logger.warning("repo_map.build_failed", task_id=str(state.task_id), error=str(exc))
     return state.repo_map
