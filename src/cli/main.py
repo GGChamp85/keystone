@@ -292,6 +292,95 @@ def finetune_start(
     _print_finetune_job(job)
 
 
+@finetune_app.command("guided")
+def finetune_guided(
+    repo: Annotated[list[str], typer.Option("--repo", help="Allow-listed git URL to learn from (repeatable)")],
+    goal: Annotated[str, typer.Option(help="What the adapter should get better at, in plain words")],
+    base_model: Annotated[str, typer.Option(help="Catalog model id, or 'auto' for the default SLM")] = "auto",
+    epochs: Annotated[int, typer.Option(min=1)] = 1,
+    holdout_ratio: Annotated[float, typer.Option(min=0.05, max=0.5)] = 0.2,
+    gpu: Annotated[
+        list[str] | None,
+        typer.Option("--gpu", help="Target GPU as NAME:VRAM_GB (repeatable); omitted = detect on the server"),
+    ] = None,
+    gpu_hourly_cost: Annotated[float | None, typer.Option(help="Your GPU price in USD/hour, for the cost line")] = None,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Approve the plan without asking")] = False,
+    force: Annotated[bool, typer.Option(help="Approve even if the planner says it does not fit")] = False,
+):
+    """Describe → plan & cost → approve → train. Builds a dataset from the repositories' real history and
+    this tenant's accepted agent tasks, shows the plan, and starts the job once you approve it."""
+    gpus = None
+    if gpu:
+        gpus = []
+        for spec in gpu:
+            name, _, vram = spec.rpartition(":")
+            if not name or not vram:
+                error_console.print(f"--gpu must be NAME:VRAM_GB, got {spec!r}")
+                raise typer.Exit(code=1)
+            gpus.append({"name": name, "vram_gb": float(vram)})
+    body = {
+        "repositories": repo,
+        "goal": goal,
+        "base_model": base_model,
+        "epochs": epochs,
+        "holdout_ratio": holdout_ratio,
+        "gpus": gpus,
+        "gpu_hourly_cost_usd": gpu_hourly_cost,
+    }
+    plan = _request_one("POST", "/v1/finetune/plans", json=body)
+    p = plan["plan"]
+    ds = plan["dataset"]
+    table = Table(title=f"Plan {plan['job_id']}", show_header=False)
+    table.add_row("Base model", plan["base_model"])
+    table.add_row("Method", f"{p['method']}  ({'fits' if p['fits'] else 'DOES NOT FIT'})")
+    table.add_row(
+        "Hardware",
+        f"{p['gpu_count']} x {p['gpu_name'] or '?'} ({p['vram_available_gb']} GB; needs ~{p['vram_required_gb']} GB)",
+    )
+    table.add_row(
+        "Examples",
+        f"{p['train_examples']} train / {p['holdout_examples']} held out  (from {ds['total_examples']} collected)",
+    )
+    table.add_row(
+        "Sources",
+        ", ".join(f"{k}: {v}" for k, v in ds["per_repository"].items()) + f"; accepted tasks: {ds['trajectories']}",
+    )
+    table.add_row(
+        "Safety",
+        f"{ds['dropped_by_secret_scan']} record(s) dropped by the secret scan, "
+        f"{ds['records_with_pii_redacted']} with PII redacted",
+    )
+    table.add_row("Steps", f"{p['total_steps']} optimizer steps ({p['epochs']} epoch(s), LoRA r={p['lora_r']})")
+    table.add_row("Time", f"~{p['estimated_hours']} h" if p["estimated_hours"] is not None else "—")
+    table.add_row(
+        "Cost", f"~${p['estimated_cost_usd']}" if p["estimated_cost_usd"] is not None else "— (no GPU price given)"
+    )
+    table.add_row("Basis", p["estimate_basis"])
+    for reason in p["reasons"]:
+        table.add_row("Note", reason)
+    for warning in ds["warnings"]:
+        table.add_row("[yellow]Warning[/yellow]", warning)
+    console.print(table)
+    if not yes and not typer.confirm("Approve and start training?", default=False):
+        console.print(f"Not started. Approve later with: keystone finetune approve {plan['job_id']}")
+        return
+    job = _request_one("POST", f"/v1/finetune/plans/{plan['job_id']}/approve", json={"force": force})
+    console.print(
+        f"[green]Started[/green] job {job['id']} ({job['status']}) — follow it with: "
+        f"keystone finetune watch {job['id']}"
+    )
+
+
+@finetune_app.command("approve")
+def finetune_approve(
+    job_id: Annotated[str, typer.Argument()],
+    force: Annotated[bool, typer.Option(help="Approve even if the planner says it does not fit")] = False,
+):
+    """Approve a planned guided fine-tune and start it."""
+    job = _request_one("POST", f"/v1/finetune/plans/{job_id}/approve", json={"force": force})
+    console.print(f"[green]Started[/green] job {job['id']} ({job['status']})")
+
+
 @finetune_app.command("list")
 def finetune_list(status: Annotated[str | None, typer.Option(help="Filter by status")] = None):
     """List fine-tuning jobs for your tenant."""
@@ -323,10 +412,31 @@ def finetune_preview(
 
 
 @finetune_app.command("promote")
-def finetune_promote(job_id: Annotated[str, typer.Argument()]):
-    """Promote a completed job's adapter to the tenant's default for its base model."""
-    job = _request_one("POST", f"/v1/finetune/jobs/{job_id}/promote")
+def finetune_promote(
+    job_id: Annotated[str, typer.Argument()],
+    force: Annotated[
+        bool, typer.Option("--force", help="Admin only: promote despite a fail/unknown verdict (audit-logged)")
+    ] = False,
+):
+    """Promote a completed job's adapter to the tenant's default for its base model.
+
+    Gated by the verdict: the adapter must have beaten the base model on the
+    held-out split. The promoted adapter is written to the lora_modules
+    manifest and live-loaded into the serving vLLM when it allows it.
+    """
+    job = _request_one("POST", f"/v1/finetune/jobs/{job_id}/promote", params={"force": "true"} if force else None)
+    verdict = (job.get("metrics") or {}).get("verdict") or {}
+    serving = (job.get("metrics") or {}).get("serving") or {}
     console.print(f"[green]Promoted[/green] {job['id']} — new requests for {job['base_model']} now route to it.")
+    if verdict:
+        console.print(f"Verdict: {verdict.get('status')} — {verdict.get('reason')}")
+    if serving:
+        loaded = "[green]loaded live[/green]" if serving.get("loaded") else "[yellow]not loaded live[/yellow]"
+        console.print(f"Serving: {loaded} — {serving.get('detail')}")
+        if serving.get("manifest"):
+            console.print(f"Manifest: {serving['manifest']}")
+        if serving.get("manifest_error"):
+            console.print(f"[red]{serving['manifest_error']}[/red]")
 
 
 @finetune_app.command("rollback")

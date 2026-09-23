@@ -343,7 +343,7 @@ export async function previewFineTuneDataset(jobId: string, lines = 5): Promise<
   return resp.json()
 }
 
-async function fineTuneJobAction(jobId: string, action: 'promote' | 'rollback'): Promise<FineTuneJob> {
+async function fineTuneJobAction(jobId: string, action: string): Promise<FineTuneJob> {
   const resp = await fetch(`/v1/finetune/jobs/${jobId}/${action}`, {
     method: 'POST',
     headers: authHeaders(),
@@ -354,7 +354,8 @@ async function fineTuneJobAction(jobId: string, action: 'promote' | 'rollback'):
   return resp.json()
 }
 
-export const promoteFineTuneJob = (jobId: string): Promise<FineTuneJob> => fineTuneJobAction(jobId, 'promote')
+export const promoteFineTuneJob = (jobId: string, force = false): Promise<FineTuneJob> =>
+  fineTuneJobAction(jobId, force ? 'promote?force=true' : 'promote')
 export const rollbackFineTuneJob = (jobId: string): Promise<FineTuneJob> => fineTuneJobAction(jobId, 'rollback')
 
 // Mirrors src/finetuning/events.py's publish_finetune_event() payload.
@@ -438,5 +439,100 @@ export async function getUsage(days = 30): Promise<UsageSummary> {
   if (!resp.ok) {
     throw new Error(`Failed to load usage (${resp.status})`)
   }
+  return resp.json()
+}
+
+
+// ── Guided fine-tune (src/finetuning/guided.py; POST /v1/finetune/plans) ──────
+
+export interface CatalogModel {
+  hf_id: string
+  short_name: string
+  params_b: number
+  license: string
+  context: number
+  vram_serve_gb: number
+  vram_qlora_gb: number
+  vram_lora_bf16_gb: number
+  notes: string
+}
+
+export interface ModelCatalog {
+  models: CatalogModel[]
+  default: string
+  detected_gpus: { name: string; vram_gb: number }[]
+}
+
+export interface GuidedPlanRequest {
+  repositories: string[]
+  goal: string
+  base_model: string
+  epochs: number
+  holdout_ratio: number
+  gpus?: { name: string; vram_gb: number }[]
+  gpu_hourly_cost_usd?: number
+}
+
+export interface TrainingPlan {
+  base_model: string
+  method: string
+  fits: boolean
+  gpu_count: number
+  gpu_name: string | null
+  vram_available_gb: number
+  vram_required_gb: number
+  train_examples: number
+  holdout_examples: number
+  epochs: number
+  total_steps: number
+  lora_r: number
+  estimated_tokens: number
+  estimated_hours: number | null
+  estimate_basis: string
+  estimated_cost_usd: number | null
+  reasons: string[]
+}
+
+export interface GuidedPlan {
+  job_id: string
+  status: string
+  base_model: string
+  dataset: {
+    goal: string
+    repositories: string[]
+    per_repository: Record<string, number>
+    trajectories: number
+    total_examples: number
+    dropped_by_secret_scan: number
+    records_with_pii_redacted: number
+    warnings: string[]
+  }
+  manifest: Record<string, unknown>
+  plan: TrainingPlan
+}
+
+export async function getModelCatalog(): Promise<ModelCatalog> {
+  const resp = await fetch('/v1/finetune/catalog', { headers: authHeaders() })
+  if (!resp.ok) throw new Error(`Failed to load the model catalog (${resp.status})`)
+  return resp.json()
+}
+
+export async function createGuidedPlan(req: GuidedPlanRequest): Promise<GuidedPlan> {
+  const resp = await fetch('/v1/finetune/plans', {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  if (!resp.ok) throw new Error(`Planning failed (${resp.status}): ${await resp.text()}`)
+  return resp.json()
+}
+
+export async function approveGuidedPlan(jobId: string, force = false): Promise<FineTuneJob> {
+  const resp = await fetch(`/v1/finetune/plans/${jobId}/approve`, {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ force }),
+  })
+  if (!resp.ok) throw new Error(`Approval failed (${resp.status}): ${await resp.text()}`)
   return resp.json()
 }

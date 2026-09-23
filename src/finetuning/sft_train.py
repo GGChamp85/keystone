@@ -20,7 +20,7 @@ logger = structlog.get_logger(__name__)
 
 @dataclass
 class SFTTrainingConfig:
-    base_model: str = "Qwen/Qwen2.5-Coder-32B-Instruct"
+    base_model: str = "Qwen/Qwen2.5-Coder-7B-Instruct"  # the catalog default SLM (src/inference/catalog.py)
     adapter_path: str | None = None  # Previous LoRA adapter to continue from
     training_data: str = ""
     eval_data: str | None = None  # held-out split (src/finetuning/manifest.py)

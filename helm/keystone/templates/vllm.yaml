@@ -145,6 +145,12 @@ spec:
                   {{- if $cfg.kvCacheDtype }}
                   --kv-cache-dtype={{ $cfg.kvCacheDtype }} \
                   {{- end }}
+                  {{- if $cfg.lora.enabled }}
+                  --enable-lora --max-lora-rank={{ $cfg.lora.maxRank }} --max-loras={{ $cfg.lora.maxLoras }} \
+                  {{- if $cfg.lora.modules }}
+                  --lora-modules{{ range $cfg.lora.modules }} {{ .name }}={{ .path }}{{ end }} \
+                  {{- end }}
+                  {{- end }}
                   --port=8000
               else
                 until ray start --address="${HEAD_ADDR}:6379" --num-gpus={{ $cfg.gpuCount }} --disable-usage-stats --block; do
@@ -173,11 +179,28 @@ spec:
             {{- if $cfg.kvCacheDtype }}
             - "--kv-cache-dtype={{ $cfg.kvCacheDtype }}"
             {{- end }}
+            {{- if $cfg.lora.enabled }}
+            # Promoted fine-tuned adapters (src/inference/lora_registry.py): served by name next to the
+            # base model. `modules` is the restart-time list; live loads use /v1/load_lora_adapter.
+            - "--enable-lora"
+            - "--max-lora-rank={{ $cfg.lora.maxRank }}"
+            - "--max-loras={{ $cfg.lora.maxLoras }}"
+            {{- if $cfg.lora.modules }}
+            - "--lora-modules"
+            {{- range $cfg.lora.modules }}
+            - "{{ .name }}={{ .path }}"
+            {{- end }}
+            {{- end }}
+            {{- end }}
             - "--port=8000"
           {{- end }}
           env:
             - name: VLLM_NO_USAGE_STATS
               value: "1"
+            {{- if $cfg.lora.enabled }}
+            - name: VLLM_ALLOW_RUNTIME_LORA_UPDATING
+              value: "True"
+            {{- end }}
             - name: HF_HUB_DISABLE_TELEMETRY
               value: "1"
             {{- if $.Values.modelCache.hfOffline }}

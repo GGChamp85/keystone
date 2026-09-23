@@ -9,7 +9,10 @@ Domain adaptation on internal codebases using low-rank adaptation.
 from __future__ import annotations
 
 import os
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 import structlog
 
@@ -18,9 +21,45 @@ from src.finetuning._common import warmup_kwargs
 logger = structlog.get_logger(__name__)
 
 
+ProgressCallback = Callable[[dict[str, Any]], None]
+
+
+def make_progress_callback(report: ProgressCallback):
+    """A transformers TrainerCallback that reports every logged step (loss, eval loss, step/total, elapsed,
+    ETA) to `report` — the live view an admin watches in `keystone finetune watch` and the web UI. Built
+    inside a factory so this module stays importable without transformers installed."""
+    from transformers import TrainerCallback
+
+    started = time.monotonic()
+
+    class _KeystoneProgress(TrainerCallback):
+        def on_log(self, args, state, control, logs=None, **kwargs):
+            logs = logs or {}
+            step = int(getattr(state, "global_step", 0) or 0)
+            total = int(getattr(state, "max_steps", 0) or 0)
+            elapsed = time.monotonic() - started
+            eta = (elapsed / step) * (total - step) if step and total else None
+            payload = {
+                "step": step,
+                "total_steps": total,
+                "epoch": logs.get("epoch"),
+                "loss": logs.get("loss"),
+                "eval_loss": logs.get("eval_loss"),
+                "learning_rate": logs.get("learning_rate"),
+                "elapsed_seconds": round(elapsed, 1),
+                "eta_seconds": round(eta, 1) if eta is not None else None,
+            }
+            try:
+                report(payload)
+            except Exception as exc:  # a progress hiccup must never fail the training run
+                logger.warning("lora.progress_callback_failed", error=str(exc))
+
+    return _KeystoneProgress()
+
+
 @dataclass
 class LoRATrainingConfig:
-    base_model: str = "Qwen/Qwen2.5-Coder-32B-Instruct"
+    base_model: str = "Qwen/Qwen2.5-Coder-7B-Instruct"  # the catalog default SLM (src/inference/catalog.py)
     training_data: str = ""
     eval_data: str | None = None  # held-out split (src/finetuning/manifest.py) — without it, a run has no
     # way to tell "training loss went down" from "the model actually got better," and no way to compare
@@ -60,6 +99,9 @@ class LoRATrainingConfig:
     seed: int = 42
     wandb_project: str | None = "keystone-finetuning"
     hf_token: str | None = None
+    # Runtime-only (not part of the persisted job config): called with a progress dict — step, total_steps,
+    # loss, eval_loss, elapsed_seconds, eta_seconds — after every logged step, from the training thread.
+    progress: ProgressCallback | None = field(default=None, repr=False, compare=False)
 
 
 def run_lora_training(config: LoRATrainingConfig) -> dict:
@@ -186,10 +228,24 @@ def run_lora_training(config: LoRATrainingConfig) -> dict:
         data_collator=data_collator,
     )
 
+    if config.progress is not None:
+        trainer.add_callback(make_progress_callback(config.progress))
+
+    # The verdict needs the BASE model's loss on the same held-out data. A freshly initialised LoRA
+    # (B = 0) leaves the model's output identical to the base, so evaluating before the first step
+    # is exactly the base model's held-out loss — no second model load.
+    base_eval_loss = None
+    if eval_dataset is not None:
+        logger.info("lora.base_eval_start")
+        base_eval_loss = trainer.evaluate().get("eval_loss")
+        logger.info("lora.base_eval_done", base_eval_loss=base_eval_loss)
+
     logger.info("lora.training_start")
     train_result = trainer.train()
 
     eval_metrics = trainer.evaluate() if eval_dataset is not None else {}
+    train_tokens = int(sum(len(ids) for ids in tokenized["input_ids"])) * max(config.num_epochs, 1)
+    runtime = float(train_result.metrics.get("train_runtime", 0) or 0)
 
     # Save adapter
     adapter_path = os.path.join(config.output_dir, "adapter")
@@ -201,6 +257,9 @@ def run_lora_training(config: LoRATrainingConfig) -> dict:
         "train_runtime": train_result.metrics.get("train_runtime", 0),
         "train_samples_per_second": train_result.metrics.get("train_samples_per_second", 0),
         "eval_loss": eval_metrics.get("eval_loss"),
+        "base_eval_loss": base_eval_loss,
+        "train_tokens": train_tokens,
+        "train_tokens_per_second": round(train_tokens / runtime, 1) if runtime > 0 else None,
         "adapter_path": adapter_path,
     }
     logger.info("lora.training_complete", **metrics)

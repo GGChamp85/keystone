@@ -15,10 +15,12 @@ through the real (torch-requiring, GPU-less-here) training path.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import httpx
 import pytest
@@ -62,6 +64,17 @@ async def api_key(tenant_id):
     return full_key
 
 
+@pytest.fixture(autouse=True)
+def _finetuning_output_dir(tmp_path, monkeypatch):
+    """Promotion writes the real lora_modules manifest into FINETUNING_OUTPUT_DIR; give it a writable one."""
+    from src.config import get_settings
+
+    monkeypatch.setenv("FINETUNING_OUTPUT_DIR", str(tmp_path / "finetuning-out"))
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
 @asynccontextmanager
 async def running_client() -> AsyncIterator[httpx.AsyncClient]:
     app = create_app()
@@ -73,6 +86,11 @@ async def running_client() -> AsyncIterator[httpx.AsyncClient]:
 
 def _headers(key: str) -> dict:
     return {"Authorization": f"Bearer {key}"}
+
+
+# Metrics a real trainer run writes when the adapter beat the base model on the held-out split — what the
+# promotion verdict gate (src/finetuning/verdict.py) requires before a non-forced promote.
+PASSING = {"base_eval_loss": 1.0, "eval_loss": 0.8}
 
 
 async def _make_job(tenant_id, **overrides) -> uuid.UUID:
@@ -218,12 +236,24 @@ async def test_promote_requires_a_completed_job_with_an_output_path(tenant_id, a
         assert resp.status_code == 409
 
 
+async def test_promote_refuses_a_job_without_a_held_out_comparison(tenant_id, api_key):
+    """No base_eval_loss -> verdict unknown -> 409 with the reason (an admin may force; see
+    tests/test_finetune_promote_gate.py)."""
+    job_id = await _make_job(
+        tenant_id, status="completed", output_model_path="/data/adapters/no-base", metrics={"eval_loss": 0.3}
+    )
+    async with running_client() as client:
+        resp = await client.post(f"/v1/finetune/jobs/{job_id}/promote", headers=_headers(api_key))
+        assert resp.status_code == 409
+        assert "verdict unknown" in resp.json()["detail"] and "force=true" in resp.json()["detail"]
+
+
 async def test_promote_creates_a_real_default_adapter(tenant_id, api_key):
     job_id = await _make_job(
         tenant_id,
         status="completed",
         output_model_path="/data/adapters/real-adapter",
-        metrics={"eval_loss": 0.3},
+        metrics=PASSING,
     )
     async with running_client() as client:
         resp = await client.post(f"/v1/finetune/jobs/{job_id}/promote", headers=_headers(api_key))
@@ -237,11 +267,15 @@ async def test_promote_creates_a_real_default_adapter(tenant_id, api_key):
         assert adapter.is_default is True
         assert adapter.path == "/data/adapters/real-adapter"
         assert adapter.base_model_id == "Qwen/Qwen2.5-Coder-0.5B"
+    serving = resp.json()["metrics"]["serving"]
+    assert serving["manifest_error"] is None and serving["manifest"].endswith("lora_modules.json")
+    manifest = json.loads(await asyncio.to_thread(Path(serving["manifest"]).read_text))
+    assert any(m["path"] == "/data/adapters/real-adapter" for m in manifest["modules"]["Qwen/Qwen2.5-Coder-0.5B"])
 
 
 async def test_promoting_a_second_job_demotes_the_previous_default(tenant_id, api_key):
-    job_a = await _make_job(tenant_id, status="completed", output_model_path="/data/adapters/a")
-    job_b = await _make_job(tenant_id, status="completed", output_model_path="/data/adapters/b")
+    job_a = await _make_job(tenant_id, status="completed", output_model_path="/data/adapters/a", metrics=PASSING)
+    job_b = await _make_job(tenant_id, status="completed", output_model_path="/data/adapters/b", metrics=PASSING)
 
     async with running_client() as client:
         assert (await client.post(f"/v1/finetune/jobs/{job_a}/promote", headers=_headers(api_key))).status_code == 200
@@ -257,7 +291,7 @@ async def test_promoting_a_second_job_demotes_the_previous_default(tenant_id, ap
 
 
 async def test_rollback_retires_the_adapter_and_clears_default(tenant_id, api_key):
-    job_id = await _make_job(tenant_id, status="completed", output_model_path="/data/adapters/x")
+    job_id = await _make_job(tenant_id, status="completed", output_model_path="/data/adapters/x", metrics=PASSING)
     async with running_client() as client:
         await client.post(f"/v1/finetune/jobs/{job_id}/promote", headers=_headers(api_key))
         resp = await client.post(f"/v1/finetune/jobs/{job_id}/rollback", headers=_headers(api_key))

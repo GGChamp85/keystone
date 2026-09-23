@@ -121,6 +121,14 @@ vllm:
     # unset until verified on real hardware. See
     # src/inference/config.py's VLLMConfig.kv_cache_dtype.
     kvCacheDtype: ""
+    # Promoted fine-tuned adapters served next to the base model (src/inference/lora_registry.py).
+    # enabled also sets VLLM_ALLOW_RUNTIME_LORA_UPDATING so a promotion loads live, no restart;
+    # `modules` is the restart-time list — copy it from <FINETUNING_OUTPUT_DIR>/lora_modules.json.
+    lora:
+      enabled: false
+      maxRank: 64
+      maxLoras: 4
+      modules: []  # - { name: tenant-xxxx-lora-yyyy, path: /data/finetuning/output/guided/<job>/adapter }
     autoscaling:
       enabled: false
       minReplicas: 1
@@ -156,6 +164,14 @@ vllm:
     replicas: 1
     nodeCount: 1
     kvCacheDtype: ""
+    # Promoted fine-tuned adapters served next to the base model (src/inference/lora_registry.py).
+    # enabled also sets VLLM_ALLOW_RUNTIME_LORA_UPDATING so a promotion loads live, no restart;
+    # `modules` is the restart-time list — copy it from <FINETUNING_OUTPUT_DIR>/lora_modules.json.
+    lora:
+      enabled: false
+      maxRank: 64
+      maxLoras: 4
+      modules: []  # - { name: tenant-xxxx-lora-yyyy, path: /data/finetuning/output/guided/<job>/adapter }
     autoscaling:
       enabled: false
       minReplicas: 1
@@ -177,6 +193,14 @@ vllm:
     replicas: 1
     nodeCount: 1
     kvCacheDtype: ""
+    # Promoted fine-tuned adapters served next to the base model (src/inference/lora_registry.py).
+    # enabled also sets VLLM_ALLOW_RUNTIME_LORA_UPDATING so a promotion loads live, no restart;
+    # `modules` is the restart-time list — copy it from <FINETUNING_OUTPUT_DIR>/lora_modules.json.
+    lora:
+      enabled: false
+      maxRank: 64
+      maxLoras: 4
+      modules: []  # - { name: tenant-xxxx-lora-yyyy, path: /data/finetuning/output/guided/<job>/adapter }
     autoscaling:
       enabled: false
       minReplicas: 1

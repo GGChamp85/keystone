@@ -1,25 +1,237 @@
 import { useEffect, useRef, useState } from 'react'
 import {
+  approveGuidedPlan,
+  createGuidedPlan,
   FINETUNE_TERMINAL_STATUSES,
   getFineTuneJob,
+  getModelCatalog,
   listFineTuneJobs,
   previewFineTuneDataset,
   promoteFineTuneJob,
   rollbackFineTuneJob,
   startFineTuneJob,
   streamFineTuneJob,
+  type CatalogModel,
   type DatasetPreview,
   type FineTuneEvent,
   type FineTuneJob,
+  type GuidedPlan,
 } from '../api'
 
 const JOB_TYPES = ['lora', 'sft', 'dpo']
 
 type ConfigRow = { key: string; value: string }
 
+function LossSparkline({ values }: { values: number[] }) {
+  const w = 600
+  const h = 120
+  const min = Math.min(...values)
+  const max = Math.max(...values)
+  const span = max - min || 1
+  const points = values
+    .map((v, i) => `${(i / Math.max(values.length - 1, 1)) * w},${h - ((v - min) / span) * (h - 10) - 5}`)
+    .join(' ')
+  return (
+    <svg className="loss-sparkline" viewBox={`0 0 ${w} ${h}`} width="100%" height={h} role="img" aria-label="training loss">
+      <polyline fill="none" stroke="currentColor" strokeWidth="2" points={points} />
+      <text x="4" y="12" fontSize="11">
+        max {max.toFixed(3)}
+      </text>
+      <text x="4" y={h - 4} fontSize="11">
+        min {min.toFixed(3)}
+      </text>
+    </svg>
+  )
+}
+
+function GuidedStep({ onStarted }: { onStarted: (jobId: string) => void }) {
+  const [catalog, setCatalog] = useState<CatalogModel[]>([])
+  const [detected, setDetected] = useState<{ name: string; vram_gb: number }[]>([])
+  const [repos, setRepos] = useState('')
+  const [goal, setGoal] = useState('')
+  const [baseModel, setBaseModel] = useState('auto')
+  const [epochs, setEpochs] = useState(1)
+  const [gpuPrice, setGpuPrice] = useState('')
+  const [gpuSpec, setGpuSpec] = useState('')
+  const [plan, setPlan] = useState<GuidedPlan | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    getModelCatalog()
+      .then((c) => {
+        setCatalog(c.models)
+        setDetected(c.detected_gpus)
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+  }, [])
+
+  async function handlePlan(e: React.FormEvent) {
+    e.preventDefault()
+    setBusy(true)
+    setError(null)
+    try {
+      const gpus = gpuSpec.trim()
+        ? gpuSpec.split(',').map((spec) => {
+            const [name, vram] = spec.trim().split(':')
+            return { name: name.trim(), vram_gb: Number(vram) }
+          })
+        : undefined
+      const created = await createGuidedPlan({
+        repositories: repos
+          .split(/\s+/)
+          .map((r) => r.trim())
+          .filter(Boolean),
+        goal: goal.trim(),
+        base_model: baseModel,
+        epochs,
+        holdout_ratio: 0.2,
+        gpus,
+        gpu_hourly_cost_usd: gpuPrice.trim() ? Number(gpuPrice) : undefined,
+      })
+      setPlan(created)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleApprove(force: boolean) {
+    if (!plan) return
+    setBusy(true)
+    setError(null)
+    try {
+      const job = await approveGuidedPlan(plan.job_id, force)
+      onStarted(job.id)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (plan) {
+    const p = plan.plan
+    const ds = plan.dataset
+    return (
+      <div className="plan-card">
+        <h3>Step 2 of 3 — Review the plan</h3>
+        <div className="stats-grid">
+          <div className="stat">
+            <span className="stat-label">Model</span>
+            <span className="stat-value">{plan.base_model.split('/').pop()}</span>
+          </div>
+          <div className="stat">
+            <span className="stat-label">Method</span>
+            <span className="stat-value">{p.method.toUpperCase()}</span>
+          </div>
+          <div className="stat">
+            <span className="stat-label">Fits</span>
+            <span className="stat-value">{p.fits ? 'Yes' : 'No'}</span>
+          </div>
+          <div className="stat">
+            <span className="stat-label">Examples</span>
+            <span className="stat-value">
+              {p.train_examples} / {p.holdout_examples} held out
+            </span>
+          </div>
+          <div className="stat">
+            <span className="stat-label">Steps</span>
+            <span className="stat-value">{p.total_steps}</span>
+          </div>
+          <div className="stat">
+            <span className="stat-label">Time</span>
+            <span className="stat-value">{p.estimated_hours !== null ? `~${p.estimated_hours} h` : '—'}</span>
+          </div>
+          <div className="stat">
+            <span className="stat-label">Cost</span>
+            <span className="stat-value">{p.estimated_cost_usd !== null ? `~$${p.estimated_cost_usd}` : '—'}</span>
+          </div>
+        </div>
+        <p className="steps-hint">
+          Hardware: {p.gpu_count} × {p.gpu_name ?? '?'} ({p.vram_available_gb} GB; needs ~{p.vram_required_gb} GB).
+          {' '}
+          {p.estimate_basis}
+        </p>
+        <p className="steps-hint">
+          Sources:{' '}
+          {Object.entries(ds.per_repository)
+            .map(([r, n]) => `${r} (${n})`)
+            .join(', ')}
+          ; accepted agent tasks: {ds.trajectories}. Safety: {ds.dropped_by_secret_scan} record(s) dropped by the
+          secret scan, {ds.records_with_pii_redacted} with PII redacted.
+        </p>
+        <ul className="plan-steps">
+          {p.reasons.map((r) => (
+            <li key={r}>{r}</li>
+          ))}
+          {ds.warnings.map((w) => (
+            <li key={w} className="error-text">
+              {w}
+            </li>
+          ))}
+        </ul>
+        {error && <p className="error-text">{error}</p>}
+        <div className="task-item-actions">
+          <button disabled={busy || !p.fits} onClick={() => handleApprove(false)}>
+            {busy ? 'Starting…' : 'Approve and train'}
+          </button>
+          {!p.fits && (
+            <button disabled={busy} onClick={() => handleApprove(true)}>
+              Start anyway (hardware not visible to the planner)
+            </button>
+          )}
+          <button className="back-link" disabled={busy} onClick={() => setPlan(null)}>
+            ← Change the description
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <form className="task-form finetune-configure-form" onSubmit={handlePlan}>
+      <h3>Step 1 of 3 — Describe</h3>
+      <label htmlFor="gf-repos">Repositories to learn from (allow-listed git URLs, one per line)</label>
+      <textarea id="gf-repos" rows={3} value={repos} onChange={(e) => setRepos(e.target.value)} />
+      <label htmlFor="gf-goal">What should the adapter get better at?</label>
+      <textarea
+        id="gf-goal"
+        rows={2}
+        placeholder="Follow this codebase's conventions when fixing bugs in the payments service"
+        value={goal}
+        onChange={(e) => setGoal(e.target.value)}
+      />
+      <label htmlFor="gf-model">Base model</label>
+      <select id="gf-model" value={baseModel} onChange={(e) => setBaseModel(e.target.value)}>
+        <option value="auto">auto — the default SLM, stepped down if it would not fit</option>
+        {catalog.map((m) => (
+          <option key={m.hf_id} value={m.hf_id}>
+            {m.short_name} — {m.params_b}B, {m.license}, QLoRA ~{m.vram_qlora_gb} GB
+          </option>
+        ))}
+      </select>
+      <label htmlFor="gf-epochs">Epochs</label>
+      <input id="gf-epochs" type="number" min={1} value={epochs} onChange={(e) => setEpochs(Number(e.target.value))} />
+      <label htmlFor="gf-gpu">
+        Target GPUs (NAME:VRAM_GB, comma-separated) — leave empty to use what the server detects
+        {detected.length > 0 ? `: ${detected.map((g) => `${g.name} ${g.vram_gb} GB`).join(', ')}` : ' (none detected)'}
+      </label>
+      <input id="gf-gpu" type="text" placeholder="NVIDIA L4:22.5" value={gpuSpec} onChange={(e) => setGpuSpec(e.target.value)} />
+      <label htmlFor="gf-price">Your GPU price (USD per GPU-hour, optional — for the cost line)</label>
+      <input id="gf-price" type="text" placeholder="0.69" value={gpuPrice} onChange={(e) => setGpuPrice(e.target.value)} />
+      {error && <p className="error-text">{error}</p>}
+      <button type="submit" disabled={busy || !repos.trim() || goal.trim().length < 10}>
+        {busy ? 'Building the dataset…' : 'Build the plan'}
+      </button>
+    </form>
+  )
+}
+
 function ConfigureStep({ onStarted }: { onStarted: (jobId: string) => void }) {
   const [jobType, setJobType] = useState('lora')
-  const [baseModel, setBaseModel] = useState('Qwen/Qwen2.5-Coder-32B-Instruct')
+  const [baseModel, setBaseModel] = useState('Qwen/Qwen2.5-Coder-7B-Instruct')
   const [trainingDataPath, setTrainingDataPath] = useState('')
   const [configRows, setConfigRows] = useState<ConfigRow[]>([{ key: 'num_epochs', value: '3' }])
   const [starting, setStarting] = useState(false)
@@ -164,12 +376,22 @@ function JobProgressView({ jobId, onBack }: { jobId: string; onBack: () => void 
   const status = latest?.status ?? job?.status ?? 'pending'
   const isDone = FINETUNE_TERMINAL_STATUSES.has(status)
   const canPromote = job?.status === 'completed' && !!job.output_model_path
+  type Progress = { step: number; total_steps: number; loss?: number | null; eta_seconds?: number | null }
+  const progress = events
+    .map((ev) => ev.metrics as Partial<Progress> | undefined)
+    .filter((m): m is Progress => !!m && typeof m.step === 'number' && typeof m.total_steps === 'number')
+  const losses = progress.map((p) => p.loss).filter((l): l is number => typeof l === 'number')
+  const lastLoss = losses.length ? losses[losses.length - 1] : null
+  const eta = progress.length ? (progress[progress.length - 1].eta_seconds ?? null) : null
+  const verdict = (job?.metrics?.verdict ?? null) as
+    | { status: string; reason: string; base_eval_loss: number | null; eval_loss: number | null }
+    | null
 
-  async function handlePromote() {
+  async function handlePromote(force = false) {
     setBusy(true)
     setActionError(null)
     try {
-      const updated = await promoteFineTuneJob(jobId)
+      const updated = await promoteFineTuneJob(jobId, force)
       setJob(updated)
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err))
@@ -242,23 +464,62 @@ function JobProgressView({ jobId, onBack }: { jobId: string; onBack: () => void 
           <span className="stat-value">{status}</span>
         </div>
         <div className="stat">
+          <span className="stat-label">Step</span>
+          <span className="stat-value">
+            {progress.length > 0 ? `${progress[progress.length - 1].step} / ${progress[progress.length - 1].total_steps}` : '—'}
+          </span>
+        </div>
+        <div className="stat">
+          <span className="stat-label">Loss</span>
+          <span className="stat-value">{lastLoss !== null ? lastLoss.toFixed(4) : '—'}</span>
+        </div>
+        <div className="stat">
+          <span className="stat-label">ETA</span>
+          <span className="stat-value">{eta !== null ? `${Math.round(eta / 60)} min` : '—'}</span>
+        </div>
+        <div className="stat">
           <span className="stat-label">Latest message</span>
           <span className="stat-value">{latest?.message ?? '—'}</span>
         </div>
       </div>
+
+      {losses.length > 1 && (
+        <div className="plan-card">
+          <h3>Training loss</h3>
+          <LossSparkline values={losses} />
+        </div>
+      )}
 
       {isDone && (
         <div className={`result-card ${status === 'completed' ? 'result-ok' : 'result-error'}`}>
           <h3>{status === 'completed' ? 'Verdict' : 'Failure'}</h3>
           {status === 'completed' ? (
             <>
-              <p>Training completed. Real metrics from this run:</p>
+              {verdict && (
+                <p>
+                  <strong>
+                    {verdict.status === 'pass'
+                      ? '✅ Beats the base model'
+                      : verdict.status === 'fail'
+                        ? '❌ Does not beat the base model'
+                        : '⚠️ No held-out comparison'}
+                  </strong>
+                  {' — '}
+                  {verdict.reason}
+                </p>
+              )}
+              <p>Real metrics from this run:</p>
               <pre className="finetune-dataset-record">{JSON.stringify(job?.metrics ?? latest?.metrics ?? {}, null, 2)}</pre>
               {job?.output_model_path && <p>Adapter: <code>{job.output_model_path}</code></p>}
               <div className="finetune-verdict-actions">
-                {canPromote && (
-                  <button disabled={busy} onClick={handlePromote}>
+                {canPromote && (!verdict || verdict.status === 'pass') && (
+                  <button disabled={busy} onClick={() => handlePromote(false)}>
                     {busy ? 'Promoting…' : 'Promote to default'}
+                  </button>
+                )}
+                {canPromote && verdict && verdict.status !== 'pass' && (
+                  <button disabled={busy} onClick={() => handlePromote(true)}>
+                    {busy ? 'Promoting…' : 'Promote anyway (admin, audited)'}
                   </button>
                 )}
                 <button disabled={busy} onClick={handleRollback}>
@@ -353,7 +614,7 @@ function JobListView({ onOpenJob, onNewJob }: { onOpenJob: (jobId: string) => vo
 }
 
 export function FineTunePanel({ onBack }: { onBack: () => void }) {
-  const [mode, setMode] = useState<'list' | 'configure' | 'progress'>('list')
+  const [mode, setMode] = useState<'list' | 'guided' | 'configure' | 'progress'>('list')
   const [activeJobId, setActiveJobId] = useState<string | null>(null)
 
   return (
@@ -363,8 +624,8 @@ export function FineTunePanel({ onBack }: { onBack: () => void }) {
       </button>
       <h2>Fine-tune</h2>
       <p className="plan-summary">
-        Train a LoRA/SFT/DPO adapter on your own repositories — pick a real training-data JSONL, watch progress
-        live, then promote or roll back the result.
+        Describe what the adapter should learn, review the plan and its cost, approve, watch it train, then promote
+        it — or bring your own JSONL for full control.
       </p>
 
       {mode === 'list' && (
@@ -373,8 +634,28 @@ export function FineTunePanel({ onBack }: { onBack: () => void }) {
             setActiveJobId(id)
             setMode('progress')
           }}
-          onNewJob={() => setMode('configure')}
+          onNewJob={() => setMode('guided')}
         />
+      )}
+
+      {mode === 'guided' && (
+        <>
+          <button className="back-link" onClick={() => setMode('list')}>
+            ← All jobs
+          </button>
+          <GuidedStep
+            onStarted={(id) => {
+              setActiveJobId(id)
+              setMode('progress')
+            }}
+          />
+          <p className="steps-hint">
+            Prefer to supply your own training JSONL and every hyperparameter?{' '}
+            <button className="back-link" onClick={() => setMode('configure')}>
+              Advanced job →
+            </button>
+          </p>
+        </>
       )}
 
       {mode === 'configure' && (

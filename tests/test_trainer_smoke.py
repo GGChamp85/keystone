@@ -89,6 +89,8 @@ def test_lora_trainer_runs_for_real_on_cpu_and_saves_a_loadable_adapter(tmp_path
         wandb_project=None,
     )
 
+    progress: list[dict] = []
+    config.progress = progress.append
     metrics = run_lora_training(config)
 
     adapter_path = Path(metrics["adapter_path"])
@@ -96,6 +98,13 @@ def test_lora_trainer_runs_for_real_on_cpu_and_saves_a_loadable_adapter(tmp_path
     assert any(p.name.startswith("adapter_model") for p in adapter_path.iterdir())
     assert isinstance(metrics["train_loss"], float) and math.isfinite(metrics["train_loss"])
     assert isinstance(metrics["eval_loss"], float) and math.isfinite(metrics["eval_loss"])
+    # The base model was evaluated on the same held-out data BEFORE training (the verdict's baseline),
+    # and the real throughput was measured (what the planner replaces its estimate with).
+    assert isinstance(metrics["base_eval_loss"], float) and math.isfinite(metrics["base_eval_loss"])
+    assert metrics["train_tokens"] > 0 and metrics["train_tokens_per_second"] > 0
+    # Live progress reached the callback from inside the training thread, one report per logged step.
+    assert progress and progress[-1]["step"] == 2 and progress[-1]["total_steps"] == 2
+    assert any(p.get("loss") is not None for p in progress)
 
     # The artifact must be a real, loadable adapter — the thing promote_job
     # registers and vLLM would serve — not just files on disk.

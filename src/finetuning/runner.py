@@ -37,6 +37,7 @@ from src.config import get_settings
 from src.db.connection import get_db_context
 from src.db.models import FineTuneJob
 from src.finetuning.events import publish_finetune_event
+from src.finetuning.verdict import compute_verdict
 
 logger = structlog.get_logger(__name__)
 
@@ -88,6 +89,18 @@ async def default_finetune_runner(job: FineTuneJobSnapshot) -> dict[str, Any]:
 
     config = _build_config(config_cls, job["base_model"], job.get("config") or {})
     loop = asyncio.get_running_loop()
+    if hasattr(config, "progress"):
+        job_id = job["id"]
+
+        def report(payload: dict[str, Any]) -> None:
+            # Called from the training thread: hand the event to the loop the API runs on.
+            step, total = payload.get("step"), payload.get("total_steps")
+            message = f"step {step}/{total}" + (
+                f", loss {payload['loss']:.4f}" if payload.get("loss") is not None else ""
+            )
+            asyncio.run_coroutine_threadsafe(publish_finetune_event(job_id, "running", message, metrics=payload), loop)
+
+        config.progress = report
     return await loop.run_in_executor(None, run_fn, config)
 
 
@@ -147,6 +160,7 @@ async def run_finetune_job(job_id: UUID, runner: FineTuneRunner | None = None) -
         logger.error("finetune.job_failed", job_id=str(job_id), error=str(exc))
         return {"status": "failed", "error": str(exc)}
 
+    metrics = {**metrics, "verdict": compute_verdict(metrics).to_dict()}
     async with get_db_context() as db:
         job = await db.get(FineTuneJob, job_id)
         if job is not None:

@@ -25,11 +25,17 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 
 from src.api.middleware.auth import require_scope
-from src.api.models.requests import StartFineTuneRequest
+from src.api.models.requests import ApprovePlanRequest, GuidedPlanRequest, StartFineTuneRequest
 from src.api.models.responses import FineTuneJobResponse
 from src.db.connection import get_db_context
-from src.db.models import AdapterStatus, FineTuneJob, ModelAdapter, Tenant
+from src.db.models import AdapterStatus, APIKey, AuditLog, FineTuneJob, ModelAdapter, Tenant, User, UserRole
+from src.finetuning import guided
 from src.finetuning.runner import _JOB_TYPE_CONFIGS, start_finetune_job
+from src.finetuning.verdict import compute_verdict
+from src.hardware import GPU, detect_gpus
+from src.inference.catalog import CATALOG, default_slm
+from src.inference.lora_registry import serve_promoted_adapter
+from src.memory.ingestion import InvalidRepositoryURLError
 
 router = APIRouter(prefix="/v1/finetune", tags=["finetune"])
 
@@ -66,6 +72,67 @@ def _validate_config(job_type: str, config: dict) -> None:
                 f"Unknown config field(s) for a {job_type} job: {sorted(unknown)}. Valid fields: {sorted(known_fields)}"
             ),
         )
+
+
+@router.get("/catalog")
+async def model_catalog(auth: tuple = Depends(require_scope("finetune"))):
+    """The SLM catalog (src/inference/catalog.py) with VRAM footprints, plus the GPUs detected on this host."""
+    return {
+        "models": [e.to_dict() for e in CATALOG],
+        "default": default_slm().hf_id,
+        "detected_gpus": [g.to_dict() for g in detect_gpus()],
+    }
+
+
+@router.post("/plans", status_code=201)
+async def create_guided_plan(req: GuidedPlanRequest, auth: tuple = Depends(require_scope("finetune"))):
+    """Describe → plan & cost. Builds the dataset from the repositories' real history (and this tenant's
+    accepted agent tasks), splits it, picks QLoRA/LoRA for the hardware, and persists a `planned` job.
+    Nothing trains until POST /plans/{id}/approve."""
+    tenant: Tenant = auth[1]
+    try:
+        plan = await guided.create_plan(
+            tenant.id,
+            repositories=req.repositories,
+            goal=req.goal,
+            base_model=req.base_model,
+            holdout_ratio=req.holdout_ratio,
+            epochs=req.epochs,
+            lora_r=req.lora_r,
+            gpus=[GPU(name=g.name, vram_gb=g.vram_gb) for g in req.gpus] if req.gpus is not None else None,
+            gpu_hourly_cost_usd=req.gpu_hourly_cost_usd,
+            clone=guided.default_clone,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except InvalidRepositoryURLError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return plan.to_dict()
+
+
+@router.get("/plans/{job_id}")
+async def get_guided_plan(job_id: UUID, auth: tuple = Depends(require_scope("finetune"))):
+    tenant: Tenant = auth[1]
+    job = await _get_owned_job(job_id, tenant.id)
+    body = (job.config or {}).get("guided")
+    if not body:
+        raise HTTPException(status_code=404, detail="not a guided plan")
+    return {"job_id": str(job.id), "status": job.status, "base_model": job.base_model, **body}
+
+
+@router.post("/plans/{job_id}/approve", response_model=FineTuneJobResponse)
+async def approve_guided_plan(
+    job_id: UUID, req: ApprovePlanRequest | None = None, auth: tuple = Depends(require_scope("finetune"))
+):
+    """Approve → train: the planned job becomes pending and starts (Temporal, or the asyncio fallback)."""
+    tenant: Tenant = auth[1]
+    try:
+        job = await guided.approve_plan(job_id, tenant.id, force=bool(req and req.force))
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except guided.PlanNotApprovable as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _to_response(job)
 
 
 @router.post("/jobs", response_model=FineTuneJobResponse, status_code=201)
@@ -163,7 +230,12 @@ def _read_dataset_preview(path: Path, lines: int) -> tuple[int, list[dict]] | No
 
 
 @router.post("/jobs/{job_id}/promote", response_model=FineTuneJobResponse)
-async def promote_job(job_id: UUID, auth: tuple = Depends(require_scope("finetune"))):
+async def promote_job(
+    job_id: UUID,
+    request: Request,
+    force: bool = Query(default=False, description="Admin only: promote despite a fail/unknown verdict"),
+    auth: tuple = Depends(require_scope("finetune")),
+):
     """
     Registers (or updates) this job's adapter as the tenant's promoted
     default for its base model — the one src/inference/model_router.py's
@@ -171,14 +243,32 @@ async def promote_job(job_id: UUID, auth: tuple = Depends(require_scope("finetun
     whatever was previously the default for the same (tenant, base_model)
     first: routing must never have two "default" adapters for the same
     base model at once.
+
+    Gated by the verdict (src/finetuning/verdict.py): the adapter must have
+    beaten the base model on the held-out split. A `fail` or `unknown`
+    verdict is refused (409) unless an admin passes `force=true`, which is
+    written to the audit log. Then the adapter is made servable
+    (src/inference/lora_registry.py): manifest for the next restart, live
+    load on the serving role now.
     """
+    api_key: APIKey = auth[0]
     tenant: Tenant = auth[1]
+    user: User | None = auth[2]
     job = await _get_owned_job(job_id, tenant.id)
     if job.status != "completed" or not job.output_model_path:
         raise HTTPException(
             status_code=409,
             detail="Only a completed job with a real output_model_path can be promoted",
         )
+    verdict = compute_verdict(job.metrics)
+    if not verdict.passed:
+        if not force:
+            raise HTTPException(
+                status_code=409,
+                detail=f"verdict {verdict.status}: {verdict.reason}. An admin may promote anyway with ?force=true.",
+            )
+        if user is None or user.role != UserRole.ADMIN:
+            raise HTTPException(status_code=403, detail="force=true requires an admin user linked to this API key")
 
     async with get_db_context() as db:
         existing_defaults = (
@@ -218,6 +308,29 @@ async def promote_job(job_id: UUID, auth: tuple = Depends(require_scope("finetun
                     metrics=job.metrics or {},
                 )
             )
+        promoted = (
+            existing_for_job
+            or (await db.execute(select(ModelAdapter).where(ModelAdapter.job_id == job_id))).scalar_one()
+        )
+        adapter_name, adapter_path = promoted.name, promoted.path
+        if not verdict.passed:
+            db.add(
+                AuditLog(
+                    actor=user.email if user else api_key.key_prefix,
+                    action="finetune.promote_forced",
+                    target_type="finetune_job",
+                    target_id=str(job_id),
+                    metadata_={"verdict": verdict.to_dict(), "adapter": adapter_name},
+                    source_ip=request.client.host if request.client else None,
+                )
+            )
+
+    serving = await serve_promoted_adapter(adapter_name, adapter_path, job.base_model)
+    async with get_db_context() as db:
+        refreshed = await db.get(FineTuneJob, job_id)
+        if refreshed is not None:
+            refreshed.metrics = {**(refreshed.metrics or {}), "serving": serving}
+            job = refreshed
     return _to_response(job)
 
 

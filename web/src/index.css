@@ -857,3 +857,9 @@ button:disabled {
 .spend-table tbody tr:last-child td {
   border-bottom: none;
 }
+
+
+.loss-sparkline {
+  color: var(--accent);
+  display: block;
+}

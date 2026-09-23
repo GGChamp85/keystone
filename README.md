@@ -273,9 +273,9 @@ The full pipeline is real and wired end to end: real training-data sources, a re
 **From the CLI**:
 
 ```bash
-keystone finetune start lora Qwen/Qwen2.5-Coder-32B-Instruct /data/finetune/train.jsonl --set num_epochs=3
+keystone finetune start lora Qwen/Qwen2.5-Coder-7B-Instruct /data/finetune/train.jsonl --set num_epochs=3
 keystone finetune watch <job-id>       # live progress until it reaches a terminal status
-keystone finetune promote <job-id>     # register as the tenant's default adapter for its base model
+keystone finetune promote <job-id>     # verdict-gated: served in seconds once it beats the base model
 keystone finetune rollback <job-id>    # retire it — routing falls back to the base model
 ```
 
@@ -564,6 +564,7 @@ keystone/
 | `docs/airgap/OFFLINE_INSTALL_RUNBOOK.md` | Build → bundle → transfer → import → bring-up, step by step |
 | `docs/architecture/SANDBOX_ARCHITECTURE.md` | How the Firecracker/gVisor sandbox layer actually works |
 | `docs/architecture/adr/` | Architecture decision records — why ctags not tree-sitter, Ray not Kubeflow, llama.cpp in CI, RunPod via REST, vendor-neutral text |
+| `docs/guides/fine-tune-slm-on-your-repo.md` | Guided fine-tune: describe → plan & cost → approve → train → promote, with what every estimate means |
 | `docs/guides/use-from-vscode.md` | VS Code via the Continue extension: chat, edit, autocomplete and MCP memory against your gateway |
 | `docs/deployment/KUBERNETES_CLIENT_VPC.md` | Helm install, and what's verified on a real cluster vs. not |
 | `docs/deployment/RUNPOD_SETUP.md` | Step-by-step: real GPU pods on RunPod, wired to the rest of the stack |

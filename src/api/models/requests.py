@@ -141,10 +141,32 @@ class AgentTaskRequest(BaseModel):
 # ── Fine-Tuning Requests ─────────────────────────────────────
 
 
+class GPUSpec(BaseModel):
+    name: str
+    vram_gb: float = Field(..., gt=0)
+
+
+class GuidedPlanRequest(BaseModel):
+    """Describe a fine-tune in plain terms; the server builds the dataset, picks the method and returns a plan."""
+
+    repositories: list[str] = Field(..., min_length=1, description="Allow-listed git URLs to learn from")
+    goal: str = Field(..., min_length=10, max_length=2000, description="What the adapter should get better at")
+    base_model: str = Field(default="auto", description="A catalog model id, or 'auto' for the default SLM")
+    holdout_ratio: float = Field(default=0.2, ge=0.05, le=0.5)
+    epochs: int = Field(default=1, ge=1)
+    lora_r: int | None = Field(default=None, ge=1)
+    gpus: list[GPUSpec] | None = Field(default=None, description="Target hardware; omitted = detect on this host")
+    gpu_hourly_cost_usd: float | None = Field(default=None, ge=0, description="Your GPU price, for the cost line")
+
+
+class ApprovePlanRequest(BaseModel):
+    force: bool = Field(default=False, description="Start even if the planner says it does not fit")
+
+
 class StartFineTuneRequest(BaseModel):
     base_model: str = Field(
-        default="Qwen/Qwen2.5-Coder-32B-Instruct",
-        description="HuggingFace model to fine-tune",
+        default="Qwen/Qwen2.5-Coder-7B-Instruct",
+        description="HuggingFace model to fine-tune (the catalog default SLM; see GET /v1/finetune/catalog)",
     )
     job_type: Literal["lora", "sft", "dpo"] = "lora"
     training_data_path: str = Field(..., description="Path to training data within the mounted volume")
