@@ -70,6 +70,12 @@ export function TaskSubmitForm({ onSubmitted }: { onSubmitted: (taskId: string) 
   return (
     <form className="task-form" onSubmit={handleSubmit}>
       <h2>New Keystone Agents task</h2>
+      <p className="steps-hint">
+        Describe the change in plain English. The agent clones the repository, plans, edits real files with
+        tool calls, runs the repo's own tests, and opens a pull request when it's done — watch it happen live
+        from the Tasks list after you submit. A repository URL is required for real work; branch defaults to{' '}
+        <code>main</code>, and max iterations caps how many plan/fix cycles it gets before stopping.
+      </p>
 
       <label htmlFor="task">Task description</label>
       <textarea
@@ -83,7 +89,7 @@ export function TaskSubmitForm({ onSubmitted }: { onSubmitted: (taskId: string) 
 
       <div className="form-row">
         <div>
-          <label htmlFor="repo">Repository URL (optional)</label>
+          <label htmlFor="repo">Repository URL</label>
           <input
             id="repo"
             type="text"

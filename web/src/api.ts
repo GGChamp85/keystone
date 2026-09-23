@@ -691,7 +691,7 @@ export interface ChatStreamResult {
  * receives each text delta as it arrives; the result carries the timings the Playground shows.
  */
 export async function streamChat(
-  req: { model: string; messages: ChatTurn[]; temperature?: number; max_tokens?: number },
+  req: { model: string; messages: ChatTurn[]; temperature?: number; max_tokens?: number; top_p?: number },
   onDelta: (text: string) => void,
   signal: AbortSignal,
 ): Promise<ChatStreamResult> {

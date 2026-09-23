@@ -52,45 +52,36 @@ export default function App() {
   return (
     <div className="app-shell">
       <header className="app-header">
-        <h1>Keystone Agents</h1>
+        <div className="app-brand">
+          <span className="app-logo" aria-hidden="true">
+            KA
+          </span>
+          <h1>Keystone Agents</h1>
+        </div>
         <div className="api-key-bar">
           {!taskId && (
             <>
-              {view !== 'team' && (
-                <button className="nav-link" onClick={() => setView('team')}>
-                  Tasks
-                </button>
-              )}
-              {view !== 'memory' && (
-                <button className="nav-link" onClick={() => setView('memory')}>
-                  Memory
-                </button>
-              )}
-              {view !== 'finetune' && (
-                <button className="nav-link" onClick={() => setView('finetune')}>
-                  Fine-tune
-                </button>
-              )}
-              {view !== 'spend' && (
-                <button className="nav-link" onClick={() => setView('spend')}>
-                  Spend
-                </button>
-              )}
-              {view !== 'models' && (
-                <button className="nav-link" onClick={() => setView('models')}>
-                  Models
-                </button>
-              )}
-              {view !== 'playground' && (
-                <button className="nav-link" onClick={() => setView('playground')}>
-                  Playground
-                </button>
-              )}
-              {view !== 'benchmarks' && (
-                <button className="nav-link" onClick={() => setView('benchmarks')}>
-                  Benchmarks
-                </button>
-              )}
+              <button className={view === 'team' ? 'nav-link nav-link-active' : 'nav-link'} onClick={() => setView('team')}>
+                Tasks
+              </button>
+              <button className={view === 'memory' ? 'nav-link nav-link-active' : 'nav-link'} onClick={() => setView('memory')}>
+                Memory
+              </button>
+              <button className={view === 'finetune' ? 'nav-link nav-link-active' : 'nav-link'} onClick={() => setView('finetune')}>
+                Fine-tune
+              </button>
+              <button className={view === 'spend' ? 'nav-link nav-link-active' : 'nav-link'} onClick={() => setView('spend')}>
+                Spend
+              </button>
+              <button className={view === 'models' ? 'nav-link nav-link-active' : 'nav-link'} onClick={() => setView('models')}>
+                Models
+              </button>
+              <button className={view === 'playground' ? 'nav-link nav-link-active' : 'nav-link'} onClick={() => setView('playground')}>
+                Playground
+              </button>
+              <button className={view === 'benchmarks' ? 'nav-link nav-link-active' : 'nav-link'} onClick={() => setView('benchmarks')}>
+                Benchmarks
+              </button>
             </>
           )}
           <ApiKeyBar />
