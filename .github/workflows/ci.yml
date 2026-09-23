@@ -26,6 +26,10 @@ jobs:
       - run: ruff format --check src/ tests/ benchmarks/
       - name: mypy (zero errors — configured in pyproject.toml [tool.mypy])
         run: mypy
+      - name: uv.lock is in sync with pyproject.toml
+        run: pip install uv && uv lock --check
+      - name: repo-facing text stays vendor-neutral (ADR 0006)
+        run: scripts/check_vendor_neutral.sh README.md CHANGELOG.md ROADMAP.md $(find docs -name '*.md')
 
   test:
     name: Test (pytest, real Postgres/Redis/Qdrant/Docker sandbox)

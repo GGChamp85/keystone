@@ -30,6 +30,8 @@ cd web && npm install && npm run dev
 ## Before opening a PR
 
 ```bash
+uv sync --frozen --extra dev    # reproducible dev environment from uv.lock (or: pip install -e '.[dev]')
+pre-commit install              # runs the checks below on every commit (.pre-commit-config.yaml)
 ruff check src/ tests/          # lint (no --fix in CI — fix locally, then commit)
 ruff format --check src/ tests/
 mypy                            # type check src/ — CI requires zero errors (config: pyproject.toml [tool.mypy])

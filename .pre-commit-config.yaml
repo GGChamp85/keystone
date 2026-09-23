@@ -1,0 +1,31 @@
+# The same checks CI's lint job runs (.github/workflows/ci.yml), before the commit exists.
+#   pip install pre-commit && pre-commit install
+# Local hooks call the project's own pinned tools from the active environment, so the
+# versions can never drift from pyproject.toml's dev extra.
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check (--fix)
+        entry: ruff check --fix
+        language: system
+        types: [python]
+        files: ^(src|tests|benchmarks)/
+      - id: ruff-format
+        name: ruff format
+        entry: ruff format
+        language: system
+        types: [python]
+        files: ^(src|tests|benchmarks)/
+      - id: mypy
+        name: mypy (zero errors, config in pyproject.toml)
+        entry: mypy
+        language: system
+        pass_filenames: false
+        files: ^src/.*\.py$
+      - id: no-vendor-names-in-repo-facing-text
+        name: repo-facing text stays vendor-neutral (ADR 0006)
+        entry: scripts/check_vendor_neutral.sh
+        language: script
+        pass_filenames: true
+        files: ^(README\.md|CHANGELOG\.md|ROADMAP\.md|docs/.*\.md)$

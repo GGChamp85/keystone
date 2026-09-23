@@ -563,6 +563,8 @@ keystone/
 |---|---|
 | `docs/airgap/OFFLINE_INSTALL_RUNBOOK.md` | Build → bundle → transfer → import → bring-up, step by step |
 | `docs/architecture/SANDBOX_ARCHITECTURE.md` | How the Firecracker/gVisor sandbox layer actually works |
+| `docs/architecture/adr/` | Architecture decision records — why ctags not tree-sitter, Ray not Kubeflow, llama.cpp in CI, RunPod via REST, vendor-neutral text |
+| `docs/guides/use-from-vscode.md` | VS Code via the Continue extension: chat, edit, autocomplete and MCP memory against your gateway |
 | `docs/deployment/KUBERNETES_CLIENT_VPC.md` | Helm install, and what's verified on a real cluster vs. not |
 | `docs/deployment/RUNPOD_SETUP.md` | Step-by-step: real GPU pods on RunPod, wired to the rest of the stack |
 | `docs/deployment/OPENCODE_SETUP.md` | Wiring the interactive CLI to Keystone |
