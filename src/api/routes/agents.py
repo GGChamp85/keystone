@@ -14,7 +14,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from src.api.middleware.auth import require_scope
-from src.api.models.requests import AgentTaskRequest, IngestRepositoryRequest, SubmitTaskFeedbackRequest
+from src.api.models.requests import (
+    AgentTaskRequest,
+    IngestRepositoryRequest,
+    SubmitTaskFeedbackRequest,
+    TaskCostEstimateRequest,
+)
 from src.api.models.responses import (
     AgentTaskResponse,
     AgentTaskSubmittedResponse,
@@ -93,6 +98,29 @@ async def list_tasks(
     engine = get_keystone_engine()
     tasks = await engine.list_tasks(tenant.id, user_id=user_id, repository_url=repository_url, limit=limit)
     return [AgentTaskSummaryResponse(**t) for t in tasks]
+
+
+@router.post("/tasks/estimate")
+async def estimate_task(
+    req: TaskCostEstimateRequest,
+    auth: tuple = Depends(require_scope("agent")),
+):
+    """A labelled cost estimate before submitting a task — no task is created. Drawn from this tenant's own
+    completed tasks when it has any, else every completed task on this deployment, else a documented rough
+    default; `estimate_basis` always says which. Never more precise than the history backing it."""
+    from src.inference.model_router import classify_task_to_role
+    from src.orchestrator.cost_estimate import estimate_task_cost
+
+    tenant: Tenant = auth[1]
+    role = classify_task_to_role(req.task) if req.model == "auto" else req.model
+    estimate = await estimate_task_cost(
+        req.task,
+        tenant_id=tenant.id,
+        model_role=role,
+        repository_url=req.repository_url,
+        best_of_n=req.best_of_n or 1,
+    )
+    return estimate.to_dict()
 
 
 @router.get("/tasks/{task_id}", response_model=AgentTaskResponse)

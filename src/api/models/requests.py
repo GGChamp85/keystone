@@ -224,6 +224,17 @@ class AgentTaskRequest(BaseModel):
     )
 
 
+class TaskCostEstimateRequest(BaseModel):
+    """`POST /v1/keystone/tasks/estimate` — the same shape a real submission would use, no task created."""
+
+    task: str = Field(..., min_length=10, max_length=50000)
+    repository_url: str | None = Field(
+        default=None, description="Only affects the token floor, not the estimate source"
+    )
+    model: Literal["coding", "coding_fallback", "reasoning", "auto"] = Field(default="coding")
+    best_of_n: int | None = Field(default=None, ge=1)
+
+
 # ── Fine-Tuning Requests ─────────────────────────────────────
 
 

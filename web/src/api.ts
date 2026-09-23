@@ -45,6 +45,54 @@ export async function submitTask(req: TaskSubmitRequest): Promise<TaskSubmitResp
   return resp.json()
 }
 
+export interface TaskCostEstimateRequest {
+  task: string
+  repository_url?: string
+  model?: string
+  best_of_n?: number
+}
+
+export interface TaskCostEstimate {
+  estimated_prompt_tokens: number
+  estimated_completion_tokens: number
+  estimated_total_tokens: number
+  estimated_cost_usd: number | null
+  pricing_configured: boolean
+  model_role: string
+  best_of_n: number
+  sample_size: number
+  estimate_basis: string
+}
+
+export async function estimateTaskCost(req: TaskCostEstimateRequest): Promise<TaskCostEstimate> {
+  const resp = await fetch('/v1/keystone/tasks/estimate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(req),
+  })
+  if (!resp.ok) {
+    throw new Error(`Cost estimate failed (${resp.status}): ${await resp.text()}`)
+  }
+  return resp.json()
+}
+
+export interface TaskCostBreakdownRow {
+  phase: string
+  model_role: string
+  iterations: number
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  estimated_cost_usd: number
+}
+
+export interface TaskCostBreakdown {
+  pricing_configured: boolean
+  prices_per_million: Record<string, number>
+  rows: TaskCostBreakdownRow[]
+  totals: { prompt_tokens: number; completion_tokens: number; total_tokens: number; estimated_cost_usd: number }
+}
+
 export interface ModelInfo {
   id: string
   root: string
@@ -153,6 +201,22 @@ export interface ListTasksParams {
   user_id?: string
   repository_url?: string
   limit?: number
+}
+
+export interface AgentTaskDetail {
+  id: string
+  status: string
+  total_prompt_tokens: number
+  total_completion_tokens: number
+  cost_breakdown: TaskCostBreakdown
+}
+
+export async function getTask(taskId: string): Promise<AgentTaskDetail> {
+  const resp = await fetch(`/v1/keystone/tasks/${taskId}`, { headers: authHeaders() })
+  if (!resp.ok) {
+    throw new Error(`Failed to load task (${resp.status})`)
+  }
+  return resp.json()
 }
 
 export async function listTasks(params: ListTasksParams = {}): Promise<AgentTaskSummary[]> {

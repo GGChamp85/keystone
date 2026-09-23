@@ -30,6 +30,10 @@ curl -X POST http://localhost:8080/v1/keystone/tasks \
 
 Then watch: `GET /v1/keystone/tasks/{id}/stream` is a live event stream (the web UI renders it) with every tool call and result, every diff, every test run and quality finding, the review, and the pull request link. Nothing is truncated in storage: full test output, full diffs and full install logs stay on the task record.
 
+## What it will cost
+
+Before you submit, `POST /v1/keystone/tasks/estimate` (the web UI shows it live as you type) answers "roughly how many tokens, and how much": it draws on this tenant's own completed tasks when there are any, falls back to every completed task on the deployment, and only uses a documented rough default when nothing has ever completed — `estimate_basis` always says which, so the number is never presented as more precise than it is. After a task finishes, `GET /v1/keystone/tasks/{id}` returns `cost_breakdown`: the same execution trace grouped by phase and model role and priced by your `MODEL_PRICES_PER_MILLION` — the real cost, not a second guess — shown as a table in the web UI once the task completes.
+
 ## Best of N
 
 For work worth more than one attempt, set `best_of_n` on the task (or `AGENT_BEST_OF_N` for the deployment; default 1, no ceiling). The agent makes N independent attempts from the same clean base, each on its own branch in the sandbox, scores every attempt with the repository's own lint, type checks and the tests related to what it touched, and carries the best one forward as ordinary uncommitted edits into the normal quality, review and test gates. The trace shows every attempt's score and the ranking; losing branches are deleted. It multiplies model spend by N, which is why it is off by default.

@@ -169,6 +169,7 @@ class AgentTaskResponse(BaseModel):
     output_files: list[str]
     error_message: str | None
     execution_trace: list[dict[str, Any]]
+    cost_breakdown: dict[str, Any]
     sandbox_id: str | None
     temporal_workflow_id: str | None
     started_at: datetime | None

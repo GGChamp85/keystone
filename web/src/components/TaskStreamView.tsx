@@ -1,5 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
-import { isNodeEvent, isStepEvent, streamTask, TERMINAL_PHASES, type StepEvent, type TaskEvent } from '../api'
+import {
+  getTask,
+  isNodeEvent,
+  isStepEvent,
+  streamTask,
+  TERMINAL_PHASES,
+  type StepEvent,
+  type TaskCostBreakdown,
+  type TaskEvent,
+} from '../api'
+
+function usd(v: number): string {
+  return `$${v.toFixed(v < 1 ? 4 : 2)}`
+}
 
 const PHASE_ORDER = ['planning', 'coding', 'quality', 'review', 'testing', 'fixing', 'complete'] as const
 
@@ -122,6 +135,7 @@ export function TaskStreamView({ taskId, onBack }: { taskId: string; onBack: () 
   const [events, setEvents] = useState<TaskEvent[]>([])
   const [connectionError, setConnectionError] = useState<string | null>(null)
   const [connected, setConnected] = useState(true)
+  const [costBreakdown, setCostBreakdown] = useState<TaskCostBreakdown | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -156,6 +170,13 @@ export function TaskStreamView({ taskId, onBack }: { taskId: string; onBack: () 
   const phase = latest?.phase ?? 'planning'
   const isDone = latest ? Boolean(latest.final) || (TERMINAL_PHASES.has(phase) && !connected) : false
   const finalEvent = nodeEvents.find((ev) => ev.final)
+
+  useEffect(() => {
+    if (!isDone) return
+    getTask(taskId)
+      .then((t) => setCostBreakdown(t.cost_breakdown))
+      .catch(() => setCostBreakdown(null))
+  }, [isDone, taskId])
 
   return (
     <div className="task-stream-view">
@@ -257,6 +278,51 @@ export function TaskStreamView({ taskId, onBack }: { taskId: string; onBack: () 
               Commit <code>{finalEvent.commit_sha.slice(0, 12)}</code> on <code>{finalEvent.branch_name}</code>
             </p>
           )}
+        </div>
+      )}
+
+      {isDone && costBreakdown && costBreakdown.rows.length > 0 && (
+        <div className="result-card">
+          <h3>Cost</h3>
+          {!costBreakdown.pricing_configured && (
+            <p className="steps-hint">
+              Set <code>MODEL_PRICES_PER_MILLION</code> to see dollars. Tokens are recorded regardless.
+            </p>
+          )}
+          <div className="spend-table-wrap">
+            <table className="spend-table">
+              <thead>
+                <tr>
+                  <th>Phase</th>
+                  <th>Model role</th>
+                  <th>Prompt</th>
+                  <th>Completion</th>
+                  <th>Total</th>
+                  <th>Cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                {costBreakdown.rows.map((r) => (
+                  <tr key={`${r.phase}-${r.model_role}`}>
+                    <td>{r.phase}</td>
+                    <td>{r.model_role || '—'}</td>
+                    <td>{r.prompt_tokens.toLocaleString()}</td>
+                    <td>{r.completion_tokens.toLocaleString()}</td>
+                    <td>{r.total_tokens.toLocaleString()}</td>
+                    <td>{costBreakdown.pricing_configured ? usd(r.estimated_cost_usd) : '—'}</td>
+                  </tr>
+                ))}
+                <tr>
+                  <th>Total</th>
+                  <th></th>
+                  <th>{costBreakdown.totals.prompt_tokens.toLocaleString()}</th>
+                  <th>{costBreakdown.totals.completion_tokens.toLocaleString()}</th>
+                  <th>{costBreakdown.totals.total_tokens.toLocaleString()}</th>
+                  <th>{costBreakdown.pricing_configured ? usd(costBreakdown.totals.estimated_cost_usd) : '—'}</th>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

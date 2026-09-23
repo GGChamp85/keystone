@@ -1,5 +1,9 @@
 import { useEffect, useState } from 'react'
-import { listModels, submitTask, type ModelInfo } from '../api'
+import { estimateTaskCost, listModels, submitTask, type ModelInfo, type TaskCostEstimate } from '../api'
+
+function usd(v: number): string {
+  return `$${v.toFixed(v < 1 ? 4 : 2)}`
+}
 
 export function TaskSubmitForm({ onSubmitted }: { onSubmitted: (taskId: string) => void }) {
   const [task, setTask] = useState('')
@@ -10,6 +14,23 @@ export function TaskSubmitForm({ onSubmitted }: { onSubmitted: (taskId: string) 
   const [models, setModels] = useState<ModelInfo[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [estimate, setEstimate] = useState<TaskCostEstimate | null>(null)
+  const [estimating, setEstimating] = useState(false)
+
+  useEffect(() => {
+    if (task.trim().length < 10) {
+      setEstimate(null)
+      return
+    }
+    const handle = setTimeout(() => {
+      setEstimating(true)
+      estimateTaskCost({ task, repository_url: repositoryUrl || undefined, model })
+        .then(setEstimate)
+        .catch(() => setEstimate(null))
+        .finally(() => setEstimating(false))
+    }, 600) // debounced: an estimate on every keystroke would just be noise
+    return () => clearTimeout(handle)
+  }, [task, repositoryUrl, model])
 
   useEffect(() => {
     listModels()
@@ -100,6 +121,18 @@ export function TaskSubmitForm({ onSubmitted }: { onSubmitted: (taskId: string) 
           />
         </div>
       </div>
+
+      {estimating && <p className="steps-hint">Estimating cost…</p>}
+      {estimate && (
+        <p className="steps-hint">
+          Estimate: ~{estimate.estimated_total_tokens.toLocaleString()} tokens
+          {estimate.pricing_configured && estimate.estimated_cost_usd !== null
+            ? ` (~${usd(estimate.estimated_cost_usd)})`
+            : ' (no price configured for this role)'}
+          {' — '}
+          {estimate.estimate_basis}
+        </p>
+      )}
 
       {error && <p className="error-text">{error}</p>}
 

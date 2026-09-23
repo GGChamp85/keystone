@@ -602,6 +602,9 @@ class KeystoneEngine:
             task = result.scalar_one_or_none()
             if task is None:
                 return None
+            from src.orchestrator.cost_estimate import task_cost_breakdown
+
+            execution_trace = task.execution_trace or []
             return {
                 "id": task.id,
                 "user_id": task.user_id,
@@ -617,7 +620,8 @@ class KeystoneEngine:
                 "output_diff": task.output_diff,
                 "output_files": task.output_files or [],
                 "error_message": task.error_message,
-                "execution_trace": task.execution_trace or [],
+                "execution_trace": execution_trace,
+                "cost_breakdown": task_cost_breakdown(execution_trace),
                 "sandbox_id": task.sandbox_id,
                 "temporal_workflow_id": task.temporal_workflow_id,
                 "started_at": task.started_at,

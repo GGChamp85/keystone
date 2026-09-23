@@ -58,3 +58,7 @@ claims:
     docs: [CHANGELOG.md]
     tests: [tests/test_workspace_runtime_switch.py]
 
+
+  - text: "the tenant-history, platform-history and rough-default paths each in turn, the floor from the real system prompt and task tokens, `best_of_n` scaling, a real trace grouped and priced, and both routes"
+    docs: [CHANGELOG.md]
+    tests: [tests/test_cost_estimate.py]
