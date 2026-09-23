@@ -163,6 +163,11 @@ class SandboxManager:
         self._handles_by_task = {k: v for k, v in self._handles_by_task.items() if v != sandbox_id}
         logger.info("sandbox.destroyed", sandbox_id=sandbox_id)
 
+    def forget(self, task_id: str) -> None:
+        """Drop the cached handle for `task_id` (after destroying it) so the next get_or_create builds a new
+        sandbox — how a task switches runtime image once the clone reveals the repository's ecosystem."""
+        self._handles_by_task.pop(task_id, None)
+
     async def destroy_all(self) -> None:
         """Destroy all sandboxes this manager instance knows about."""
         ids = list(set(self._handles_by_task.values()))

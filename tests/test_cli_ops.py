@@ -68,6 +68,16 @@ def test_build_sandbox_images_command_points_at_the_real_dockerfile():
     assert "keystone-sandbox-python:latest" in cmd
 
 
+def test_every_sandbox_runtime_image_has_a_real_dockerfile_and_a_build_command():
+    from src.cli.ops import build_sandbox_image_commands
+
+    cmds = build_sandbox_image_commands(REPO_ROOT)
+    tags = [c[c.index("-t") + 1] for c in cmds]
+    assert tags == ["keystone-sandbox-python:latest", "keystone-sandbox-node:latest", "keystone-sandbox-go:latest"]
+    for c in cmds:
+        assert Path(c[c.index("-f") + 1]).exists()
+
+
 def test_build_migrate_command():
     cmd = build_migrate_command(REPO_ROOT / "docker-compose.yml")
     assert cmd == [

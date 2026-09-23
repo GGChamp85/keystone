@@ -684,3 +684,45 @@ export async function streamChat(
   }
   return { text, usage, finish_reason: finish, ttft_ms: ttft, elapsed_ms: performance.now() - started, served_role: servedRole }
 }
+
+// ── Benchmarks (src/api/routes/benchmarks.py) ─────────────────────────────────────────────────
+
+export interface BenchmarkBackend {
+  label: string
+  model_id: string | null
+  tasks_run: number
+  solved: number
+  solve_rate: number
+  avg_duration_ms: number
+  total_prompt_tokens: number
+  total_completion_tokens: number
+  latest_at: string | null
+}
+
+export interface BenchmarkTaskResult {
+  run_id: string
+  solved: boolean
+  status: string
+  duration_ms: number
+  prompt_tokens: number
+  completion_tokens: number
+  pr_url: string | null
+  error_message: string | null
+  fail_to_pass: Record<string, boolean>
+  pass_to_pass: Record<string, boolean>
+  created_at: string | null
+}
+
+export interface BenchmarkComparison {
+  generated_at: number
+  runs_considered: number
+  backends: BenchmarkBackend[]
+  tasks: { task_id: string; language: string; results: Record<string, BenchmarkTaskResult> }[]
+}
+
+export async function getBenchmarks(days: number | null = null): Promise<BenchmarkComparison> {
+  const qs = days ? `?days=${days}` : ''
+  const resp = await fetch(`/v1/keystone/benchmarks${qs}`, { headers: authHeaders() })
+  if (!resp.ok) throw new Error(`Failed to load benchmarks (${resp.status}): ${await resp.text()}`)
+  return resp.json()
+}

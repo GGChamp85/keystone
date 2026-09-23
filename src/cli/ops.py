@@ -64,9 +64,32 @@ def build_down_command(compose_file: Path) -> list[str]:
     return ["docker", "compose", "-f", str(compose_file), "down"]
 
 
+SANDBOX_RUNTIMES: tuple[tuple[str, str], ...] = (
+    ("python", "keystone-sandbox-python:latest"),
+    ("node", "keystone-sandbox-node:latest"),
+    ("go", "keystone-sandbox-go:latest"),
+)
+
+
+def build_sandbox_image_commands(repo_root: Path) -> list[list[str]]:
+    """One `docker build` per sandbox runtime image (python, node, go) — what `make sandbox-images` runs."""
+    return [
+        [
+            "docker",
+            "build",
+            "-f",
+            str(repo_root / "docker" / "sandbox-runtimes" / f"{name}.Dockerfile"),
+            "-t",
+            tag,
+            str(repo_root),
+        ]
+        for name, tag in SANDBOX_RUNTIMES
+    ]
+
+
 def build_sandbox_images_command(repo_root: Path) -> list[str]:
-    dockerfile = repo_root / "docker" / "sandbox-runtimes" / "python.Dockerfile"
-    return ["docker", "build", "-f", str(dockerfile), "-t", "keystone-sandbox-python:latest", str(repo_root)]
+    """The Python runtime image's build command (the first of `build_sandbox_image_commands`)."""
+    return build_sandbox_image_commands(repo_root)[0]
 
 
 def build_migrate_command(compose_file: Path) -> list[str]:

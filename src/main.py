@@ -120,6 +120,7 @@ def create_app() -> FastAPI:
     metrics_app = make_asgi_app()
     app.mount("/metrics", metrics_app)
     from src.api.routes.agents import router as agents_router
+    from src.api.routes.benchmarks import router as benchmarks_router
     from src.api.routes.completions import router as completions_router
     from src.api.routes.finetune import router as finetune_router
     from src.api.routes.health import router as health_router
@@ -133,6 +134,7 @@ def create_app() -> FastAPI:
     app.include_router(completions_router)
     app.include_router(messages_router)
     app.include_router(models_library_router)
+    app.include_router(benchmarks_router)
     app.include_router(keys_router)
     app.include_router(agents_router)
     app.include_router(memory_router)

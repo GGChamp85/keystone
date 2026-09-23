@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ApiKeyBar } from './components/ApiKeyBar'
 import { FineTunePanel } from './components/FineTunePanel'
+import { BenchmarksPanel } from './components/BenchmarksPanel'
 import { MemoryPanel } from './components/MemoryPanel'
 import { ModelLibrary } from './components/ModelLibrary'
 import { Playground } from './components/Playground'
@@ -9,8 +10,8 @@ import { TaskSubmitForm } from './components/TaskSubmitForm'
 import { TaskStreamView } from './components/TaskStreamView'
 import { TeamTaskList } from './components/TeamTaskList'
 
-type View = 'memory' | 'team' | 'finetune' | 'spend' | 'models' | 'playground'
-const VIEWS: View[] = ['memory', 'team', 'finetune', 'spend', 'models', 'playground']
+type View = 'memory' | 'team' | 'finetune' | 'spend' | 'models' | 'playground' | 'benchmarks'
+const VIEWS: View[] = ['memory', 'team', 'finetune', 'spend', 'models', 'playground', 'benchmarks']
 
 function taskIdFromUrl(): string | null {
   return new URLSearchParams(window.location.search).get('task')
@@ -85,6 +86,11 @@ export default function App() {
                   Playground
                 </button>
               )}
+              {view !== 'benchmarks' && (
+                <button className="nav-link" onClick={() => setView('benchmarks')}>
+                  Benchmarks
+                </button>
+              )}
             </>
           )}
           <ApiKeyBar />
@@ -106,6 +112,8 @@ export default function App() {
             onPlayground={(modelId) => setView('playground', { model: modelId })}
             onFineTune={(baseModel) => setView('finetune', { base_model: baseModel })}
           />
+        ) : view === 'benchmarks' ? (
+          <BenchmarksPanel onBack={() => setView(null)} />
         ) : view === 'playground' ? (
           <Playground
             initialModel={new URLSearchParams(window.location.search).get('model')}

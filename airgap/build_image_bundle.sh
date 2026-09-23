@@ -66,10 +66,11 @@ for image in "${IMAGES[@]}"; do
   echo
 done
 
-# The two Keystone-built images (app + sandbox-daemon) aren't pulled from a
-# registry — build them locally first (docker build ... -t keystone-app:latest)
-# then include here so the whole bundle is one self-consistent artifact.
-for local_image in "keystone-app:latest" "keystone-sandbox-daemon:latest"; do
+# The Keystone-built images (app, sandbox-daemon, and the three sandbox runtime images the daemon
+# starts tasks in) aren't pulled from a registry — build them locally first (`make build`, which
+# runs `make sandbox-images`) then include here so the whole bundle is one self-consistent artifact.
+for local_image in "keystone-app:latest" "keystone-sandbox-daemon:latest" \
+  "keystone-sandbox-python:latest" "keystone-sandbox-node:latest" "keystone-sandbox-go:latest"; do
   if docker image inspect "$local_image" >/dev/null 2>&1; then
     echo "--- Including locally-built $local_image ---"
     safe_name="$(echo "$local_image" | tr '/:' '__')"

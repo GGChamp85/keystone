@@ -166,10 +166,23 @@ async def _wait_for_terminal_status(task_id: uuid.UUID, timeout_seconds: int, po
     raise TimeoutError(f"Task {task_id} did not reach a terminal status within {timeout_seconds}s")
 
 
-async def _run_held_out_tests(repo_url: str, branch_name: str, test_ids: list[str], test_command_prefix: str) -> dict:
+def _held_out_prefix(task: dict[str, Any]) -> str:
+    """The command a single held-out test id is appended to: one test at a time, so pytest's own
+    invocation is used for Python; Node and Go tasks declare a prefix-style `test_command`."""
+    return "python -m pytest" if task.get("language", "python") == "python" else task["test_command"]
+
+
+# task.json "language" -> the sandbox daemon's runtime template (src/sandbox/daemon.py RUNTIME_IMAGES)
+_RUNTIME_TEMPLATE = {"python": "python", "node": "javascript", "typescript": "typescript", "go": "go"}
+
+
+async def _run_held_out_tests(
+    repo_url: str, branch_name: str, test_ids: list[str], test_command_prefix: str, language: str = "python"
+) -> dict:
     """Clones `branch_name` in a brand-new sandbox — independent of whatever
-    sandbox the agent itself used — and runs each held-out test id
-    individually so one unrelated failure doesn't mask the rest."""
+    sandbox the agent itself used — built from the runtime image for the task's
+    language, and runs each held-out test id individually so one unrelated
+    failure doesn't mask the rest."""
     from src.orchestrator.workspace import Workspace
     from src.sandbox.manager import SandboxManager
 
@@ -178,6 +191,7 @@ async def _run_held_out_tests(repo_url: str, branch_name: str, test_ids: list[st
     task_id = f"verify-{uuid.uuid4().hex[:8]}"
     ws = Workspace(manager, task_id=task_id, tenant_id="benchmark-verify")
     try:
+        await ws.ensure_sandbox(network_enabled=True, language=_RUNTIME_TEMPLATE.get(language, "python"))
         await ws.clone(repo_url, branch=branch_name)
         for test_id in test_ids:
             outcome = await ws.run(f"{test_command_prefix} {test_id}", timeout=120, check=False)
@@ -245,7 +259,9 @@ async def run_one_task(task: dict[str, Any], *, max_iterations: int, timeout_sec
 
     logger.info("agent_runner.verifying_held_out_tests", task_id=task["id"], branch=final.branch_name)
     all_test_ids = task["fail_to_pass"] + task["pass_to_pass"]
-    held_out = await _run_held_out_tests(repo_url, final.branch_name, all_test_ids, "python -m pytest")
+    held_out = await _run_held_out_tests(
+        repo_url, final.branch_name, all_test_ids, _held_out_prefix(task), task.get("language", "python")
+    )
 
     result["fail_to_pass"] = {t: held_out.get(t, False) for t in task["fail_to_pass"]}
     result["pass_to_pass"] = {t: held_out.get(t, False) for t in task["pass_to_pass"]}

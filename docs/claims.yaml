@@ -54,3 +54,7 @@ claims:
     docs: [CHANGELOG.md]
     tests: [tests/test_best_of_n.py::test_the_candidate_that_passes_the_repos_own_checks_wins]
 
+  - text: "no `go` in the Python sandbox, `go1.` after the switch, the old sandbox destroyed"
+    docs: [CHANGELOG.md]
+    tests: [tests/test_workspace_runtime_switch.py]
+

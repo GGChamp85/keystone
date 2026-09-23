@@ -1,0 +1,12 @@
+{
+  "id": "retry_jitter_node",
+  "language": "node",
+  "instruction": "backoffDelay() in backoff.js is meant to implement exponential backoff with full jitter: the delay for an attempt must be a random value between 0 and min(cap, base * 2^attempt). The current implementation scales the jitter by 1.5 and applies the cap to the wrong quantity, so late attempts can wait longer than the cap and longer than their exponential window. Fix backoffDelay() so the delay is always within [0, min(cap, base * 2^attempt)] for any random() value in [0, 1], keeping retry() and the existing test in tests/retry.test.js working.",
+  "test_command": "node --test",
+  "fail_to_pass": [
+    "tests/backoff.test.js"
+  ],
+  "pass_to_pass": [
+    "tests/retry.test.js"
+  ]
+}

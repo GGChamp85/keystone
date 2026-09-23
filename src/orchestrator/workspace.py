@@ -70,13 +70,29 @@ class Workspace:
         self._tenant_id = tenant_id
         self._handle: str | None = None
         self._repo_cwd = f"/workspace/{REPO_DIR}"
+        self.language = "python"  # the runtime template this sandbox was created with
+        self._network_enabled = True
 
-    async def ensure_sandbox(self, *, network_enabled: bool = True) -> str:
+    async def ensure_sandbox(self, *, network_enabled: bool = True, language: str | None = None) -> str:
         if self._handle is None:
+            self.language = language or self.language
+            self._network_enabled = network_enabled
             self._handle = await self._manager.get_or_create(
-                self._task_id, tenant_id=self._tenant_id, language="python", network_enabled=network_enabled
+                self._task_id, tenant_id=self._tenant_id, language=self.language, network_enabled=network_enabled
             )
         return self._handle
+
+    async def switch_runtime(self, language: str) -> str:
+        """Replace this task's sandbox with one built from another runtime image (`language` is a
+        template name the daemon maps to an image: python, javascript, typescript, go, ...). The
+        working tree is not carried over — call `clone` again afterwards. Used once, right after the
+        first clone, when the repository turns out to be Node or Go rather than Python."""
+        if self._handle is not None:
+            await self._manager.destroy(self._handle)
+            self._manager.forget(self._task_id)
+            self._handle = None
+        self.language = language
+        return await self.ensure_sandbox(network_enabled=self._network_enabled, language=language)
 
     def _repo_relative(self, path: str) -> str:
         """

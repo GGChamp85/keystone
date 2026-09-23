@@ -15,6 +15,8 @@ build: sandbox-images ## Build all containers (compose services + sandbox runtim
 
 sandbox-images: ## Build sandbox runtime images (required before any Keystone Agents task can run — not a compose service, built standalone and referenced by name from src/sandbox/daemon.py's RUNTIME_IMAGES)
 	docker build -f docker/sandbox-runtimes/python.Dockerfile -t keystone-sandbox-python:latest .
+	docker build -f docker/sandbox-runtimes/node.Dockerfile -t keystone-sandbox-node:latest .
+	docker build -f docker/sandbox-runtimes/go.Dockerfile -t keystone-sandbox-go:latest .
 
 up: ## Start full stack (detached)
 	$(COMPOSE) up -d

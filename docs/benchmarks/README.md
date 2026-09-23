@@ -11,9 +11,9 @@
 
 ## The repository tasks
 
-Nine tasks under `benchmarks/tasks/repo/`, each a small real repository with a genuine bug, a failing test that the fix must make pass (`fail_to_pass`) and tests that must keep passing (`pass_to_pass`). Each task proves its own premise in CI: `tests/test_repo_tasks_well_formed.py` checks that the held-out tests really fail before the fix and really pass after.
+Twelve tasks under `benchmarks/tasks/repo/`, each a small real repository with a genuine bug, a failing test that the fix must make pass (`fail_to_pass`) and tests that must keep passing (`pass_to_pass`). Each task proves its own premise in CI: `tests/test_repo_tasks_well_formed.py` checks that the held-out tests really fail before the fix and really pass after — Python with pytest, Node with the built-in test runner, Go with `go test` inside the Go sandbox runtime image.
 
-`backoff_cap`, `config_deep_merge`, `csv_quoted_fields`, `date_range_inclusive`, `inventory_negative_stock`, `lru_cache_recency`, `pagination_last_page`, `slugify_collapse`, `token_bucket`. They are Python today; Node and Go tasks need their runtimes in the sandbox image.
+Python: `backoff_cap`, `config_deep_merge`, `csv_quoted_fields`, `date_range_inclusive`, `inventory_negative_stock`, `lru_cache_recency`, `pagination_last_page`, `slugify_collapse`, `token_bucket`. Node: `slug_dedupe_node`, `retry_jitter_node`. Go: `lru_ttl_go`. The agent runs each in the sandbox runtime image for its ecosystem (`docker/sandbox-runtimes/{python,node,go}.Dockerfile`, chosen after the clone from the repository's own tooling).
 
 ## Run it
 
@@ -30,6 +30,10 @@ Requirements: a git host the agent may push to (a local Gitea works), the sandbo
 
 - The `token_bucket` task (a rate limiter whose refill did not cap at capacity) was solved by a frontier model through the unmodified agent loop in **67.6 seconds over 5 iterations**: planning, tool-based edits, quality gates, review, tests, a real push and a real pull request, confirmed by re-running both held-out tests in a fresh sandbox clone.
 - The single-function smoke suite, run from a development machine with no GPU: the self-hosted role reported an honest 0/3 (no endpoint reachable, not a fabricated score); two frontier models scored 3/3 with real sandboxed execution.
+
+## The comparison in the web UI
+
+**Benchmarks** in the web UI (`GET /v1/keystone/benchmarks`) shows the same rows as a comparison: per backend, how many tasks were solved, the average time and the tokens spent; per task, the latest run of every backend with its status, duration, tokens and pull request link. It is empty until a run has been persisted.
 
 ## What is not published yet
 

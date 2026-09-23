@@ -53,7 +53,7 @@ from src.cli.ops import (
     build_down_command,
     build_helm_install_command,
     build_migrate_command,
-    build_sandbox_images_command,
+    build_sandbox_image_commands,
     build_tofu_command,
     build_tofu_output_command,
     build_up_command,
@@ -665,7 +665,8 @@ def up(
         return
 
     if sandbox_images:
-        _run_streamed(build_sandbox_images_command(root), cwd=root)
+        for cmd in build_sandbox_image_commands(root):
+            _run_streamed(cmd, cwd=root)
     if migrate:
         _run_streamed(build_migrate_command(compose_file), cwd=root)
 

@@ -1,0 +1,12 @@
+{
+  "id": "lru_ttl_go",
+  "language": "go",
+  "instruction": "The LRU cache in cache/lru.go is supposed to expire entries `ttl` after they were set, but Get() never checks the entry's expiry: a stale entry is returned as if it were fresh, and it is even promoted to most-recently-used. Fix Get() so an expired entry is treated as absent (returns \\\"\\\", false) and is removed from the cache, so Len() no longer counts it \u2014 without changing the eviction behaviour covered by TestEvictsLeastRecentlyUsed.",
+  "test_command": "go test",
+  "fail_to_pass": [
+    "-run ^TestExpiredEntriesAreNotReturned$ ./..."
+  ],
+  "pass_to_pass": [
+    "-run ^TestEvictsLeastRecentlyUsed$ ./..."
+  ]
+}

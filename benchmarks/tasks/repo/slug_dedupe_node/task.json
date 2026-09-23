@@ -1,0 +1,12 @@
+{
+  "id": "slug_dedupe_node",
+  "language": "node",
+  "instruction": "The SlugRegistry in slug.js is supposed to give every repeated title a unique slug by appending an incrementing suffix (-2, -3, -4, ...). Today claim() only ever tries the '-2' suffix, so the third repeat of a title is handed the same '-2' slug again — a duplicate. Fix claim() so the suffix counts up until an unused slug is found, without changing slugify() or the existing test in tests/slugify.test.js.",
+  "test_command": "node --test",
+  "fail_to_pass": [
+    "tests/registry.test.js"
+  ],
+  "pass_to_pass": [
+    "tests/slugify.test.js"
+  ]
+}

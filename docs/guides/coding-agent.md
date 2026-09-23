@@ -36,7 +36,7 @@ For work worth more than one attempt, set `best_of_n` on the task (or `AGENT_BES
 
 ## Where the work happens
 
-Each task gets its own sandbox (gVisor by default; Firecracker microVMs where KVM is available) with the repository cloned inside it, its own branch and its own pull request. The sandbox's network egress is restricted to the git hosts you allow and the package mirrors you configure. Tasks never share a working copy, so many developers can run many tasks against many repositories at once; throughput is bounded by the GPU, worker and sandbox capacity you deploy, not by a policy number.
+Each task gets its own sandbox (gVisor by default; Firecracker microVMs where KVM is available) with the repository cloned inside it, its own branch and its own pull request. The sandbox runs the runtime image for the repository's ecosystem — Python, Node or Go toolchains baked in (`make sandbox-images` builds all three), chosen from the repository's own tooling once it is cloned. The sandbox's network egress is restricted to the git hosts you allow and the package mirrors you configure. Tasks never share a working copy, so many developers can run many tasks against many repositories at once; throughput is bounded by the GPU, worker and sandbox capacity you deploy, not by a policy number.
 
 ## Connect your git server
 

@@ -52,6 +52,10 @@ def next_gate_phase(state: AgentState) -> AgentPhase:
     return AgentPhase.COMPLETE
 
 
+# repo_profile ecosystem -> the sandbox daemon's runtime template (src/sandbox/daemon.py RUNTIME_IMAGES)
+RUNTIME_TEMPLATE_FOR_ECOSYSTEM: dict[str, str] = {"python": "python", "node": "javascript", "go": "go"}
+
+
 async def get_or_clone_workspace(state: AgentState) -> Workspace:
     """
     Returns a `Workspace` over the task's shared sandbox (created once,
@@ -69,6 +73,20 @@ async def get_or_clone_workspace(state: AgentState) -> Workspace:
         if not state.repository_url:
             raise ValueError("get_or_clone_workspace requires state.repository_url")
         clone_result = await ws.clone(state.repository_url, state.branch)
+        # The runtime image is chosen from the repository's real tooling, which is only known after the
+        # clone: a Node or Go repository moves to the matching sandbox image (node/go toolchains baked
+        # in) and is cloned again there. A missing image is reported and the task stays in the Python
+        # sandbox, where its tests will fail with the real reason rather than a silent skip.
+        template = RUNTIME_TEMPLATE_FOR_ECOSYSTEM.get((await detect_profile(ws)).ecosystem)
+        if template and template != ws.language:
+            try:
+                await ws.switch_runtime(template)
+                clone_result = await ws.clone(state.repository_url, state.branch)
+                logger.info("workspace.runtime_switched", task_id=str(state.task_id), template=template)
+            except Exception as exc:
+                logger.warning("workspace.runtime_switch_failed", task_id=str(state.task_id), error=str(exc))
+                await ws.switch_runtime("python")
+                clone_result = await ws.clone(state.repository_url, state.branch)
         state.working_branch = f"keystone/{state.user_slug or 'agent'}/{state.task_id}"
         await ws.create_branch(state.working_branch)
         state.repo_cloned = True
