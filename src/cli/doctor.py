@@ -248,6 +248,146 @@ def check_secrets(settings: Settings) -> list[CheckResult]:
     return results
 
 
+def check_tls(settings: Settings) -> CheckResult:
+    """The API's certificate: present, parseable, not expired, and how long it has left."""
+    if not settings.tls_cert_path and not settings.tls_key_path:
+        return CheckResult(
+            "TLS", CheckStatus.SKIP, "TLS_CERT_PATH/TLS_KEY_PATH not set — TLS terminates elsewhere (nginx/ingress)"
+        )
+    from pathlib import Path
+
+    cert_path = Path(settings.tls_cert_path or "")
+    key_path = Path(settings.tls_key_path or "")
+    if not cert_path.is_file() or not key_path.is_file():
+        return CheckResult(
+            "TLS", CheckStatus.FAIL, f"certificate or key file missing ({cert_path}, {key_path}) — `make certs`"
+        )
+    try:
+        from datetime import UTC, datetime
+
+        from cryptography import x509
+
+        cert = x509.load_pem_x509_certificate(cert_path.read_bytes())
+    except Exception as exc:
+        return CheckResult("TLS", CheckStatus.FAIL, f"{cert_path} is not a PEM certificate ({exc})")
+    days_left = (cert.not_valid_after_utc - datetime.now(UTC)).days
+    subject = cert.subject.rfc4514_string()
+    if days_left < 0:
+        return CheckResult(
+            "TLS", CheckStatus.FAIL, f"{subject} expired {-days_left} day(s) ago — re-issue with `make certs-ca`"
+        )
+    if days_left < 14:
+        return CheckResult("TLS", CheckStatus.WARN, f"{subject} expires in {days_left} day(s) — re-issue soon")
+    return CheckResult("TLS", CheckStatus.OK, f"{subject} valid for {days_left} more day(s)")
+
+
+def check_disk(settings: Settings) -> list[CheckResult]:
+    """Free space where the platform writes: the fine-tuning output/data dirs when they exist, else the cwd."""
+    from pathlib import Path
+
+    results = []
+    candidates = [settings.finetuning_output_dir, settings.finetuning_data_dir, "."]
+    seen: set[str] = set()
+    for c in candidates:
+        path = Path(c)
+        if not path.exists():
+            continue
+        root = str(path.resolve())
+        if root in seen:
+            continue
+        seen.add(root)
+        usage = shutil.disk_usage(root)
+        free_pct = usage.free / usage.total * 100 if usage.total else 0
+        free_gb = usage.free / 1e9
+        label = f"Disk ({c})" if c != "." else "Disk (working directory)"
+        if free_pct < 5:
+            results.append(
+                CheckResult(
+                    label,
+                    CheckStatus.FAIL,
+                    f"{free_gb:.1f} GB free ({free_pct:.0f}%) — model pulls and adapters will fail",
+                )
+            )
+        elif free_pct < 15:
+            results.append(CheckResult(label, CheckStatus.WARN, f"{free_gb:.1f} GB free ({free_pct:.0f}%)"))
+        else:
+            results.append(CheckResult(label, CheckStatus.OK, f"{free_gb:.1f} GB free ({free_pct:.0f}%)"))
+    return results
+
+
+async def check_migrations(settings: Settings) -> CheckResult:
+    """The database's Alembic revision against this code's head — an upgrade that forgot `alembic upgrade head`
+    shows up here, before a request hits a missing column."""
+    import asyncpg
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    if settings.database_url is None:
+        return CheckResult("Migrations", CheckStatus.SKIP, "DATABASE_URL is not set")
+    try:
+        heads = ScriptDirectory.from_config(Config("alembic.ini")).get_heads()
+    except Exception as exc:
+        return CheckResult(
+            "Migrations", CheckStatus.SKIP, f"cannot read the migration scripts here ({exc}) — run from a checkout"
+        )
+    dsn = settings.database_url.replace("postgresql+asyncpg://", "postgresql://", 1)
+    try:
+        conn = await asyncpg.connect(dsn, timeout=5.0)
+        try:
+            rows = await conn.fetch("SELECT version_num FROM alembic_version")
+        finally:
+            await conn.close()
+    except Exception as exc:
+        if "alembic_version" in str(exc):
+            return CheckResult(
+                "Migrations",
+                CheckStatus.FAIL,
+                "no alembic_version table — the database has never been migrated: `alembic upgrade head`",
+            )
+        return CheckResult("Migrations", CheckStatus.SKIP, f"Postgres unreachable ({exc}); see the Postgres check")
+    current = {r["version_num"] for r in rows}
+    if current == set(heads):
+        return CheckResult("Migrations", CheckStatus.OK, f"database at head {', '.join(sorted(heads))}")
+    return CheckResult(
+        "Migrations",
+        CheckStatus.FAIL,
+        f"database at {', '.join(sorted(current)) or 'nothing'}, code head is {', '.join(sorted(heads))} — "
+        "run `alembic upgrade head`",
+    )
+
+
+async def check_app_ready(base_url: str | None) -> CheckResult:
+    """The running application's own readiness (`/health/ready`), when KEYSTONE_INFERENCE_URL points at one."""
+    if not base_url:
+        return CheckResult(
+            "App /health/ready",
+            CheckStatus.SKIP,
+            "KEYSTONE_INFERENCE_URL not set — the checks above talk to the services directly",
+        )
+    url = f"{base_url.rstrip('/')}/health/ready"
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(url)
+    except Exception as exc:
+        return CheckResult(
+            "App /health/ready",
+            CheckStatus.FAIL,
+            f"{url} unreachable ({exc}) — is the app up? `keystone up`, `make status`",
+        )
+    try:
+        body = resp.json()
+    except ValueError:
+        body = {}
+    components = body.get("components", {}) if isinstance(body, dict) else {}
+    unhealthy = [k for k, v in components.items() if v not in ("healthy", "unprobed")]
+    if resp.status_code == 200:
+        note = f"; models: {', '.join(unhealthy)}" if unhealthy else ""
+        return CheckResult("App /health/ready", CheckStatus.OK, f"ready at {base_url}{note}")
+    return CheckResult(
+        "App /health/ready", CheckStatus.FAIL, f"HTTP {resp.status_code}: {', '.join(unhealthy) or body}"
+    )
+
+
 def check_gpu() -> CheckResult:
     if shutil.which("nvidia-smi") is None:
         return CheckResult(
@@ -290,9 +430,11 @@ def check_docker() -> CheckResult:
         return CheckResult("Docker", CheckStatus.FAIL, f"failed to run `docker info` ({exc})")
 
 
-async def run_all_checks(settings: Settings) -> list[CheckResult]:
+async def run_all_checks(settings: Settings, *, app_base_url: str | None = None) -> list[CheckResult]:
     results: list[CheckResult] = [check_docker(), check_gpu()]
+    results.extend(check_disk(settings))
     results.append(await check_postgres(settings))
+    results.append(await check_migrations(settings))
     results.append(await check_redis(settings))
     results.append(await check_qdrant(settings))
     results.append(await check_sandbox_daemon(settings))
@@ -306,4 +448,6 @@ async def run_all_checks(settings: Settings) -> list[CheckResult]:
     results.append(await check_git_host(settings))
     results.extend(await check_package_mirrors(settings))
     results.extend(check_secrets(settings))
+    results.append(check_tls(settings))
+    results.append(await check_app_ready(app_base_url))
     return results

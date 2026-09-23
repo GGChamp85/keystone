@@ -154,7 +154,8 @@ The full site builds with `mkdocs build --strict` in CI. Start at [`docs/index.m
 | [Benchmarks](docs/benchmarks/README.md) | how quality and cost are measured, and the real numbers so far |
 | [Kubernetes](docs/deployment/KUBERNETES_CLIENT_VPC.md), [RunPod](docs/deployment/RUNPOD_SETUP.md), [Air-gapped](docs/airgap/OFFLINE_INSTALL_RUNBOOK.md), [OpenCode](docs/deployment/OPENCODE_SETUP.md) | deploy for production |
 | [Open weights: risk and support](docs/enterprise/open-weights-risk-and-support.md) | decide whether self-hosted open-weight models fit your organisation |
-| [Configuration reference](docs/reference/configuration.md) | look up any setting |
+| [Troubleshooting](docs/troubleshooting.md) | fix an error message you are looking at |
+| [Configuration](docs/reference/configuration.md), [CLI](docs/reference/cli.md), [API](docs/reference/api.md) | look up any setting, command, or route (all generated from the code) |
 | [Sandbox architecture](docs/architecture/SANDBOX_ARCHITECTURE.md), [Decision records](docs/architecture/adr/README.md) | understand why it is built this way |
 | [Licenses and compliance](docs/LICENSES_AND_COMPLIANCE.md), [Telemetry audit](docs/TELEMETRY_AUDIT.md) | satisfy procurement and security review |
 | [`ROADMAP.md`](ROADMAP.md), [`CHANGELOG.md`](CHANGELOG.md) | see what is built, what is next, what changed |

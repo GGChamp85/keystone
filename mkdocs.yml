@@ -53,8 +53,11 @@ nav:
       - Load test: benchmarks/load-test.md
   - Enterprise:
       - Open weights, risk and support: enterprise/open-weights-risk-and-support.md
+  - Troubleshooting: troubleshooting.md
   - Reference:
       - Configuration: reference/configuration.md
+      - CLI: reference/cli.md
+      - API: reference/api.md
   - Architecture:
       - Sandbox: architecture/SANDBOX_ARCHITECTURE.md
       - Decision records: architecture/adr/README.md

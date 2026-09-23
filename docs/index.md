@@ -18,7 +18,8 @@ Every page here says what has been verified and by which test. A claim with no t
 | deploy on Kubernetes, RunPod, or with no internet | [Deployment](deployment/KUBERNETES_CLIENT_VPC.md), [RunPod](deployment/RUNPOD_SETUP.md), [Air-gapped](airgap/OFFLINE_INSTALL_RUNBOOK.md) |
 | decide whether open weights fit my organisation | [Open weights: risk and support](enterprise/open-weights-risk-and-support.md) |
 | see how quality and cost are measured | [Benchmarks](benchmarks/README.md) |
-| look up a setting | [Configuration reference](reference/configuration.md) |
+| fix an error message | [Troubleshooting](troubleshooting.md) |
+| look up a setting, a command, or a route | [Configuration](reference/configuration.md), [CLI](reference/cli.md), [API](reference/api.md) |
 | understand why it is built this way | [Architecture](architecture/SANDBOX_ARCHITECTURE.md), [Decision records](architecture/adr/README.md) |
 
 ## What is real today

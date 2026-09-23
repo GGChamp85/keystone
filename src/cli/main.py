@@ -903,11 +903,12 @@ _STATUS_STYLE = {
 
 @app.command("doctor")
 def doctor():
-    """Diagnose your Keystone deployment — real checks against Postgres, Redis, Qdrant, the
-    sandbox daemon, model endpoints, the git host, package mirrors, and secret strength, each
-    reporting exactly what's wrong (and often how to fix it), not just pass/fail."""
+    """Diagnose your Keystone deployment — real checks against Postgres (and its migration revision), Redis,
+    Qdrant, the sandbox daemon, model endpoints, the git host, package mirrors, secret strength, TLS
+    certificate validity, free disk, and the running app's own readiness when KEYSTONE_INFERENCE_URL is set —
+    each reporting exactly what's wrong (and often how to fix it), not just pass/fail."""
     settings = get_settings()
-    results = asyncio.run(run_all_checks(settings))
+    results = asyncio.run(run_all_checks(settings, app_base_url=os.environ.get("KEYSTONE_INFERENCE_URL")))
 
     table = Table(show_lines=False)
     table.add_column("Check")

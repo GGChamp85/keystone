@@ -69,3 +69,17 @@ def test_claims_file_checks_out_against_the_collected_suite(tmp_path: Path):
     assert len(problems) == 2
     assert "text not found verbatim in README.md" in problems[0]
     assert "is not collected by pytest" in problems[1]
+
+
+def test_cli_and_api_reference_pages_are_current():
+    proc = subprocess.run(
+        [sys.executable, "scripts/gen_cli_reference.py", "--check"], cwd=ROOT, capture_output=True, text=True
+    )
+    assert proc.returncode == 0, proc.stderr or proc.stdout
+    cli = (ROOT / "docs" / "reference" / "cli.md").read_text()
+    api = (ROOT / "docs" / "reference" / "api.md").read_text()
+    assert "## keystone finetune promote" in cli and "--force" in cli
+    assert (
+        "| `POST` | `/v1/messages` |" in api
+        and "| `POST` | `/v1/admin/tenants/{tenant_id}/keys/{key_prefix}/rotate` |" in api
+    )
