@@ -1,0 +1,43 @@
+# Truth-in-docs: each claim below must appear verbatim in the listed documents and name tests that
+# exist in the collected suite. Checked by scripts/check_claims.py in CI. A sentence in the docs that
+# asserts a behaviour belongs here with the test that proves it; a claim that loses its test loses
+# its sentence.
+claims:
+  - text: "trains a real LoRA adapter on the real Qwen2.5-Coder-0.5B-Instruct on CPU"
+    docs: [CHANGELOG.md]
+    tests: [tests/test_trainer_smoke.py]
+
+  - text: "the failing job is refused, a non-admin's `force` is refused, an admin's force is audited, the passing job promotes, the manifest lists both, and the live load is attempted for each"
+    docs: [docs/guides/fine-tune-slm-on-your-repo.md]
+    tests:
+      - tests/test_finetune_promote_gate.py::test_promote_is_gated_by_the_verdict_forced_only_by_an_admin_and_then_served
+
+  - text: "over the real route with the real `InferenceClient` talking HTTP to a real backend process"
+    docs: [CHANGELOG.md]
+    tests:
+      - tests/test_messages_api.py::test_messages_tool_use_round_trip
+      - tests/test_messages_api.py::test_the_real_anthropic_sdk_talks_to_the_gateway
+
+  - text: "runs the route against a real backend process for one role and dead ports for the others"
+    docs: [docs/guides/model-library-and-playground.md]
+    tests: [tests/test_model_library.py::test_library_reports_live_state_adapters_training_and_catalog]
+
+  - text: "verifies health, a real completion with real token usage, and real streaming against it"
+    docs: [CHANGELOG.md]
+    tests: [tests/e2e/test_ci_backend.py]
+
+  - text: "the held-out tests really fail before the fix and really pass after"
+    docs: [ROADMAP.md]
+    tests: [tests/test_repo_tasks_well_formed.py]
+
+  - text: "Two candidate places are refused as ambiguous, never guessed"
+    docs: [CHANGELOG.md]
+    tests: [tests/test_fuzzy_patch.py]
+
+  - text: "ctags ran inside a live sandbox and produced the expected symbols, signatures, line numbers and reference counts"
+    docs: [CHANGELOG.md]
+    tests: [tests/test_repo_map.py]
+
+  - text: "the gateway passes `tools`, `tool_choice` and `tool` messages through to the model unchanged"
+    docs: [docs/guides/use-from-vscode.md]
+    tests: [tests/test_messages_api.py::test_chat_completions_passes_tools_and_tool_messages_through]

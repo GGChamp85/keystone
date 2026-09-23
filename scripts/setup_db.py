@@ -5,10 +5,12 @@
 
 import asyncio
 import sys
+
 sys.path.insert(0, "/app")
 
 from src.db.connection import engine
 from src.db.models import Base
+
 
 async def main():
     async with engine.begin() as conn:
@@ -16,6 +18,7 @@ async def main():
         await conn.run_sync(Base.metadata.create_all)
         print("Database schema initialized successfully.")
         print(f"Tables: {list(Base.metadata.tables.keys())}")
+
 
 if __name__ == "__main__":
     asyncio.run(main())

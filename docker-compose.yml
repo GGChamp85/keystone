@@ -188,20 +188,27 @@ services:
     deploy:
       resources:
         reservations:
-          devices: [{ driver: nvidia, count: 8, capabilities: [gpu] }]
+          devices:
+            - driver: nvidia
+              count: ${VLLM_CODING_GPU_COUNT:-8}
+              capabilities: [gpu]
     environment:
       HF_TOKEN: "${HF_TOKEN}"
       VLLM_NO_USAGE_STATS: "1"
       HF_HUB_DISABLE_TELEMETRY: "1"
       # Lets a promoted fine-tuned adapter load live via /v1/load_lora_adapter (src/inference/lora_registry.py).
       VLLM_ALLOW_RUNTIME_LORA_UPDATING: "True"
+    # The model behind the coding role is a .env choice, not an edit here: `keystone init --backend single-gpu`
+    # sets VLLM_CODING_MODEL=Qwen/Qwen2.5-Coder-7B-Instruct, VLLM_CODING_GPU_COUNT=1, VLLM_CODING_TOOL_PARSER=hermes.
     # VLLM_CODING_EXTRA_ARGS: e.g. "--enable-lora --max-lora-rank 64 --lora-modules name=/data/finetuning/output/.../adapter"
     command: >
-      --model zai-org/GLM-5.3-Flash --served-model-name glm-5.3-flash ${VLLM_CODING_EXTRA_ARGS:-}
-      --tensor-parallel-size 8 --max-model-len 131072 --gpu-memory-utilization 0.92
+      --model ${VLLM_CODING_MODEL:-zai-org/GLM-5.3-Flash}
+      --served-model-name ${VLLM_CODING_SERVED_MODEL_NAME:-glm-5.3-flash} ${VLLM_CODING_EXTRA_ARGS:-}
+      --tensor-parallel-size ${VLLM_CODING_GPU_COUNT:-8} --max-model-len ${VLLM_CODING_MAX_MODEL_LEN:-131072}
+      --gpu-memory-utilization 0.92
       --max-num-seqs 32 --enable-prefix-caching --enable-chunked-prefill
       --max-num-batched-tokens 16384 --block-size 16 --swap-space 8
-      --trust-remote-code --enable-auto-tool-choice --tool-call-parser glm47
+      --trust-remote-code --enable-auto-tool-choice --tool-call-parser ${VLLM_CODING_TOOL_PARSER:-glm47}
       --port 8000
     ports: ["8001:8000"]
     volumes: [model-cache:/root/.cache/huggingface]

@@ -31,10 +31,17 @@ def find_repo_root(start: Path | None = None) -> Path | None:
     return None
 
 
-def build_up_command(compose_file: Path, *, dev_only: bool = False) -> list[str]:
-    cmd = ["docker", "compose", "-f", str(compose_file), "up", "-d"]
+def build_up_command(compose_file: Path, *, dev_only: bool = False, with_demo_model: bool = False) -> list[str]:
+    """`with_demo_model` adds the `demo-model` compose profile (llama.cpp serving Qwen2.5-Coder-0.5B on CPU —
+    a real OpenAI-compatible backend with no GPU) to whatever else comes up."""
+    cmd = ["docker", "compose", "-f", str(compose_file)]
+    if with_demo_model:
+        cmd += ["--profile", "demo-model"]
+    cmd += ["up", "-d"]
     if dev_only:
         cmd += ["postgres", "redis", "qdrant"]
+        if with_demo_model:
+            cmd.append("demo-model")
     return cmd
 
 

@@ -25,7 +25,7 @@ keystone ide continue-config --base-url https://keystone.internal:8080 --api-key
   --ca-bundle /etc/keystone/pki/ca.crt --output ~/.continue/config.yaml
 ```
 
-`KEYSTONE_API_KEY` in the environment is picked up when `--api-key` is omitted. A checked-in rendering with placeholders is at [`vscode/continue/config.example.yaml`](../../vscode/continue/config.example.yaml).
+`KEYSTONE_API_KEY` in the environment is picked up when `--api-key` is omitted. A checked-in rendering with placeholders is at [`vscode/continue/config.example.yaml`](https://github.com/GGChamp85/keystone/blob/main/vscode/continue/config.example.yaml).
 
 ## 3. What the config does
 

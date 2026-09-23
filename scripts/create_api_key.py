@@ -5,10 +5,11 @@
 
 import asyncio
 import sys
+
 sys.path.insert(0, "/app")
 
-from uuid import UUID
 from sqlalchemy import select
+
 from src.api.middleware.auth import generate_api_key
 from src.db.connection import async_session_factory, init_db
 from src.db.models import APIKey, Tenant, TenantTier
@@ -51,8 +52,11 @@ async def main():
 
         full_key, prefix, key_hash = generate_api_key()
         api_key = APIKey(
-            tenant_id=tenant.id, name=key_name, key_prefix=prefix,
-            key_hash=key_hash, scopes=scopes,
+            tenant_id=tenant.id,
+            name=key_name,
+            key_prefix=prefix,
+            key_hash=key_hash,
+            scopes=scopes,
         )
         db.add(api_key)
         await db.commit()

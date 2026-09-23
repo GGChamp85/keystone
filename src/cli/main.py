@@ -36,7 +36,14 @@ from rich.table import Table
 
 from src.cli.doctor import CheckStatus, run_all_checks
 from src.cli.ide import ContinueConfigInputs, render_continue_config
-from src.cli.init import default_overrides, find_env_template, render_env_file
+from src.cli.init import (
+    BACKEND_CHOICES,
+    BACKEND_NOTES,
+    backend_overrides,
+    default_overrides,
+    find_env_template,
+    render_env_file,
+)
 from src.cli.ops import (
     build_bundle_build_images_command,
     build_bundle_download_models_command,
@@ -580,6 +587,14 @@ def up(
     ] = False,
     migrate: Annotated[bool, typer.Option(help="Run alembic migrations once the stack is up")] = True,
     sandbox_images: Annotated[bool, typer.Option(help="Build the sandbox runtime image too")] = True,
+    with_demo_model: Annotated[
+        bool,
+        typer.Option(
+            "--with-demo-model",
+            help="Also start the no-GPU demo model (llama.cpp, Qwen2.5-Coder-0.5B) — pair with "
+            "`keystone init --backend demo-cpu`",
+        ),
+    ] = False,
 ):
     """Bring up the Keystone stack — a real wrapper around `docker compose up -d`
     (+ optionally the sandbox image build and migrations), matching what the README's
@@ -587,7 +602,7 @@ def up(
     root = _require_repo_root()
     compose_file = root / "docker-compose.yml"
 
-    _run_streamed(build_up_command(compose_file, dev_only=dev), cwd=root)
+    _run_streamed(build_up_command(compose_file, dev_only=dev, with_demo_model=with_demo_model), cwd=root)
 
     if dev:
         console.print("[green]Dev infra is up.[/green] (--dev skips sandbox-images/migrate too)")
@@ -759,6 +774,15 @@ def init(
     yes: Annotated[
         bool, typer.Option("--yes", help="Non-interactive: auto-generate all secrets, skip every other prompt")
     ] = False,
+    backend: Annotated[
+        str | None,
+        typer.Option(
+            "--backend",
+            help="Coding model backend: demo-cpu (llama.cpp 0.5B, no GPU), single-gpu (vLLM serving "
+            "Qwen2.5-Coder-7B on one 24 GB GPU), frontier-proxy (benchmarks/frontier_proxy.py), or "
+            "self-hosted-gpu (the compose/Helm defaults). Asked interactively when omitted.",
+        ),
+    ] = None,
 ):
     """Guided setup — writes a real .env file (from .env.example) for `make up` to use.
     Run `keystone doctor` afterward to verify what's actually reachable."""
@@ -802,19 +826,18 @@ def init(
             overrides["GIT_HOST_API_URL"] = api_url
             overrides["GIT_HOST_TOKEN"] = token
 
+    if backend is None and not yes:
         backend = Prompt.ask(
             "\nCoding model backend",
-            choices=["frontier-proxy", "self-hosted-gpu"],
-            default="frontier-proxy",
+            choices=list(BACKEND_CHOICES),
+            default="demo-cpu",
         )
-        if backend == "frontier-proxy":
-            overrides["VLLM_CODING_URL"] = "http://host.docker.internal:8090/v1"
-            console.print(
-                "\n[dim]After `make up`, start the proxy with a real ANTHROPIC_API_KEY in your shell:\n"
-                "  FRONTIER_PROXY_MODEL=claude-opus-4-6 python -m benchmarks.frontier_proxy\n"
-                "(on Linux, not Docker Desktop, host.docker.internal needs an extra_hosts entry — "
-                "see the comment above VLLM_CODING_URL in the .env this writes.)[/dim]"
-            )
+    if backend is not None:
+        if backend not in BACKEND_CHOICES:
+            error_console.print(f"Unknown --backend {backend!r}; choose one of: {', '.join(BACKEND_CHOICES)}")
+            raise typer.Exit(code=2)
+        overrides.update(backend_overrides(backend))
+        console.print(f"\n[dim]{BACKEND_NOTES[backend]}[/dim]")
 
     content = render_env_file(template.read_text(), overrides)
     output_path.write_text(content)

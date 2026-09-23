@@ -51,3 +51,4 @@ openbao/.openbao-init.json
 dist/
 build/
 .claude/
+site/

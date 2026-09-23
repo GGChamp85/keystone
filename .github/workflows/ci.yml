@@ -137,6 +137,22 @@ jobs:
       - name: Run the real trainer smoke
         run: python -m pytest tests/test_trainer_smoke.py -v --tb=short
 
+  docs:
+    name: Docs (truth-in-docs claims, generated config reference, mkdocs --strict)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev,docs]"
+      - name: Configuration reference is generated from src/config.py and current
+        run: python scripts/gen_config_reference.py --check
+      - name: Every documented claim names a test that exists
+        run: python scripts/check_claims.py
+      - name: Documentation site builds with no warnings
+        run: mkdocs build --strict
+
   helm:
     name: Helm lint + template
     runs-on: ubuntu-latest

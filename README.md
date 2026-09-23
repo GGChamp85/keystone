@@ -143,6 +143,8 @@ That's the complete list — no managed SaaS dependency anywhere in it (see [Tec
 
 ## Run it locally in 10 minutes
 
+The guided version of this section — one path, two tracks (no GPU / one 24 GB GPU), executed by a test in CI — is `docs/getting-started/quickstart.md`: `keystone init --backend demo-cpu && keystone up --with-demo-model`.
+
 This brings up the full stack (no model backend chosen yet — see [What you need](#what-you-need) for the two real options, and [Watch it write code](#watch-it-write-code) if you want to skip straight to a working coding-agent task with no GPU).
 
 ```bash
@@ -587,8 +589,13 @@ keystone/
 
 ## Documentation
 
+Published as a site with `mkdocs build --strict` in CI (`mkdocs.yml`; `pip install -e ".[docs]" && mkdocs serve` locally). Two gates keep it true: `docs/reference/configuration.md` is generated from `src/config.py` (`scripts/gen_config_reference.py --check`), and every claim in `docs/claims.yaml` must appear verbatim in the document it is attributed to and name a test that pytest actually collects (`scripts/check_claims.py`).
+
 | Doc | Covers |
 |---|---|
+| `docs/getting-started/quickstart.md` | **The one path**: `keystone init --backend demo-cpu` → `keystone up --with-demo-model` → a key → a real completion → the agent on a repo task; Track B on one 24 GB GPU |
+| `docs/getting-started/hardware-sizing.md` | What each GPU tier serves and fine-tunes, per model, with the formulas |
+| `docs/reference/configuration.md` | Every setting, generated from the code |
 | `docs/airgap/OFFLINE_INSTALL_RUNBOOK.md` | Build → bundle → transfer → import → bring-up, step by step |
 | `docs/architecture/SANDBOX_ARCHITECTURE.md` | How the Firecracker/gVisor sandbox layer actually works |
 | `docs/architecture/adr/` | Architecture decision records — why ctags not tree-sitter, Ray not Kubeflow, llama.cpp in CI, RunPod via REST, vendor-neutral text |

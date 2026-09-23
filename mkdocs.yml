@@ -1,0 +1,62 @@
+site_name: Keystone
+site_description: Self-hosted, air-gap-capable LLM inference gateway and deterministic coding-agent platform
+repo_url: https://github.com/GGChamp85/keystone
+repo_name: GGChamp85/keystone
+docs_dir: docs
+strict: true
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.expand
+    - content.code.copy
+    - search.suggest
+  palette:
+    - scheme: default
+      primary: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Dark mode
+    - scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Light mode
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.superfences
+  - pymdownx.highlight
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - Quickstart (one path): getting-started/quickstart.md
+      - Hardware sizing: getting-started/hardware-sizing.md
+  - Guides:
+      - Model Library and Playground: guides/model-library-and-playground.md
+      - Fine-tune an SLM on your repo: guides/fine-tune-slm-on-your-repo.md
+      - Use it from VS Code: guides/use-from-vscode.md
+  - Deployment:
+      - Kubernetes (client VPC): deployment/KUBERNETES_CLIENT_VPC.md
+      - RunPod: deployment/RUNPOD_SETUP.md
+      - OpenCode: deployment/OPENCODE_SETUP.md
+      - Air-gapped install: airgap/OFFLINE_INSTALL_RUNBOOK.md
+  - Reference:
+      - Configuration: reference/configuration.md
+  - Architecture:
+      - Sandbox: architecture/SANDBOX_ARCHITECTURE.md
+      - Decision records: architecture/adr/README.md
+      - ADR 0001 — ctags, not tree-sitter: architecture/adr/0001-ctags-not-tree-sitter.md
+      - ADR 0002 — Ray Train over Kubeflow: architecture/adr/0002-ray-train-over-kubeflow.md
+      - ADR 0003 — llama.cpp CI backend: architecture/adr/0003-llama-cpp-ci-backend.md
+      - ADR 0004 — peppered API-key hashing: architecture/adr/0004-peppered-api-key-hashing.md
+      - ADR 0005 — RunPod Serverless via REST: architecture/adr/0005-runpod-serverless-via-rest.md
+      - ADR 0006 — vendor-neutral display strings: architecture/adr/0006-vendor-neutral-display-strings.md
+  - Compliance:
+      - Licenses and compliance: LICENSES_AND_COMPLIANCE.md
+      - Telemetry audit: TELEMETRY_AUDIT.md
