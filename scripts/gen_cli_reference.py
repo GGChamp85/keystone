@@ -18,6 +18,14 @@ import re
 import sys
 from pathlib import Path
 
+# Deterministic help rendering regardless of the terminal this runs in (a developer's shell, CI): typer's
+# rich output reads these before anything is imported, so they must be set here, first.
+os.environ["TERMINAL_WIDTH"] = "100"
+os.environ["COLUMNS"] = "100"
+os.environ["NO_COLOR"] = "1"
+os.environ["TERM"] = "dumb"
+os.environ["_TYPER_FORCE_DISABLE_TERMINAL"] = "1"
+
 ROOT = Path(__file__).resolve().parent.parent
 CLI_OUT = ROOT / "docs" / "reference" / "cli.md"
 API_OUT = ROOT / "docs" / "reference" / "api.md"
@@ -25,34 +33,31 @@ API_OUT = ROOT / "docs" / "reference" / "api.md"
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 
-def _help(app, args: list[str]) -> str:
-    from typer.testing import CliRunner
+def _plain_group(app):
+    """The click command tree with typer's rich rendering disabled — plain click help, whose layout depends
+    only on the fixed width above, not on the rich/typer version installed."""
+    import click
+    import typer.core
+    import typer.main
 
-    env = {**os.environ, "TERM": "dumb", "NO_COLOR": "1", "COLUMNS": "100"}
-    result = CliRunner().invoke(app, [*args, "--help"], env=env)
-    text = _ANSI.sub("", result.output)
-    # typer/rich box drawing is fine in a fenced block; strip trailing spaces for stable diffs
-    return "\n".join(line.rstrip() for line in text.splitlines()).strip() + "\n"
+    typer.core.HAS_RICH = False  # typer falls back to click's own formatter when rich is unavailable
+    return click, typer.main.get_command(app)
 
 
-def _walk(app) -> list[list[str]]:
-    """Every command path, depth-first, in registration order."""
-    import typer
-    from typer.main import get_group
+def _help_pages(app) -> list[tuple[list[str], str]]:
+    """(command path, help text) for the root and every command and subcommand, in registration order."""
+    click, root = _plain_group(app)
+    pages: list[tuple[list[str], str]] = []
 
-    group = get_group(app)
-    paths: list[list[str]] = []
+    def visit(cmd, path: list[str], parent_ctx) -> None:
+        ctx = click.Context(cmd, info_name=path[-1] if path else "keystone", parent=parent_ctx, terminal_width=100)
+        text = _ANSI.sub("", cmd.get_help(ctx))
+        pages.append((path, "\n".join(line.rstrip() for line in text.splitlines()).strip() + "\n"))
+        for name in getattr(cmd, "commands", {}):
+            visit(cmd.commands[name], [*path, name], ctx)
 
-    def visit(cmd, prefix: list[str]) -> None:
-        commands = getattr(cmd, "commands", {})
-        for name in commands:
-            sub = commands[name]
-            paths.append([*prefix, name])
-            visit(sub, [*prefix, name])
-
-    visit(group, [])
-    del typer
-    return paths
+    visit(root, [], None)
+    return pages
 
 
 def render_cli() -> str:
@@ -66,15 +71,10 @@ def render_cli() -> str:
         "(`KEYSTONE_INFERENCE_URL`, `KEYSTONE_API_KEY`; admin commands need `KEYSTONE_ROOT_ADMIN_TOKEN`), except "
         "`init`, `doctor`, `up`/`down`, `bundle` and `deploy`, which work on the machine they run on.",
         "",
-        "## keystone",
-        "",
-        "```text",
-        _help(app, []).rstrip(),
-        "```",
-        "",
     ]
-    for path in _walk(app):
-        parts += [f"## keystone {' '.join(path)}", "", "```text", _help(app, path).rstrip(), "```", ""]
+    for path, text in _help_pages(app):
+        title = "keystone" if not path else f"keystone {' '.join(path)}"
+        parts += [f"## {title}", "", "```text", text.rstrip(), "```", ""]
     return "\n".join(parts)
 
 

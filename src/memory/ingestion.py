@@ -20,11 +20,12 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from src.config import get_settings
 from src.db.connection import get_db_context
-from src.db.models import CodebaseIndex
+from src.db.models import CodebaseIndex, CodeChunk
+from src.memory.chunking import chunk_code
 from src.memory.vector_store import VectorStore
 
 logger = structlog.get_logger(__name__)
@@ -235,7 +236,7 @@ class CodeIngestionPipeline:
                     file_hash = hashlib.sha256(content.encode()).hexdigest()
 
                     existing = existing_by_path.get(rel_path)
-                    file_chunks = self._chunk_code(content, chunk_size, chunk_overlap)
+                    file_chunks = chunk_code(content, language, chunk_size, chunk_overlap)
                     needs_reembedding, stale_range = _plan_file_ingestion(
                         existing.file_hash if existing else None,
                         existing.chunk_count if existing else 0,
@@ -274,6 +275,22 @@ class CodeIngestionPipeline:
             if stale_ids:
                 await vs.delete_by_ids(tenant_id, stale_ids)
             upserted = await vs.upsert_chunks(tenant_id, chunks)
+            # the same chunks, by the same ids, in Postgres for full-text ranking (src/memory/hybrid_search.py)
+            async with get_db_context() as db:
+                if stale_ids:
+                    await db.execute(delete(CodeChunk).where(CodeChunk.id.in_([uuid.UUID(i) for i in stale_ids])))
+                for c in chunks:
+                    await db.merge(
+                        CodeChunk(
+                            id=uuid.UUID(c["id"]),
+                            tenant_id=tenant_uuid,
+                            repository_url=repository_url,
+                            file_path=c["file_path"],
+                            language=c["language"],
+                            chunk_index=c["chunk_index"],
+                            content=c["content"],
+                        )
+                    )
 
             # A fresh session for the writeback — existing_by_path's rows were
             # loaded in (and detached from) the earlier read-only session, so

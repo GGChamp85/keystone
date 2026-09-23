@@ -60,11 +60,19 @@ echo "== dump: $(stat -f %z "$WORK/source.dump" 2>/dev/null || stat -c %s "$WORK
 echo "== starting a fresh postgres ($IMAGE)"
 PORT="${DRILL_PORT:-55432}"
 docker run -d --name "$NAME" -e POSTGRES_PASSWORD=drill -e POSTGRES_USER=keystone -e POSTGRES_DB=keystone -p "$PORT:5432" "$IMAGE" >/dev/null
-for _ in $(seq 1 60); do
-  if docker exec "$NAME" pg_isready -U keystone -d keystone >/dev/null 2>&1; then break; fi
+TARGET_URL="postgresql://keystone:drill@127.0.0.1:$PORT/keystone"
+# The official image starts Postgres once for initdb and then restarts it: pg_isready can pass during that
+# first window and the real connection then fail. Wait for a real query through the published port.
+ready=0
+for _ in $(seq 1 90); do
+  if pg psql -tA "$TARGET_URL" -c "select 1" >/dev/null 2>&1; then ready=1; break; fi
   sleep 1
 done
-TARGET_URL="postgresql://keystone:drill@127.0.0.1:$PORT/keystone"
+if [ "$ready" != "1" ]; then
+  echo "fresh postgres did not become ready on port $PORT" >&2
+  docker logs "$NAME" 2>&1 | tail -20 >&2
+  exit 1
+fi
 
 echo "== restoring"
 pg pg_restore --no-owner --no-privileges --dbname="$TARGET_URL" /work/source.dump

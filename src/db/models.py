@@ -12,6 +12,7 @@ from typing import Any
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    Computed,
     DateTime,
     Float,
     ForeignKey,
@@ -25,7 +26,7 @@ from sqlalchemy import (
 from sqlalchemy import (
     Enum as SAEnum,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -355,6 +356,29 @@ class CodebaseIndex(Base):
 
 
 # ── Audit Log ─────────────────────────────────────────────────
+
+
+class CodeChunk(Base):
+    """The text of one indexed chunk — the same id as its Qdrant point — with a generated tsvector, so
+    retrieval can rank by full text as well as by embedding (src/memory/hybrid_search.py)."""
+
+    __tablename__ = "code_chunks"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    repository_url: Mapped[str] = mapped_column(String(1024), nullable=False)
+    file_path: Mapped[str] = mapped_column(String(2048), nullable=False)
+    language: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    chunk_index: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    tsv: Mapped[Any] = mapped_column(TSVECTOR, Computed("to_tsvector('english', content)", persisted=True))
+    indexed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+
+    __table_args__ = (Index("ix_code_chunks_tenant_repo", "tenant_id", "repository_url"),)
 
 
 class AuditLog(Base):

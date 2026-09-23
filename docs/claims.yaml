@@ -41,3 +41,12 @@ claims:
   - text: "the gateway passes `tools`, `tool_choice` and `tool` messages through to the model unchanged"
     docs: [docs/guides/use-from-vscode.md]
     tests: [tests/test_messages_api.py::test_chat_completions_passes_tools_and_tool_messages_through]
+
+  - text: "an exact identifier found by full text, fused first when both sides agree, repository scoping on both sides"
+    docs: [CHANGELOG.md]
+    tests: [tests/test_hybrid_search.py::test_exact_identifiers_are_found_by_full_text_and_fused_with_vector_results]
+
+  - text: "the real test database's revision, real disk usage"
+    docs: [CHANGELOG.md]
+    tests: [tests/test_doctor_checks.py]
+

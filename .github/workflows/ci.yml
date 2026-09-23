@@ -156,15 +156,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -e ".[dev,docs]"
+      - name: Install from the lockfile (the generated references depend on exact library versions)
+        run: pip install uv && uv sync --frozen --extra dev --extra docs
       - name: Configuration reference is generated from src/config.py and current
-        run: python scripts/gen_config_reference.py --check
+        run: uv run python scripts/gen_config_reference.py --check
       - name: CLI and API references are generated from the code and current
-        run: python scripts/gen_cli_reference.py --check
+        run: uv run python scripts/gen_cli_reference.py --check
       - name: Every documented claim names a test that exists
-        run: python scripts/check_claims.py
+        run: uv run python scripts/check_claims.py
       - name: Documentation site builds with no warnings
-        run: mkdocs build --strict
+        run: uv run mkdocs build --strict
 
   helm:
     name: Helm lint + template

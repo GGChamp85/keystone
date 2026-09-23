@@ -28,10 +28,11 @@ from dataclasses import dataclass
 from uuid import UUID
 
 import structlog
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from src.db.connection import get_db_context
 from src.db.models import AgentMemory, MemoryKind, MemoryScope, MemorySource, MemoryStatus
+from src.memory.hybrid_search import or_query
 from src.orchestrator.context import count_tokens
 
 logger = structlog.get_logger(__name__)
@@ -201,9 +202,19 @@ async def recall(
             )
         else:
             stmt = stmt.where(AgentMemory.scope == MemoryScope.TENANT)
+        # Postgres full-text rank of each memory against the query (stemming, stop words, phrase-aware),
+        # computed in the query itself; a memory that matches nothing ranks 0 and falls back to recency.
+        tsq = func.websearch_to_tsquery("english", or_query(query)) if or_query(query) else None
+        rank_expr = func.ts_rank_cd(func.to_tsvector("english", AgentMemory.content), tsq) if tsq is not None else None
         stmt = stmt.order_by(AgentMemory.created_at.desc())
         result = await db.execute(stmt)
         candidates = list(result.scalars().all())
+        fts_rank: dict[UUID, float] = {}
+        if rank_expr is not None and candidates:
+            rank_rows = await db.execute(
+                select(AgentMemory.id, rank_expr).where(AgentMemory.id.in_([m.id for m in candidates]))
+            )
+            fts_rank = {row[0]: float(row[1] or 0.0) for row in rank_rows.all()}
 
     query_words = {w.lower() for w in _WORD_RE.findall(query)}
     ranked = sorted(
@@ -211,7 +222,8 @@ async def recall(
         key=lambda m: (
             not m.pinned,  # pinned (False) sorts before unpinned (True)
             m.scope != MemoryScope.REPO,  # repo-scope sorts before tenant-scope
-            -_keyword_overlap(m.content, query_words),
+            -fts_rank.get(m.id, 0.0),  # full-text rank first
+            -_keyword_overlap(m.content, query_words),  # then plain overlap as the tie-breaker
             -(m.created_at.timestamp() if m.created_at else 0),
         ),
     )

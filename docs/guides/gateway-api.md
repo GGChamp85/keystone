@@ -69,7 +69,7 @@ keystone ingest https://your-git-host/yourorg/yourrepo --branch main
 #   61 chunk(s) created, 61 upserted, 0 stale chunk(s) removed
 ```
 
-Incremental: an unchanged file is skipped next time; a removed file's chunks are deleted. The agent's planning, coding and review steps retrieve from this index.
+Incremental: an unchanged file is skipped next time; a removed file's chunks are deleted. Chunks are cut on the code's own boundaries (functions and classes, via the real parser for Python) and stored twice: as embeddings in Qdrant and as full-text rows in Postgres. The agent's planning, coding and review steps retrieve with both — vector similarity for the topic, full-text rank for the exact identifiers a task names — fused so a chunk found by both ranks first.
 
 ## Keys, limits, spend
 

@@ -30,6 +30,7 @@ from src.config import get_settings
 from src.db.connection import get_db_context
 from src.db.models import AgentTask, TaskStatus, Tenant
 from src.inference.model_router import classify_task_complexity, classify_task_to_role
+from src.memory.hybrid_search import hybrid_search
 from src.memory.vector_store import VectorStore
 from src.orchestrator.circuit_breaker import CircuitBreakerConfig, CircuitBreakerTripped
 from src.orchestrator.concurrency import (
@@ -330,14 +331,11 @@ class KeystoneEngine:
             max_context_tokens=get_settings().agent_max_context_tokens,
         )
 
-        # Retrieve RAG context from Qdrant
+        # Retrieve RAG context: vector similarity fused with full-text rank (src/memory/hybrid_search.py),
+        # so the exact identifiers a task names are found as reliably as its topic
         try:
             vs = await self._get_vector_store()
-            rag_results = await vs.search(
-                query=task_description,
-                tenant_id=str(tenant_id),
-                limit=5,
-            )
+            rag_results = await hybrid_search(vs, tenant_id, task_description, repository=repository_url, limit=5)
             if rag_results:
                 state.rag_context = "\n\n---\n\n".join(
                     f"File: {r['file_path']}\n```\n{r['content']}\n```" for r in rag_results
