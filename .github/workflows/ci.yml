@@ -18,7 +18,7 @@ jobs:
     name: Lint (ruff) + type check (mypy)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - run: pip install -e ".[dev]"
@@ -78,7 +78,7 @@ jobs:
       CODING_MODEL_ID: demo-coder
       PYTHONPATH: ${{ github.workspace }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - run: pip install -e ".[dev]"
@@ -132,7 +132,7 @@ jobs:
       HF_HUB_DISABLE_TELEMETRY: "1"
       TOKENIZERS_PARALLELISM: "false"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - name: Cache the Hugging Face hub (the 0.5B base model, ~1 GB, downloaded once)
@@ -152,7 +152,7 @@ jobs:
     name: Docs (truth-in-docs claims, generated config reference, mkdocs --strict)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -171,7 +171,7 @@ jobs:
     name: Helm lint + template
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: azure/setup-helm@v4
       - run: helm lint helm/keystone --set training.ray.enabled=true --set observability.enabled=true
       - run: helm template keystone-ci helm/keystone --set observability.enabled=true --set training.ray.enabled=true > /dev/null
@@ -207,7 +207,7 @@ jobs:
     name: IaC (OpenTofu fmt + init -backend=false + validate, no cloud credentials)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: opentofu/setup-opentofu@v1
         with:
           tofu_version: "1.12.6"
@@ -236,7 +236,7 @@ jobs:
     name: Shellcheck (airgap/, pki/, scripts/)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Shellcheck all tracked shell scripts
         run: |
           find airgap pki scripts -name '*.sh' -print0 | xargs -0 -r shellcheck
@@ -250,7 +250,7 @@ jobs:
       QDRANT_API_KEY: ci-test-key
       KEYSTONE_ROOT_ADMIN_TOKEN: ci-test-root-admin-token
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: docker compose config --quiet
 
   web:
@@ -260,7 +260,7 @@ jobs:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -277,7 +277,7 @@ jobs:
       run:
         working-directory: vscode/extension
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -300,7 +300,7 @@ jobs:
     name: Docker image build (no push)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v6
         with:
