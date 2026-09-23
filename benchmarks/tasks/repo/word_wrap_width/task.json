@@ -1,0 +1,14 @@
+{
+  "id": "word_wrap_width",
+  "language": "python",
+  "instruction": "word_wrap() in wrap.py is supposed to break text into lines no longer than `width` characters, but its length check compares each candidate line against `width + 1` instead of `width`, so a line one character over the limit is accepted. Fix word_wrap() so no returned line ever exceeds `width` characters, without changing its signature or breaking the existing tests in tests/test_wrap.py.",
+  "test_command": "python -m pytest tests/ -v",
+  "fail_to_pass": [
+    "tests/test_wrap.py::test_wraps_at_the_given_width_without_ever_exceeding_it",
+    "tests/test_wrap.py::test_multiple_lines_are_produced_for_long_text"
+  ],
+  "pass_to_pass": [
+    "tests/test_wrap.py::test_short_text_fits_on_one_line",
+    "tests/test_wrap.py::test_a_single_word_longer_than_width_is_its_own_line"
+  ]
+}

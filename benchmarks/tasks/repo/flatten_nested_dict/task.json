@@ -1,0 +1,14 @@
+{
+  "id": "flatten_nested_dict",
+  "language": "python",
+  "instruction": "flatten() in flatten.py is supposed to turn a nested dict into dot-path keys, but when a nested value is itself an empty dict, flatten() recurses into zero iterations and out.update({}) silently drops that key entirely instead of preserving it. Fix flatten() so an empty nested dict at any depth is kept in the output (as an empty-dict value at its dotted path) without breaking the existing tests in tests/test_flatten.py.",
+  "test_command": "python -m pytest tests/ -v",
+  "fail_to_pass": [
+    "tests/test_flatten.py::test_an_empty_nested_dict_is_preserved_not_dropped",
+    "tests/test_flatten.py::test_deeply_nested_empty_dict_is_preserved"
+  ],
+  "pass_to_pass": [
+    "tests/test_flatten.py::test_flattens_nested_keys_with_dot_paths",
+    "tests/test_flatten.py::test_non_dict_values_at_top_level_are_kept_as_is"
+  ]
+}

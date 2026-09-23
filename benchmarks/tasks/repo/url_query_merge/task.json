@@ -1,0 +1,14 @@
+{
+  "id": "url_query_merge",
+  "language": "python",
+  "instruction": "merge_query() in query.py builds the new query string by hand-joining \"key=value\" pairs, so special characters in a parameter value (spaces, &, =, #) are never percent-encoded and corrupt the resulting URL. Fix merge_query() to produce a properly percent-encoded query string (the standard library's urlencode is the right tool) without changing its signature or breaking the existing tests in tests/test_query.py.",
+  "test_command": "python -m pytest tests/ -v",
+  "fail_to_pass": [
+    "tests/test_query.py::test_special_characters_in_values_are_percent_encoded",
+    "tests/test_query.py::test_a_hash_character_in_a_value_is_also_encoded"
+  ],
+  "pass_to_pass": [
+    "tests/test_query.py::test_merges_new_param_into_existing_query",
+    "tests/test_query.py::test_new_param_overrides_existing_same_key"
+  ]
+}

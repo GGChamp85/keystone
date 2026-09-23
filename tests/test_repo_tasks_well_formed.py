@@ -89,7 +89,7 @@ def test_task_premise_holds_on_the_unfixed_repo(task_dir: Path, tmp_path: Path):
     assert all(passing.values()), f"pass_to_pass must pass before the fix: {passing}"
 
 
-def test_there_are_at_least_twelve_repo_tasks_across_three_ecosystems():
-    assert len(TASK_DIRS) >= 12, [p.name for p in TASK_DIRS]
+def test_there_are_at_least_fifteen_repo_tasks_across_three_ecosystems():
+    assert len(TASK_DIRS) >= 15, [p.name for p in TASK_DIRS]
     languages = {json.loads((p / "task.json").read_text()).get("language", "python") for p in TASK_DIRS}
     assert {"python", "node", "go"} <= languages

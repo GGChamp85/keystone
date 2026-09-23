@@ -11,9 +11,9 @@
 
 ## The repository tasks
 
-Twelve tasks under `benchmarks/tasks/repo/`, each a small real repository with a genuine bug, a failing test that the fix must make pass (`fail_to_pass`) and tests that must keep passing (`pass_to_pass`). Each task proves its own premise in CI: `tests/test_repo_tasks_well_formed.py` checks that the held-out tests really fail before the fix and really pass after — Python with pytest, Node with the built-in test runner, Go with `go test` inside the Go sandbox runtime image.
+Fifteen tasks under `benchmarks/tasks/repo/`, each a small real repository with a genuine bug, a failing test that the fix must make pass (`fail_to_pass`) and tests that must keep passing (`pass_to_pass`). Each task proves its own premise in CI: `tests/test_repo_tasks_well_formed.py` checks that the held-out tests really fail before the fix and really pass after — Python with pytest, Node with the built-in test runner, Go with `go test` inside the Go sandbox runtime image.
 
-Python: `backoff_cap`, `config_deep_merge`, `csv_quoted_fields`, `date_range_inclusive`, `inventory_negative_stock`, `lru_cache_recency`, `pagination_last_page`, `slugify_collapse`, `token_bucket`. Node: `slug_dedupe_node`, `retry_jitter_node`. Go: `lru_ttl_go`. The agent runs each in the sandbox runtime image for its ecosystem (`docker/sandbox-runtimes/{python,node,go}.Dockerfile`, chosen after the clone from the repository's own tooling).
+Python: `backoff_cap`, `config_deep_merge`, `csv_quoted_fields`, `date_range_inclusive`, `flatten_nested_dict`, `inventory_negative_stock`, `lru_cache_recency`, `pagination_last_page`, `slugify_collapse`, `token_bucket`, `url_query_merge`, `word_wrap_width`. Node: `slug_dedupe_node`, `retry_jitter_node`. Go: `lru_ttl_go`. The agent runs each in the sandbox runtime image for its ecosystem (`docker/sandbox-runtimes/{python,node,go}.Dockerfile`, chosen after the clone from the repository's own tooling).
 
 ## Run it
 
