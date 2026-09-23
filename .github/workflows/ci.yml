@@ -29,7 +29,9 @@ jobs:
       - name: uv.lock is in sync with pyproject.toml
         run: pip install uv && uv lock --check
       - name: repo-facing text stays vendor-neutral (ADR 0006)
-        run: scripts/check_vendor_neutral.sh README.md CHANGELOG.md ROADMAP.md $(find docs -name '*.md')
+        run: scripts/check_vendor_neutral.sh README.md CHANGELOG.md ROADMAP.md $(find docs -name '*.md') vscode/extension/README.md vscode/extension/CHANGELOG.md
+      - name: task event types are identical in web/src/api.ts and vscode/extension/src/api.ts
+        run: python scripts/check_ts_types_in_sync.py
 
   test:
     name: Test (pytest, real Postgres/Redis/Qdrant/Docker sandbox)
@@ -207,6 +209,32 @@ jobs:
       - run: npm ci
       - run: npx tsc --noEmit
       - run: npm run build
+
+  vscode-extension:
+    name: VS Code extension (typecheck, unit tests on recorded frames, host test, .vsix)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: vscode/extension
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: vscode/extension/package-lock.json
+      - run: npm ci
+      - name: typecheck + vitest (SSE decoder, renderer and model picker on the recorded real fixtures)
+        run: npm test
+      - name: VS Code host test (activation + commands; the live submit test self-skips without KEYSTONE_URL/KEYSTONE_API_KEY)
+        run: xvfb-run -a npm run test:integration
+      - name: package the .vsix
+        run: npm run package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: keystone-agents-vsix
+          path: vscode/extension/keystone-agents.vsix
+          if-no-files-found: error
 
   docker-build:
     name: Docker image build (no push)

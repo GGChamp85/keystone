@@ -642,25 +642,17 @@ class KeystoneEngine:
             stmt = stmt.order_by(AgentTask.created_at.desc()).limit(limit)
             result = await db.execute(stmt)
             tasks = result.scalars().all()
-            return [
-                {
-                    "id": t.id,
-                    "user_id": t.user_id,
-                    "status": t.status.value,
-                    "task_description": t.task_description,
-                    "repository_url": t.repository_url,
-                    "branch": t.branch,
-                    "branch_name": t.branch_name,
-                    "pr_url": t.pr_url,
-                    "pr_number": t.pr_number,
-                    "model_role": t.model_role.value if t.model_role else "coding",
-                    "error_message": t.error_message,
-                    "started_at": t.started_at,
-                    "completed_at": t.completed_at,
-                    "created_at": t.created_at,
-                }
-                for t in tasks
-            ]
+            return [_task_summary_row(t) for t in tasks]
+
+    async def get_task_summary(self, tenant_id: UUID, task_id: UUID) -> dict | None:
+        """One task in the same lean shape as `list_tasks` rows (AgentTaskSummaryResponse),
+        scoped to the calling tenant — a task belonging to another tenant is reported as
+        not found, never leaked. Backs the MCP `task_status` tool (src/api/routes/mcp.py)."""
+        async with get_db_context() as db:
+            task = await db.get(AgentTask, task_id)
+            if task is None or task.tenant_id != tenant_id:
+                return None
+            return _task_summary_row(task)
 
     async def cancel_task(self, task_id: UUID) -> bool:
         """Cancel a running task — propagates real cancellation to the Temporal
@@ -700,6 +692,27 @@ class KeystoneEngine:
 
 # Singleton
 _engine: KeystoneEngine | None = None
+
+
+def _task_summary_row(t: AgentTask) -> dict:
+    """The per-row shape of GET /v1/keystone/tasks (AgentTaskSummaryResponse) — shared by
+    `list_tasks` and `get_task_summary` so the two can never drift."""
+    return {
+        "id": t.id,
+        "user_id": t.user_id,
+        "status": t.status.value,
+        "task_description": t.task_description,
+        "repository_url": t.repository_url,
+        "branch": t.branch,
+        "branch_name": t.branch_name,
+        "pr_url": t.pr_url,
+        "pr_number": t.pr_number,
+        "model_role": t.model_role.value if t.model_role else "coding",
+        "error_message": t.error_message,
+        "started_at": t.started_at,
+        "completed_at": t.completed_at,
+        "created_at": t.created_at,
+    }
 
 
 def get_keystone_engine() -> KeystoneEngine:

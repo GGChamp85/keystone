@@ -1,0 +1,241 @@
+{
+  "generated_at": 1790143029,
+  "models": [
+    {
+      "kind": "role",
+      "id": "coding",
+      "name": "Qwen2.5-Coder-7B-Instruct",
+      "purpose": "primary coding model: every agent task and gateway request with model='coding'",
+      "hf_source": "Qwen/Qwen2.5-Coder-7B-Instruct",
+      "provider": "local process",
+      "endpoint": "http://127.0.0.1:57244",
+      "served_path": "coding",
+      "served_model_ids": [
+        "test-model"
+      ],
+      "state": "READY",
+      "health": {
+        "healthy": true,
+        "breaker": "closed",
+        "consecutive_failures": 0,
+        "open_for_seconds": 0,
+        "last_error": null,
+        "probed_seconds_ago": 0
+      },
+      "params_b": 7.0,
+      "context": 4096,
+      "context_source": "endpoint",
+      "license": "Apache-2.0",
+      "moe": false,
+      "tool_parser": "hermes",
+      "deployment": {
+        "vram_serve_gb": 17.5
+      },
+      "api_features": {
+        "chat_completions": true,
+        "anthropic_messages": true,
+        "streaming": true,
+        "tools": true,
+        "json_schema": true,
+        "lora_adapters": false
+      },
+      "adapters": []
+    },
+    {
+      "kind": "role",
+      "id": "coding_fallback",
+      "name": "Qwen2.5-Coder-32B-Instruct",
+      "purpose": "used when the primary is unhealthy, and for simple tasks when complexity routing is on",
+      "hf_source": "Qwen/Qwen2.5-Coder-32B-Instruct",
+      "provider": "local process",
+      "endpoint": "http://127.0.0.1:1/v1",
+      "served_path": "coding_fallback",
+      "served_model_ids": [],
+      "state": "UNHEALTHY",
+      "health": {
+        "healthy": false,
+        "breaker": "closed",
+        "consecutive_failures": 1,
+        "open_for_seconds": 0,
+        "last_error": "probe returned unhealthy",
+        "probed_seconds_ago": 0
+      },
+      "params_b": 32.0,
+      "context": 131072,
+      "context_source": "catalog",
+      "license": "Apache-2.0",
+      "moe": false,
+      "tool_parser": "hermes",
+      "deployment": {
+        "vram_serve_gb": 80.0
+      },
+      "api_features": {
+        "chat_completions": true,
+        "anthropic_messages": true,
+        "streaming": true,
+        "tools": true,
+        "json_schema": true,
+        "lora_adapters": false
+      },
+      "adapters": []
+    },
+    {
+      "kind": "role",
+      "id": "reasoning",
+      "name": "DeepSeek-R1",
+      "purpose": "reviewer/critic: the review and planning nodes",
+      "hf_source": "deepseek-ai/DeepSeek-R1",
+      "provider": "local process",
+      "endpoint": "http://127.0.0.1:1/v1",
+      "served_path": "reasoning",
+      "served_model_ids": [],
+      "state": "UNHEALTHY",
+      "health": {
+        "healthy": false,
+        "breaker": "closed",
+        "consecutive_failures": 1,
+        "open_for_seconds": 0,
+        "last_error": "probe returned unhealthy",
+        "probed_seconds_ago": 0
+      },
+      "params_b": 671.0,
+      "context": 131072,
+      "context_source": "catalog",
+      "license": "MIT",
+      "moe": true,
+      "tool_parser": null,
+      "deployment": {
+        "vram_serve_gb": 1677.5
+      },
+      "api_features": {
+        "chat_completions": true,
+        "anthropic_messages": true,
+        "streaming": true,
+        "tools": false,
+        "json_schema": true,
+        "lora_adapters": false
+      },
+      "adapters": []
+    },
+    {
+      "kind": "catalog",
+      "id": "Qwen/Qwen2.5-Coder-0.5B-Instruct",
+      "name": "Qwen2.5-Coder-0.5B-Instruct",
+      "purpose": "CI/laptop smoke model; not for quality",
+      "hf_source": "Qwen/Qwen2.5-Coder-0.5B-Instruct",
+      "provider": "catalog (not deployed here)",
+      "endpoint": null,
+      "served_path": null,
+      "state": "NOT_DEPLOYED",
+      "params_b": 0.5,
+      "context": 32768,
+      "license": "Apache-2.0",
+      "moe": false,
+      "tool_parser": "hermes",
+      "deployment": {
+        "vram_serve_gb": 1.2,
+        "vram_qlora_gb": 2.6,
+        "vram_lora_bf16_gb": 3.6
+      },
+      "api_features": {
+        "chat_completions": true,
+        "anthropic_messages": true,
+        "streaming": true,
+        "tools": true,
+        "json_schema": true,
+        "lora_adapters": true
+      },
+      "adapters": []
+    },
+    {
+      "kind": "catalog",
+      "id": "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+      "name": "Qwen2.5-Coder-1.5B-Instruct",
+      "purpose": "autocomplete-class",
+      "hf_source": "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+      "provider": "catalog (not deployed here)",
+      "endpoint": null,
+      "served_path": null,
+      "state": "NOT_DEPLOYED",
+      "params_b": 1.5,
+      "context": 32768,
+      "license": "Apache-2.0",
+      "moe": false,
+      "tool_parser": "hermes",
+      "deployment": {
+        "vram_serve_gb": 3.8,
+        "vram_qlora_gb": 3.8,
+        "vram_lora_bf16_gb": 6.8
+      },
+      "api_features": {
+        "chat_completions": true,
+        "anthropic_messages": true,
+        "streaming": true,
+        "tools": true,
+        "json_schema": true,
+        "lora_adapters": true
+      },
+      "adapters": []
+    },
+    {
+      "kind": "catalog",
+      "id": "Qwen/Qwen2.5-Coder-3B-Instruct",
+      "name": "Qwen2.5-Coder-3B-Instruct",
+      "purpose": "deployable open-weight coder; fine-tunable on your repositories",
+      "hf_source": "Qwen/Qwen2.5-Coder-3B-Instruct",
+      "provider": "catalog (not deployed here)",
+      "endpoint": null,
+      "served_path": null,
+      "state": "NOT_DEPLOYED",
+      "params_b": 3.0,
+      "context": 32768,
+      "license": "Apache-2.0",
+      "moe": false,
+      "tool_parser": "hermes",
+      "deployment": {
+        "vram_serve_gb": 7.5,
+        "vram_qlora_gb": 5.6,
+        "vram_lora_bf16_gb": 11.6
+      },
+      "api_features": {
+        "chat_completions": true,
+        "anthropic_messages": true,
+        "streaming": true,
+        "tools": true,
+        "json_schema": true,
+        "lora_adapters": true
+      },
+      "adapters": []
+    },
+    {
+      "kind": "catalog",
+      "id": "Qwen/Qwen2.5-Coder-14B-Instruct",
+      "name": "Qwen2.5-Coder-14B-Instruct",
+      "purpose": "one 24 GB GPU: AWQ serving or QLoRA training only",
+      "hf_source": "Qwen/Qwen2.5-Coder-14B-Instruct",
+      "provider": "catalog (not deployed here)",
+      "endpoint": null,
+      "served_path": null,
+      "state": "NOT_DEPLOYED",
+      "params_b": 14.0,
+      "context": 131072,
+      "license": "Apache-2.0",
+      "moe": false,
+      "tool_parser": "hermes",
+      "deployment": {
+        "vram_serve_gb": 35.0,
+        "vram_qlora_gb": 18.8,
+        "vram_lora_bf16_gb": 46.8
+      },
+      "api_features": {
+        "chat_completions": true,
+        "anthropic_messages": true,
+        "streaming": true,
+        "tools": true,
+        "json_schema": true,
+        "lora_adapters": true
+      },
+      "adapters": []
+    }
+  ]
+}

@@ -1,0 +1,121 @@
+{
+  "name": "keystone-agents",
+  "displayName": "Keystone Agents",
+  "description": "Submit background coding tasks to your self-hosted Keystone deployment, watch the live plan/tool/test/PR trace inside VS Code, and search the team memory the agent learns from.",
+  "version": "0.1.0",
+  "publisher": "keystone",
+  "license": "Apache-2.0",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/GGChamp85/keystone.git",
+    "directory": "vscode/extension"
+  },
+  "homepage": "https://github.com/GGChamp85/keystone/blob/main/docs/guides/use-from-vscode.md",
+  "engines": {
+    "vscode": "^1.90.0",
+    "node": ">=20"
+  },
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "keywords": [
+    "keystone",
+    "coding agent",
+    "self-hosted",
+    "llm"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onCommand:keystone.submitTask",
+    "onCommand:keystone.openTrace",
+    "onCommand:keystone.listTasks",
+    "onCommand:keystone.memorySearch",
+    "onCommand:keystone.openPlayground",
+    "onCommand:keystone.setApiKey"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "keystone.submitTask",
+        "title": "Submit background task",
+        "category": "Keystone"
+      },
+      {
+        "command": "keystone.openTrace",
+        "title": "Open task trace",
+        "category": "Keystone"
+      },
+      {
+        "command": "keystone.listTasks",
+        "title": "List recent tasks",
+        "category": "Keystone"
+      },
+      {
+        "command": "keystone.memorySearch",
+        "title": "Search team memory",
+        "category": "Keystone"
+      },
+      {
+        "command": "keystone.openPlayground",
+        "title": "Open the Playground (web UI)",
+        "category": "Keystone"
+      },
+      {
+        "command": "keystone.setApiKey",
+        "title": "Set API key",
+        "category": "Keystone"
+      }
+    ],
+    "configuration": {
+      "title": "Keystone",
+      "properties": {
+        "keystone.baseUrl": {
+          "type": "string",
+          "default": "http://localhost:8080",
+          "description": "Base URL of the Keystone gateway (the same origin that serves /v1/* and the web UI at /app/). No trailing /v1."
+        },
+        "keystone.defaultModel": {
+          "type": "string",
+          "default": "auto",
+          "enum": [
+            "auto",
+            "coding",
+            "coding_fallback",
+            "reasoning"
+          ],
+          "enumDescriptions": [
+            "Let Keystone's router classify the task and pick the role before the task is persisted",
+            "The primary coding model",
+            "The cheaper, lower-latency coding model",
+            "The reasoning / critic model"
+          ],
+          "description": "The model role pre-selected in the picker when submitting a task. The API key is not a setting: run 'Keystone: Set API key' — it is kept in VS Code's secret storage."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "npm run typecheck && vitest run",
+    "test:unit": "vitest run",
+    "compile-tests": "tsc -p tsconfig.test.json",
+    "test:integration": "npm run build && npm run compile-tests && node out/test/runTest.js",
+    "package": "vsce package --no-dependencies --out keystone-agents.vsix"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^20.19.0",
+    "@types/vscode": "1.90.0",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^3.6.0",
+    "esbuild": "^0.25.0",
+    "mocha": "^11.7.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}

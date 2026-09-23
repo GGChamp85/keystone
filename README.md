@@ -390,7 +390,17 @@ See `docs/deployment/OPENCODE_SETUP.md` for wiring OpenCode to a non-local Keyst
 
 ### Use it from VS Code
 
-Install the [Continue](https://www.continue.dev/) extension and generate its config from your deployment — chat, inline edit, autocomplete and the agent's memory tools (over MCP) all run against your Keystone gateway with one API key:
+Two extensions, one gateway, one API key.
+
+**The Keystone extension** (`vscode/extension/`) is the background agent in VS Code: **Keystone: Submit background task** asks for a description, the repository (pre-filled from the workspace's git remote) and a model picked from the live Model Library (READY roles first; an unhealthy role is shown but cannot be picked), then opens a trace panel streaming the plan, every tool call and result, quality findings, test output, the diff and the pull request as they happen — with an **Open PR** notification at the end. **List recent tasks**, **Search team memory** and a running-task count in the status bar round it out. Install the `.vsix` CI builds, or:
+
+```bash
+cd vscode/extension && npm ci && npm run build && npm run package && code --install-extension keystone-agents.vsix
+```
+
+Its parser and renderer are tested on frames recorded from the real stream route, and a VS Code host test submits a real task when pointed at a live gateway (`vscode/extension/README.md` says exactly what is verified and how).
+
+**Continue** covers chat, inline edit, autocomplete and the agent's memory and task tools over MCP, against the same gateway — generate its config from your deployment:
 
 ```bash
 keystone ide continue-config --base-url https://keystone.internal:8080 --api-key ks-XXXX-XXXXXXXX --output ~/.continue/config.yaml

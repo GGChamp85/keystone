@@ -5,10 +5,11 @@
 Keystone Agents — MCP server.
 
 Exposes the same memory surface as the `keystone` CLI (src/cli/main.py) and
-the OpenCode plugin (cli/opencode/plugins/keystone-memory.ts) to any
-MCP-speaking client (desktop clients, IDEs, a remote
-`opencode.json` `mcp` entry) over the real Streamable HTTP transport —
-mounted into the main FastAPI app (src/main.py) at /v1/keystone/mcp.
+the OpenCode plugin (cli/opencode/plugins/keystone-memory.ts) — plus task
+submission and status, the same operations as POST/GET /v1/keystone/tasks —
+to any MCP-speaking client (desktop clients, IDEs, a remote `opencode.json`
+`mcp` entry) over the real Streamable HTTP transport — mounted into the
+main FastAPI app (src/main.py) at /v1/keystone/mcp.
 
 Built on the official `mcp` SDK (MIT, verified via `pip download mcp` +
 reading its real METADATA before adding it as a dependency). Its current
@@ -37,25 +38,33 @@ anyway). Flagged here rather than silently assumed away.
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
+from pydantic import ValidationError
 from starlette.applications import Starlette
 
 from src.api.middleware.auth import _resolve_api_key
+from src.api.models.requests import AgentTaskRequest
+from src.api.models.responses import AgentTaskSubmittedResponse, AgentTaskSummaryResponse
+from src.api.routes.agents import submit_agent_task
 from src.config import get_settings
 from src.db.connection import get_db_context
 from src.db.models import APIKey, Tenant, User
 from src.memory.store import MemoryRecord, create_memory, recall
+from src.orchestrator.concurrency import ConcurrencyLimitExceeded
+from src.orchestrator.engine import get_keystone_engine
 
 mcp_server: MCPServer = MCPServer(
     name="keystone",
     title="Keystone Agents",
     instructions=(
-        "Tools for Keystone Agents' team memory — the conventions, preferences, "
+        "Tools for Keystone Agents: the team memory — the conventions, preferences, "
         "facts, and things-to-avoid the background coding agent has learned and "
-        "recalls into its own prompts. Every call needs the same `ks-...` Bearer "
+        "recalls into its own prompts — and the background coding tasks themselves "
+        "(submit one, check its status). Every call needs the same `ks-...` Bearer "
         "API key used against the rest of the Keystone API."
     ),
     version="1.0.0",
@@ -134,6 +143,77 @@ async def memory_add(
         created_by=str(user.id) if user else str(api_key.id),
     )
     return _record_to_dict(record)
+
+
+@mcp_server.tool()
+async def task_submit(
+    task: str,
+    ctx: Context,
+    repository_url: str | None = None,
+    branch: str = "main",
+    model: str = "coding",
+    max_iterations: int = 15,
+    file_paths: list[str] | None = None,
+    quality_blocking_tools: list[str] | None = None,
+) -> dict[str, Any]:
+    """Submit a background coding task to Keystone Agents.
+
+    The agent clones `repository_url` into a sandbox, plans, edits with real
+    tools, runs the quality gates and the repo's tests, and opens a pull
+    request. `model` is a gateway role — coding | coding_fallback | reasoning —
+    or `auto` to let the router classify the task. `max_iterations` is the
+    one per-task safety bound (no ceiling). Exactly the validation of
+    `POST /v1/keystone/tasks`: the same AgentTaskRequest model and the same
+    submission function, so the two surfaces cannot drift. Returns
+    `{task_id, status, message}`; follow the task with `task_status` or the
+    REST stream `GET /v1/keystone/tasks/{task_id}/stream`.
+    """
+    api_key, tenant, user = await _authenticate(ctx)
+    try:
+        req = AgentTaskRequest(
+            task=task,
+            repository_url=repository_url,
+            branch=branch,
+            file_paths=file_paths or [],
+            model=model,  # type: ignore[arg-type]  # pydantic validates the Literal at runtime → ToolError
+            max_iterations=max_iterations,
+            quality_blocking_tools=quality_blocking_tools,
+        )
+    except ValidationError as exc:
+        raise ToolError(_validation_message(exc)) from exc
+    try:
+        task_id = await submit_agent_task(req, api_key, tenant, user)
+    except ConcurrencyLimitExceeded as exc:
+        raise ToolError(str(exc)) from exc
+    return AgentTaskSubmittedResponse(task_id=task_id, status="pending").model_dump(mode="json")
+
+
+@mcp_server.tool()
+async def task_status(task_id: str, ctx: Context) -> dict[str, Any]:
+    """The current status of one background task, in the same summary shape as
+    `GET /v1/keystone/tasks` (AgentTaskSummaryResponse): status, model role,
+    branch, pull-request URL/number, error message, timestamps. Scoped to the
+    calling key's tenant — another tenant's task is "not found".
+    """
+    _api_key, tenant, _user = await _authenticate(ctx)
+    try:
+        task_uuid = UUID(task_id)
+    except ValueError as exc:
+        raise ToolError(f"task_id must be a UUID, got {task_id!r}") from exc
+    row = await get_keystone_engine().get_task_summary(tenant.id, task_uuid)
+    if row is None:
+        raise ToolError("Task not found")
+    return AgentTaskSummaryResponse(**row).model_dump(mode="json")
+
+
+def _validation_message(exc: ValidationError) -> str:
+    """pydantic's errors as one readable line per field — the same facts FastAPI's 422 body
+    carries for the REST route, in the plain-text form a tool error needs."""
+    parts = []
+    for err in exc.errors():
+        loc = ".".join(str(p) for p in err.get("loc", ())) or "request"
+        parts.append(f"{loc}: {err.get('msg', 'invalid')}")
+    return "Invalid task request — " + "; ".join(parts)
 
 
 def build_mcp_asgi_app() -> Starlette:

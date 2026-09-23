@@ -43,16 +43,26 @@ async def test_step_events_carry_full_payloads_in_order_and_close_only_on_final(
     big_output = "line\n" * 50_000  # 250 kB of tool output — kept whole, no payload cap
     await publish_task_step(task_id, "tool_call", "coding", {"name": "read_file", "arguments": {"path": "a.py"}})
     await publish_task_step(task_id, "tool_result", "coding", {"name": "read_file", "ok": True, "output": big_output})
+    # The model's closing message of the coding loop carries `final: True` too (coding.py) — a step, not the end.
+    await publish_task_step(task_id, "model_text", "coding", {"turn": 1, "content": "Done.", "final": True})
     # The graph's own terminal phase does NOT close the stream any more — the git workflow follows it.
     await publish_task_event(task_id, "testing", {"phase": "complete", "iteration": 3})
     await publish_task_step(task_id, "diff", "finalize", {"diff": "+x", "branch_name": "b", "commit_sha": "abc"})
     await publish_task_final(task_id, "complete", result_summary="done", git_result={"pr_url": "u", "pr_number": 7})
 
     events = [payload for _id, payload in await read_task_events_from(task_id)]
-    assert [e["event_type"] for e in events] == ["node", "tool_call", "tool_result", "node", "diff", "node"]
+    assert [e["event_type"] for e in events] == [
+        "node",
+        "tool_call",
+        "tool_result",
+        "model_text",
+        "node",
+        "diff",
+        "node",
+    ]
     assert events[2]["output"] == big_output
     assert events[1]["arguments"] == {"path": "a.py"}
-    assert [is_final_event(e) for e in events] == [False, False, False, False, False, True]
+    assert [is_final_event(e) for e in events] == [False, False, False, False, False, False, True]
     assert events[-1]["pr_url"] == "u" and events[-1]["pr_number"] == 7 and events[-1]["phase"] == "complete"
 
 
@@ -69,6 +79,8 @@ def test_legacy_terminal_event_without_event_type_still_closes_the_stream():
     assert is_final_event({"phase": "complete"}) is True  # recorded before step events existed
     assert is_final_event({"event_type": "node", "phase": "complete"}) is False  # graph terminal, git work pending
     assert is_final_event({"event_type": "node", "phase": "complete", "final": True}) is True
+    # coding.py's model_text step uses `final` for "last message, no tool calls" — never the end of the stream
+    assert is_final_event({"event_type": "model_text", "phase": "coding", "content": "Done.", "final": True}) is False
 
 
 async def test_unknown_step_type_is_a_programming_error(task_id):
