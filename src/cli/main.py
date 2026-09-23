@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from pathlib import Path
 from typing import Annotated
 
 import httpx
@@ -34,6 +35,7 @@ from rich.console import Console
 from rich.table import Table
 
 from src.cli.doctor import CheckStatus, run_all_checks
+from src.cli.ide import ContinueConfigInputs, render_continue_config
 from src.cli.init import default_overrides, find_env_template, render_env_file
 from src.cli.ops import (
     build_bundle_build_images_command,
@@ -55,12 +57,14 @@ tenants_app = typer.Typer(add_completion=False, help="Bootstrap tenants (KEYSTON
 users_app = typer.Typer(add_completion=False, help="Manage tenant users (KEYSTONE_ROOT_ADMIN_TOKEN required).")
 bundle_app = typer.Typer(add_completion=False, help="Build/import the air-gapped offline bundle (wraps airgap/*.sh).")
 deploy_app = typer.Typer(add_completion=False, help="Deploy a model backend to a cloud (RunPod Serverless today).")
+ide_app = typer.Typer(add_completion=False, help="Generate IDE configuration (VS Code via Continue).")
 app.add_typer(memory_app, name="memory")
 app.add_typer(finetune_app, name="finetune")
 app.add_typer(tenants_app, name="tenants")
 app.add_typer(users_app, name="users")
 app.add_typer(bundle_app, name="bundle")
 app.add_typer(deploy_app, name="deploy")
+app.add_typer(ide_app, name="ide")
 
 console = Console()
 error_console = Console(stderr=True, style="bold red")
@@ -577,6 +581,42 @@ def deploy_runpod_serverless(
     console.print("  VLLM_CODING_API_KEY=${RUNPOD_API_KEY}")
     console.print(f"  CODING_MODEL_ID={deployment.served_model_name}")
     console.print("\nThen `keystone doctor` checks it, and `keystone deploy runpod-serverless --destroy` removes it.")
+
+
+@ide_app.command("continue-config")
+def ide_continue_config(
+    base_url: Annotated[
+        str, typer.Option(help="Keystone gateway URL, no trailing /v1 (e.g. https://keystone.internal:8080)")
+    ],
+    api_key: Annotated[
+        str, typer.Option(help="A Keystone API key with the inference and agent scopes", envvar="KEYSTONE_API_KEY")
+    ],
+    output: Annotated[
+        Path | None, typer.Option(help="Write here (typically ~/.continue/config.yaml); prints to stdout when omitted")
+    ] = None,
+    ca_bundle: Annotated[
+        Path | None, typer.Option(help="Internal CA bundle (pki/) for an air-gapped TLS deployment")
+    ] = None,
+    coding_model: Annotated[str, typer.Option(help="Model name for chat/edit/apply")] = "coding",
+    autocomplete_model: Annotated[str, typer.Option(help="Model name for autocomplete")] = "coding_fallback",
+):
+    """Render Continue's config.yaml (VS Code) pointing chat/edit/apply, autocomplete and MCP memory at
+    this Keystone deployment — the same gateway and key OpenCode uses. See docs/guides/use-from-vscode.md."""
+    text = render_continue_config(
+        ContinueConfigInputs(
+            base_url=base_url,
+            api_key=api_key,
+            coding_model=coding_model,
+            autocomplete_model=autocomplete_model,
+            ca_bundle_path=str(ca_bundle) if ca_bundle else None,
+        )
+    )
+    if output is None:
+        console.print(text, markup=False, highlight=False)
+        return
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(text)
+    console.print(f"Wrote {output} — restart VS Code (or reload Continue) to pick it up.")
 
 
 @app.command("ingest")

@@ -26,6 +26,7 @@ from src.api.models.responses import ModelInfo, ModelListResponse
 from src.billing.ledger import record_usage
 from src.config import get_settings
 from src.db.models import APIKey, Tenant
+from src.inference.health import NoHealthyModelError, endpoint_health
 from src.inference.model_router import get_model_router, resolve_model_name_for_client
 from src.orchestrator.context import count_messages_tokens, count_tokens
 
@@ -85,9 +86,16 @@ async def chat_completions(
     daily_limit = api_key.daily_token_limit_override or tenant.daily_token_limit
     await check_token_budget(tenant.id, daily_limit, tenant.monthly_token_limit)
 
-    # Route to correct model
+    # Route to correct model — 503 + Retry-After when no endpoint in the role's chain is healthy
     router_instance = get_model_router()
-    client, resolved_role = await router_instance.get_client(req.model)
+    try:
+        client, resolved_role = await router_instance.get_client(req.model)
+    except NoHealthyModelError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=str(exc),
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        ) from exc
     # This tenant's own promoted LoRA adapter for this base model, if any —
     # the direct customer-facing gateway, so this is the highest-value
     # place adapter routing applies (src/inference/model_router.py).
@@ -102,17 +110,22 @@ async def chat_completions(
             headers={"X-VS-Model": resolved_role, "Cache-Control": "no-cache"},
         )
 
-    # Non-streaming
-    response = await client.complete(
-        messages=messages,
-        temperature=req.temperature,
-        max_tokens=req.max_tokens,
-        top_p=req.top_p,
-        stop=req.stop,
-        frequency_penalty=req.frequency_penalty,
-        presence_penalty=req.presence_penalty,
-        model_override=model_name,
-    )
+    # Non-streaming — a request that errors counts toward the role's breaker; a success closes it
+    try:
+        response = await client.complete(
+            messages=messages,
+            temperature=req.temperature,
+            max_tokens=req.max_tokens,
+            top_p=req.top_p,
+            stop=req.stop,
+            frequency_penalty=req.frequency_penalty,
+            presence_penalty=req.presence_penalty,
+            model_override=model_name,
+        )
+    except Exception as exc:
+        endpoint_health.record_failure(resolved_role, f"{type(exc).__name__}: {exc}")
+        raise
+    endpoint_health.record_success(resolved_role)
 
     usage = response.get("usage", {})
     total_tokens = usage.get("total_tokens") or (usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0))

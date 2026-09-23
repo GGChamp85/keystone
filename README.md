@@ -71,6 +71,7 @@ In short: if you want frontier-quality output, Keystone can still give it to you
 - [Deterministic coding agents](#deterministic-coding-agents)
   - [Watch it write code](#watch-it-write-code)
   - [Interactive terminal](#interactive-terminal--use-it-just-like-the-codex-cli-and-similar-terminal-agents)
+  - [Use it from VS Code](#use-it-from-vscode)
   - [Submit a background task](#submit-a-background-task)
   - [Many developers, many repos, in parallel — no policy limits](#many-developers-many-repos-in-parallel--no-policy-limits)
   - [Connect your own git server](#connect-your-own-git-server)
@@ -356,6 +357,16 @@ What's actually wired up, not just a config stub:
 - **Real permission gates, not "trust the model"** — `cli/opencode.config.json`'s `permission` block asks before every edit and every shell command by default, explicitly denies `rm -rf*` and `git push*`, and allowlists only read-only commands (`git status`, `git diff*`, `git log*`, `ls*`, `cat*`, `grep*`) to run without asking.
 
 See `docs/deployment/OPENCODE_SETUP.md` for wiring OpenCode to a non-local Keystone deployment.
+
+### Use it from VS Code
+
+Install the [Continue](https://www.continue.dev/) extension and generate its config from your deployment — chat, inline edit, autocomplete and the agent's memory tools (over MCP) all run against your Keystone gateway with one API key:
+
+```bash
+keystone ide continue-config --base-url https://keystone.internal:8080 --api-key ks-XXXX-XXXXXXXX --output ~/.continue/config.yaml
+```
+
+Step by step, including air-gapped TLS: [`docs/guides/use-from-vscode.md`](docs/guides/use-from-vscode.md).
 
 ### Submit a background task
 

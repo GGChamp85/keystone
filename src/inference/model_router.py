@@ -21,6 +21,7 @@ from sqlalchemy import select
 
 from src.config import get_settings
 from src.inference.client import InferenceClient, get_inference_client
+from src.inference.health import NoHealthyModelError, endpoint_health
 
 logger = structlog.get_logger(__name__)
 
@@ -255,27 +256,19 @@ class ModelRouter:
         chain = self.FALLBACK_CHAINS.get(role, [role])
 
         for candidate_role in chain:
-            try:
-                client = get_inference_client(candidate_role)
-                healthy = await client.health()
-                if healthy:
-                    if candidate_role != role:
-                        logger.info(
-                            "model_router.fallback",
-                            requested=role,
-                            serving=candidate_role,
-                        )
-                    return client, candidate_role
-            except Exception as exc:
-                logger.warning(
-                    "model_router.health_check_failed",
-                    role=candidate_role,
-                    error=str(exc),
-                )
+            if endpoint_health.is_open(candidate_role):
+                continue  # breaker open: skipped without a probe until its cooldown ends
+            client = get_inference_client(candidate_role)
+            if await endpoint_health.is_healthy(candidate_role, client):
+                if candidate_role != role:
+                    logger.info("model_router.fallback", requested=role, serving=candidate_role)
+                return client, candidate_role
 
-        # Last resort — return the originally requested client anyway
-        logger.error("model_router.all_unhealthy", role=role)
-        return get_inference_client(role), role
+        # Nothing in the chain is available: say so (the gateway answers 503 + Retry-After)
+        # instead of returning an unhealthy client whose request would fail downstream.
+        retry_after = endpoint_health.retry_after_seconds(chain)
+        logger.error("model_router.all_unhealthy", role=role, retry_after_seconds=retry_after)
+        raise NoHealthyModelError(role, retry_after)
 
 
 # Singleton

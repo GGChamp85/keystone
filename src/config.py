@@ -177,6 +177,11 @@ class Settings(BaseSettings):
     agent_tool_timeout_seconds: int = 1_800  # ceiling for run_command's own timeout argument
     agent_max_wall_clock_seconds: int = 0  # whole-task wall clock (0 = none; max_iterations is the bound)
 
+    # ── Inference endpoint health (src/inference/health.py) ──────────
+    inference_health_cache_seconds: int = 10  # reuse a /models probe result this long
+    inference_breaker_failure_threshold: int = 3  # consecutive failures that open a role's breaker (0 = never)
+    inference_breaker_open_seconds: int = 30  # how long an open breaker skips the role before one retry
+
     # ── Usage ledger pricing (src/billing/ledger.py) ─────────────────
     # USD per 1,000,000 tokens per model role, from your own GPU economics (see
     # benchmarks/cost_model.py for the calculator). JSON, e.g.

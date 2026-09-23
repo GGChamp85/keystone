@@ -62,11 +62,11 @@ spec:
               value: "redis://:$(REDIS_PASSWORD)@{{ include "keystone.fullname" . }}-redis:6379/0"
           resources: {{- toYaml .Values.app.resources | nindent 12 }}
           readinessProbe:
-            httpGet: { path: /health, port: {{ .Values.app.port }} }
+            httpGet: { path: /health/ready, port: {{ .Values.app.port }} }
             initialDelaySeconds: 10
             periodSeconds: 10
           livenessProbe:
-            httpGet: { path: /health, port: {{ .Values.app.port }} }
+            httpGet: { path: /health/live, port: {{ .Values.app.port }} }
             initialDelaySeconds: 20
             periodSeconds: 30
           securityContext:
