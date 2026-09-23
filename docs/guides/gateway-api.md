@@ -73,9 +73,18 @@ Incremental: an unchanged file is skipped next time; a removed file's chunks are
 
 ## Keys, limits, spend
 
-- Keys are minted per tenant with scopes (`inference`, `agent`, `finetune`) by an admin (`keystone keys-create`, or `POST /v1/admin/tenants/{id}/keys`) and can be linked to a user with a role (`admin`, `lead`, `developer`).
-- Every limit is `0 = unlimited` by default: request rate, daily and monthly tokens, `max_tokens` ceiling. Set one only to impose a real cap.
+- Keys are minted per tenant with scopes (`inference`, `agent`, `finetune`) by an admin (`keystone keys-create`, or `POST /v1/admin/tenants/{id}/keys`) and can be linked to a user with a role (`admin`, `lead`, `developer`). They are stored as a keyed hash (HMAC with the deployment's `VS_SECRET_KEY`), so a copy of the database alone cannot be used to verify a key; **set `VS_SECRET_KEY` once and keep it stable** — production refuses to start without it.
+- **Rotate without an outage**: `keystone keys-rotate <tenant> <prefix>` (or `POST /v1/admin/tenants/{id}/keys/{prefix}/rotate`) mints a replacement with the same scopes and limits and keeps the old key valid for 24 hours by default (`grace_hours`, 0 = revoke now). Audited with both prefixes.
+- Every limit is `0 = unlimited` by default: request rate, daily and monthly tokens, `max_tokens` ceiling, running agent tasks, and a **monthly dollar budget**. Set any of them after creation with `keystone tenants set-limits <tenant> --monthly-budget-usd 500` (`POST /v1/admin/tenants/{id}/limits`). Once the priced ledger reaches the budget, gateway requests and new agent tasks are refused with `429` and headers `X-VS-Budget-Spent-USD` / `X-VS-Budget-Limit-USD` until the month rolls or the budget is raised.
 - Every request and every agent turn lands in the spend ledger: `GET /v1/keystone/usage`, the web UI's **Spend** view, priced by `MODEL_PRICES_PER_MILLION` from your own GPU economics.
+
+## What every response tells you
+
+- `X-Request-ID`: echoed from your request or generated; every log line for that request carries it, so quote it when asking for help.
+- `X-VS-Model`: the role that served. `X-VS-Route-Decision`: `requested=…; served=…; model=…; reason=primary|fallback|adapter|cost_routing`, so a fallback or an adapter is never silent.
+- `model: "auto"` with `GATEWAY_COST_ROUTING=1` sends a simple last message (a typo, a rename) to the cheaper `coding_fallback` role and everything else to `coding`; the decision is in the header and in the `keystone_route_decisions_total` metric. Off by default.
+- Metrics on `/metrics`: time to first token per role, upstream errors per role, routing decisions, budget rejections, tokens per tenant and role.
+- `LOG_PROMPTS=1` logs every prompt and reply through the same personal-data redaction the frontier proxy uses. Off by default: prompts are your users' data.
 
 ## Verified how
 

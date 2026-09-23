@@ -86,6 +86,7 @@ class TenantResponse(BaseModel):
     daily_token_limit: int
     monthly_token_limit: int
     max_concurrent_agents: int
+    monthly_budget_usd: float = 0
     is_active: bool
     created_at: datetime
 

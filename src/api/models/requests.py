@@ -114,6 +114,7 @@ class CreateTenantRequest(BaseModel):
     tier: Literal["free", "pro", "enterprise"] = "free"
     daily_token_limit: int | None = None
     monthly_token_limit: int | None = None
+    monthly_budget_usd: float = Field(default=0, ge=0, description="USD per calendar month; 0 (default) = no budget")
     max_concurrent_agents: int = Field(
         default=0,
         ge=0,
@@ -121,6 +122,23 @@ class CreateTenantRequest(BaseModel):
         "throughput is bounded by deployed worker/sandbox/GPU capacity. A positive value is enforced "
         "with per-user fairness (no one user may hold more than half of it).",
     )
+
+
+class SetTenantLimitsRequest(BaseModel):
+    """`POST /v1/admin/tenants/{id}/limits` — every field optional; 0 = no limit. Only the fields sent change."""
+
+    daily_token_limit: int | None = Field(default=None, ge=0)
+    monthly_token_limit: int | None = Field(default=None, ge=0)
+    max_concurrent_agents: int | None = Field(default=None, ge=0)
+    monthly_budget_usd: float | None = Field(
+        default=None, ge=0, description="USD per calendar month from the priced ledger; 0 = no budget"
+    )
+
+
+class RotateAPIKeyRequest(BaseModel):
+    """`POST /v1/admin/tenants/{id}/keys/{prefix}/rotate` — the old key keeps working for `grace_hours`."""
+
+    grace_hours: int = Field(default=24, ge=0, le=24 * 30, description="0 = revoke the old key immediately")
 
 
 class CreateAPIKeyRequest(BaseModel):

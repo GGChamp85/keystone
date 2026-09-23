@@ -136,3 +136,116 @@ spec:
             matchExpressions:
               - { key: app.kubernetes.io/component, operator: In, values: [grafana, promtail, prometheus, loki] }
 {{- end }}
+---
+{{- if .Values.networkPolicy.egress.enabled }}
+# Egress: deny by default for every pod in the release, then allow exactly what each tier needs —
+# DNS, in-cluster peers, and the operator-listed external CIDRs (the git host, package mirrors,
+# a hosted model endpoint). vLLM gets internet only when `egress.vllmInternet` is true (weight pulls
+# from a hub); an air-gapped site leaves it false and serves weights from the model cache.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "keystone.fullname" . }}-default-deny-egress
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: ["Egress"]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "keystone.fullname" . }}-allow-dns-egress
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.egress.dnsNamespace }}
+          podSelector:
+            matchLabels: {{- toYaml .Values.networkPolicy.egress.dnsPodLabels | nindent 14 }}
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "keystone.fullname" . }}-allow-app-egress
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app.kubernetes.io/component, operator: In, values: [app, worker, migrate] }
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - podSelector:
+            matchExpressions:
+              - { key: app.kubernetes.io/component, operator: In, values: [postgres, redis, qdrant, temporal, openbao, sandbox-daemon, vllm-coding, vllm-coding-fallback, vllm-reasoning] }
+    {{- range .Values.networkPolicy.egress.allowedCIDRs }}
+    - to:
+        - ipBlock: { cidr: {{ . | quote }} }
+    {{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "keystone.fullname" . }}-allow-sandbox-daemon-egress
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "keystone.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: sandbox-daemon
+  policyTypes: ["Egress"]
+  egress:
+    # the daemon reaches the git host and package mirrors on the agent's behalf; the sandbox's own
+    # egress is enforced host-side by the daemon (src/sandbox), this is the outer wall
+    {{- range .Values.networkPolicy.egress.allowedCIDRs }}
+    - to:
+        - ipBlock: { cidr: {{ . | quote }} }
+    {{- end }}
+    {{- if not .Values.networkPolicy.egress.allowedCIDRs }}
+    - to:
+        - podSelector: {}
+    {{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "keystone.fullname" . }}-allow-vllm-egress
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app.kubernetes.io/component, operator: In, values: [vllm-coding, vllm-coding-fallback, vllm-reasoning] }
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - podSelector:
+            matchExpressions:
+              - { key: app.kubernetes.io/component, operator: In, values: [vllm-coding, vllm-coding-fallback, vllm-reasoning] }
+    {{- if .Values.networkPolicy.egress.vllmInternet }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+    {{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "keystone.fullname" . }}-allow-observability-egress
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app.kubernetes.io/component, operator: In, values: [prometheus, grafana, loki, promtail, alertmanager] }
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - podSelector: {}
+{{- end }}

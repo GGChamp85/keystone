@@ -13,12 +13,18 @@ from typing import Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from src.api.middleware.auth import require_scope
 from src.api.models.requests import CompletionRequest
 from src.api.models.responses import ModelInfo, ModelListResponse
-from src.api.routes._inference_common import account_usage, admit_inference_request, usage_tokens
+from src.api.routes._inference_common import (
+    account_usage,
+    admit_inference_request,
+    log_prompt_if_enabled,
+    observe_first_token,
+    usage_tokens,
+)
 from src.config import get_settings
 from src.db.models import APIKey, Tenant
 from src.inference.health import endpoint_health
@@ -63,11 +69,13 @@ async def chat_completions(
 
     # Ceiling, rate limit, token budget, health-aware routing, this tenant's promoted adapter —
     # shared with /v1/messages (src/api/routes/_inference_common.py).
-    client, resolved_role, model_name = await admit_inference_request(
-        model=req.model, max_tokens=req.max_tokens, api_key=api_key, tenant=tenant
-    )
-
     messages = [m.to_wire() for m in req.messages]
+    last_user = next((str(m["content"]) for m in reversed(messages) if m["role"] == "user" and m["content"]), "")
+    admission = await admit_inference_request(
+        model=req.model, max_tokens=req.max_tokens, api_key=api_key, tenant=tenant, last_user_message=last_user
+    )
+    client, resolved_role, model_name = admission.client, admission.role, admission.served_name
+    headers = {"X-VS-Model": resolved_role, "X-VS-Route-Decision": admission.decision_header}
     # Tool calling / structured output pass through to the backend unchanged — an OpenAI client's
     # `tools`, `tool_choice` and `response_format` reach the model exactly as sent (an agent harness or
     # IDE in agent mode needs the full round trip: tool_calls out, `tool` messages back in).
@@ -85,7 +93,7 @@ async def chat_completions(
         return StreamingResponse(
             _stream_completion(client, messages, req, tenant, api_key, resolved_role, model_name, extra),
             media_type="text/event-stream",
-            headers={"X-VS-Model": resolved_role, "Cache-Control": "no-cache"},
+            headers={**headers, "Cache-Control": "no-cache"},
         )
 
     # Non-streaming — a request that errors counts toward the role's breaker; a success closes it
@@ -114,7 +122,12 @@ async def chat_completions(
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
     )
-    return response
+    log_prompt_if_enabled(
+        role=resolved_role,
+        messages=messages,
+        reply=(response.get("choices") or [{}])[0].get("message", {}).get("content"),
+    )
+    return JSONResponse(content=response, headers=headers)
 
 
 async def _stream_completion(client, messages, req, tenant, api_key, role, model_override=None, extra=None):
@@ -132,6 +145,8 @@ async def _stream_completion(client, messages, req, tenant, api_key, role, model
     usage: dict[str, Any] | None = None
     content_parts: list[str] = []
     stream_kwargs = {k: v for k, v in (extra or {}).items() if k != "response_format"}
+    started = time.monotonic()
+    first_token_seen = False
     try:
         async for sse in client.stream(
             messages=messages,
@@ -157,6 +172,9 @@ async def _stream_completion(client, messages, req, tenant, api_key, role, model
                     for choice in chunk.get("choices") or []:
                         text = (choice.get("delta") or {}).get("content")
                         if text:
+                            if not first_token_seen:
+                                first_token_seen = True
+                                observe_first_token(role, time.monotonic() - started)
                             content_parts.append(text)
                     if not chunk.get("choices") and chunk.get("usage") and not forward_usage:
                         continue  # the backend's usage-only chunk was for our accounting; the client did not ask for it
@@ -182,3 +200,4 @@ async def _stream_completion(client, messages, req, tenant, api_key, role, model
     await account_usage(
         tenant=tenant, api_key=api_key, role=role, prompt_tokens=prompt_tokens, completion_tokens=completion_tokens
     )
+    log_prompt_if_enabled(role=role, messages=messages, reply="".join(content_parts))

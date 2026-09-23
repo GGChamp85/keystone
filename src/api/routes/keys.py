@@ -21,6 +21,8 @@ from src.api.models.requests import (
     CreateUserRequest,
     LinkAPIKeyToUserRequest,
     RevokeAPIKeyRequest,
+    RotateAPIKeyRequest,
+    SetTenantLimitsRequest,
 )
 from src.api.models.responses import (
     APIKeyCreatedResponse,
@@ -74,10 +76,15 @@ async def create_tenant(req: CreateTenantRequest, request: Request, db: AsyncSes
         daily_token_limit=req.daily_token_limit or settings.default_daily_token_limit,
         monthly_token_limit=req.monthly_token_limit or settings.default_monthly_token_limit,
         max_concurrent_agents=req.max_concurrent_agents,
+        monthly_budget_usd=req.monthly_budget_usd,
     )
     db.add(tenant)
     await db.flush()
     await _audit(db, request, "tenant.create", "tenant", tenant.id, name=tenant.name, tier=tenant.tier.value)
+    return _tenant_response(tenant)
+
+
+def _tenant_response(tenant: Tenant) -> TenantResponse:
     return TenantResponse(
         id=tenant.id,
         name=tenant.name,
@@ -86,9 +93,29 @@ async def create_tenant(req: CreateTenantRequest, request: Request, db: AsyncSes
         daily_token_limit=tenant.daily_token_limit,
         monthly_token_limit=tenant.monthly_token_limit,
         max_concurrent_agents=tenant.max_concurrent_agents,
+        monthly_budget_usd=float(tenant.monthly_budget_usd or 0),
         is_active=tenant.is_active,
         created_at=tenant.created_at,
     )
+
+
+@router.post("/tenants/{tenant_id}/limits", response_model=TenantResponse)
+async def set_tenant_limits(
+    tenant_id: UUID, req: SetTenantLimitsRequest, request: Request, db: AsyncSession = Depends(get_db)
+):
+    """Change a tenant's caps after creation — token budgets, concurrency, the monthly dollar budget. Each is
+    0 = unlimited; only the fields sent change. Audited."""
+    tenant = await db.get(Tenant, tenant_id)
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    changes = req.model_dump(exclude_none=True)
+    if not changes:
+        raise HTTPException(status_code=422, detail="Send at least one limit to change")
+    for field, value in changes.items():
+        setattr(tenant, field, value)
+    await db.flush()
+    await _audit(db, request, "tenant.set_limits", "tenant", tenant_id, **changes)
+    return _tenant_response(tenant)
 
 
 @router.post("/tenants/{tenant_id}/keys", response_model=APIKeyCreatedResponse, status_code=201)
@@ -231,6 +258,69 @@ async def link_api_key_to_user(
         last_used_at=key.last_used_at,
         expires_at=key.expires_at,
         created_at=key.created_at,
+    )
+
+
+@router.post("/tenants/{tenant_id}/keys/{key_prefix}/rotate", response_model=APIKeyCreatedResponse, status_code=201)
+async def rotate_api_key(
+    tenant_id: UUID,
+    key_prefix: str,
+    req: RotateAPIKeyRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Mint a replacement for an active key — same name, scopes, limits and linked user — and give the old
+    key a short expiry (`grace_hours`, default 24) so clients can move over without an outage (ADR 0004).
+    The new key is shown once; the rotation is audited with both prefixes."""
+    result = await db.execute(
+        select(APIKey).where(
+            APIKey.tenant_id == tenant_id,
+            APIKey.key_prefix == key_prefix,
+            APIKey.status == APIKeyStatus.ACTIVE,
+        )
+    )
+    old = result.scalar_one_or_none()
+    if not old:
+        raise HTTPException(status_code=404, detail="Active key with this prefix not found")
+
+    full_key, prefix, key_hash = generate_api_key()
+    new = APIKey(
+        tenant_id=tenant_id,
+        user_id=old.user_id,
+        name=old.name,
+        key_prefix=prefix,
+        key_hash=key_hash,
+        scopes=list(old.scopes or []),
+        expires_at=old.expires_at,
+        daily_token_limit_override=old.daily_token_limit_override,
+        rate_limit_override=old.rate_limit_override,
+    )
+    db.add(new)
+    if req.grace_hours == 0:
+        old.status = APIKeyStatus.REVOKED
+    else:
+        grace_until = datetime.now(UTC) + timedelta(hours=req.grace_hours)
+        old.expires_at = min(old.expires_at, grace_until) if old.expires_at else grace_until
+    await db.flush()
+    await _audit(
+        db,
+        request,
+        "api_key.rotate",
+        "api_key",
+        new.id,
+        tenant_id=str(tenant_id),
+        old_prefix=key_prefix,
+        new_prefix=prefix,
+        grace_hours=req.grace_hours,
+    )
+    return APIKeyCreatedResponse(
+        id=new.id,
+        name=new.name,
+        key=full_key,
+        key_prefix=prefix,
+        scopes=new.scopes,
+        expires_at=new.expires_at,
+        created_at=new.created_at,
     )
 
 

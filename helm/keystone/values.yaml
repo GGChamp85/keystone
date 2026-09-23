@@ -24,6 +24,10 @@ image:
 app:
   replicaCount: 2
   port: 8080
+  rollout:
+    maxSurge: 1 # RollingUpdate with maxUnavailable 0: a replacement is Ready before a replica goes away
+    preStopSeconds: 5 # endpoint removal propagates before SIGTERM
+    terminationGracePeriodSeconds: 60 # long enough for an in-flight streamed completion to finish
   resources:
     requests: { cpu: "500m", memory: "512Mi" }
     limits: { cpu: "2", memory: "2Gi" }
@@ -55,6 +59,12 @@ postgres:
   enabled: true
   storage: 20Gi
   storageClassName: ""
+  backup:
+    enabled: false # nightly pg_dump CronJob to its own PVC (templates/postgres-backup.yaml); restore with scripts/restore_drill.sh
+    schedule: "0 2 * * *"
+    retentionDays: 14
+    storage: 50Gi
+    storageClassName: ""
   resources:
     requests: { cpu: "500m", memory: "1Gi" }
     limits: { cpu: "2", memory: "4Gi" }
@@ -244,9 +254,29 @@ secrets:
   redisPassword: ""
   qdrantApiKey: ""
   rootAdminToken: ""
+  openbao:
+    # Used when useOpenBao=true (templates/openbao-secretproviderclass.yaml): the Secrets Store CSI
+    # driver + Vault provider read these keys from OpenBao and sync them into <release>-secrets.
+    address: "" # default: the in-chart OpenBao service; set to an external OpenBao/Vault URL otherwise
+    role: keystone # the Kubernetes auth role bound to this chart's ServiceAccount
+    secretsPath: secret/data/keystone # KV v2 path holding POSTGRES_PASSWORD, REDIS_PASSWORD, QDRANT_API_KEY, KEYSTONE_ROOT_ADMIN_TOKEN, VS_SECRET_KEY, GRAFANA_ADMIN_PASSWORD
+    caCertPath: "" # PEM path inside the CSI provider when OpenBao serves TLS from the internal CA
+
+migrations:
+  enabled: true # pre-install/pre-upgrade hook Job running `alembic upgrade head` once per release
+  backoffLimit: 2
+  activeDeadlineSeconds: 900
 
 networkPolicy:
   enabled: true
+  egress:
+    # Default-deny egress with explicit allows (templates/networkpolicies.yaml). Off by default because
+    # it needs the cluster's DNS labels; values-client-vpc.yaml turns it on.
+    enabled: false
+    dnsNamespace: kube-system
+    dnsPodLabels: { k8s-app: kube-dns }
+    allowedCIDRs: [] # the git host, package mirrors, a hosted model endpoint — e.g. ["10.20.0.0/16"]
+    vllmInternet: false # true only when vLLM must pull weights from a hub; air-gapped sites keep false
 
 training:
   # Multi-node distributed fine-tuning (LoRA/SFT/DPO) via Kubeflow Trainer's

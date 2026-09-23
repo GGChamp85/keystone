@@ -64,6 +64,16 @@ export function SpendPanel({ onBack }: { onBack: () => void }) {
             </div>
           </div>
 
+          {summary.budget && (
+            <p className="steps-hint">
+              {summary.budget.monthly_budget_usd > 0
+                ? `Monthly budget: ${usd(summary.budget.month_to_date_usd)} of ${usd(summary.budget.monthly_budget_usd)} spent this month` +
+                  (summary.budget.month_to_date_usd >= summary.budget.monthly_budget_usd
+                    ? ' — exhausted: requests and new tasks are refused until the month rolls or an admin raises it'
+                    : '')
+                : `No monthly budget set (${usd(summary.budget.month_to_date_usd)} spent this month). An admin can set one with keystone tenants set-limits.`}
+            </p>
+          )}
           {!summary.pricing_configured && (
             <p className="steps-hint">
               Set <code>MODEL_PRICES_PER_MILLION</code> (USD per 1M tokens per model role, from your own GPU

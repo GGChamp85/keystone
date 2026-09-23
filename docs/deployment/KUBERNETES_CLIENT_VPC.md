@@ -55,6 +55,17 @@ kubectl logs -n keystone -l app.kubernetes.io/component=app --tail=50
 curl -k https://<ingress-host>/health
 ```
 
+## Production posture
+
+Four things the chart does for a production install that the dev tier does not need:
+
+- **Secrets from OpenBao, not a Kubernetes Secret at rest** (`secrets.useOpenBao=true`): `templates/openbao-secretproviderclass.yaml` declares a Secrets Store CSI `SecretProviderClass` (Vault provider; OpenBao speaks the same API) reading `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `QDRANT_API_KEY`, `KEYSTONE_ROOT_ADMIN_TOKEN`, `VS_SECRET_KEY` and `GRAFANA_ADMIN_PASSWORD` from `secrets.openbao.secretsPath` and syncing them into `<release>-secrets` — the same Secret name every template already references, so nothing else changes. The app and worker pods mount the CSI volume (that is what triggers the sync). Cluster prerequisites, installed once: `secrets-store-csi-driver` with `syncSecret.enabled=true`, the Vault CSI provider, and a Kubernetes auth role in OpenBao (`secrets.openbao.role`) bound to the chart's ServiceAccount. `VS_SECRET_KEY` must be a stable value: API keys are hashed with it.
+- **Migrations as a release hook** (`migrations.enabled`, default on): `templates/migrate-job.yaml` runs `alembic upgrade head` once per install/upgrade as a `pre-install,pre-upgrade` hook Job, waiting for Postgres first. A failed migration fails the release before any new pod takes traffic. The app Deployment rolls with `maxUnavailable: 0`, a `preStop` pause and a 60 s grace period so streamed completions finish.
+- **Nightly database backups** (`postgres.backup.enabled`, on in `values-client-vpc.yaml`): a CronJob writes `pg_dump --format=custom` into its own PVC and prunes dumps older than `retentionDays`. Copy that volume off-cluster with your organisation's tooling. **Prove restores work**: `scripts/restore_drill.sh --from-url <db url>` restores a dump into a throwaway Postgres and compares Alembic revision and row counts; CI runs it on every push against its Postgres service.
+- **Egress allowlisting** (`networkPolicy.egress.enabled`, on in `values-client-vpc.yaml`): default-deny egress for every pod, then DNS, in-cluster peers, and the CIDRs you list in `networkPolicy.egress.allowedCIDRs` (the git host, package mirrors, a hosted model endpoint). vLLM gets internet only with `vllmInternet: true`; an air-gapped site keeps it false and serves weights from the model cache.
+
+All four render in `helm lint`/`helm template` in CI with every option enabled; the OpenBao sync and the hook ordering have not yet been exercised on a real cluster with the CSI driver installed — the verification table below says so.
+
 ## What's been actually verified vs. what's real-but-unexercised
 
 Verified end-to-end against a real (if small: `kind`) Kubernetes cluster

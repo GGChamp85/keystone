@@ -216,6 +216,13 @@ class Settings(BaseSettings):
     # Set false for a backend that cannot stream tool calls.
     agent_stream_turns: bool = True
 
+    # ── Gateway behaviour ───────────────────────────────────────
+    # Log every gateway prompt and reply (through PII redaction) — off by default: prompts are your users' data.
+    log_prompts: bool = False
+    # model="auto" on the gateway routes a simple last message to coding_fallback (cheaper) instead of coding;
+    # the decision is returned in X-VS-Route-Decision. Off by default: a wrong downgrade costs quality.
+    gateway_cost_routing: bool = False
+
     # ── Temporal ──────────────────────────────────────────────
     temporal_host: str = "temporal:7233"  # Temporal server address for durable agent/fine-tune workflows
     temporal_namespace: str = "keystone"  # Temporal namespace
@@ -243,6 +250,12 @@ class Settings(BaseSettings):
     hf_token: str | None = None  # Hugging Face token for gated model downloads
 
     # ── Derived helpers ───────────────────────────────────────
+    @property
+    def secret_key_is_ephemeral(self) -> bool:
+        """True when VS_SECRET_KEY was not supplied and a random one was generated for this process —
+        API-key hashes (ADR 0004) would then be unverifiable after a restart."""
+        return "vs_secret_key" not in self.model_fields_set
+
     @property
     def is_production(self) -> bool:
         return self.vs_env == Environment.PRODUCTION

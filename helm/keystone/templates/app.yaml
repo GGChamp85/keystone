@@ -24,6 +24,13 @@ spec:
   {{- if not .Values.app.autoscaling.enabled }}
   replicas: {{ .Values.app.replicaCount }}
   {{- end }}
+  # Zero-downtime rollouts: never take a replica away before its replacement is Ready, and give
+  # in-flight requests (streams included) time to finish via preStop + the grace period.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: {{ .Values.app.rollout.maxSurge }}
   selector:
     matchLabels:
       {{- include "keystone.selectorLabels" . | nindent 6 }}
@@ -36,6 +43,16 @@ spec:
     spec:
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ .Values.app.rollout.terminationGracePeriodSeconds }}
+      {{- if .Values.secrets.useOpenBao }}
+      volumes:
+        - name: openbao-secrets
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: {{ include "keystone.fullname" . }}-openbao
       {{- end }}
       containers:
         - name: app
@@ -69,22 +86,23 @@ spec:
             httpGet: { path: /health/live, port: {{ .Values.app.port }} }
             initialDelaySeconds: 20
             periodSeconds: 30
+          lifecycle:
+            preStop:
+              # let the Service/endpoint update propagate before the process gets SIGTERM
+              exec: { command: ["sleep", "{{ .Values.app.rollout.preStopSeconds }}"] }
+          {{- if .Values.secrets.useOpenBao }}
+          volumeMounts:
+            - name: openbao-secrets
+              mountPath: /var/run/secrets/openbao
+              readOnly: true
+          {{- end }}
           securityContext:
             runAsNonRoot: true
             runAsUser: 1000
             allowPrivilegeEscalation: false
             capabilities: { drop: ["ALL"] }
-      initContainers:
-        - name: migrate
-          image: {{ include "keystone.image" (dict "root" $ "image" .Values.image.app) }}
-          command: ["alembic", "upgrade", "head"]
-          envFrom:
-            - configMapRef: { name: {{ include "keystone.fullname" . }}-config }
-          env:
-            - name: POSTGRES_PASSWORD
-              valueFrom: { secretKeyRef: { name: {{ include "keystone.fullname" . }}-secrets, key: POSTGRES_PASSWORD } }
-            - name: DATABASE_URL
-              value: "postgresql+asyncpg://keystone:$(POSTGRES_PASSWORD)@{{ include "keystone.fullname" . }}-postgres:5432/keystone"
+      # Migrations run once per release as a pre-install/pre-upgrade hook Job (templates/migrate-job.yaml),
+      # not as an initContainer racing on every replica.
 ---
 {{- if .Values.app.autoscaling.enabled }}
 apiVersion: autoscaling/v2

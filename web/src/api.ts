@@ -418,7 +418,13 @@ export interface UsageRow {
   estimated_cost_usd: number
 }
 
+export interface UsageBudget {
+  monthly_budget_usd: number // 0 = no budget
+  month_to_date_usd: number
+}
+
 export interface UsageSummary {
+  budget?: UsageBudget
   tenant_id: string
   days: number
   since: string

@@ -48,7 +48,9 @@ nav:
       - RunPod: deployment/RUNPOD_SETUP.md
       - OpenCode: deployment/OPENCODE_SETUP.md
       - Air-gapped install: airgap/OFFLINE_INSTALL_RUNBOOK.md
-  - Benchmarks: benchmarks/README.md
+  - Benchmarks:
+      - Overview: benchmarks/README.md
+      - Load test: benchmarks/load-test.md
   - Enterprise:
       - Open weights, risk and support: enterprise/open-weights-risk-and-support.md
   - Reference:

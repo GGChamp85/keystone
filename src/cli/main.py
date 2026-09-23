@@ -520,6 +520,51 @@ def keys_create(
     console.print(f"[bold yellow]{key['key']}[/bold yellow]  [dim](save this — it will not be shown again)[/dim]")
 
 
+@app.command("keys-rotate")
+def keys_rotate(
+    tenant_id: Annotated[str, typer.Argument()],
+    key_prefix: Annotated[str, typer.Argument(help="The ks-xxxxxxxx prefix of the key to replace")],
+    grace_hours: Annotated[int, typer.Option(help="How long the old key keeps working; 0 = revoke now")] = 24,
+):
+    """Replace an API key without an outage: mints a new key with the same scopes and limits and expires the
+    old one after --grace-hours (ADR 0004). Prints the new key exactly once."""
+    key = _request_one(
+        "POST", f"/v1/admin/tenants/{tenant_id}/keys/{key_prefix}/rotate", admin=True, json={"grace_hours": grace_hours}
+    )
+    console.print(f"[green]Rotated[/green] {key_prefix} -> {key['key_prefix']}... (old key valid {grace_hours}h)")
+    console.print(f"[bold yellow]{key['key']}[/bold yellow]  [dim](save this — it will not be shown again)[/dim]")
+
+
+@tenants_app.command("set-limits")
+def tenant_set_limits(
+    tenant_id: Annotated[str, typer.Argument()],
+    monthly_budget_usd: Annotated[float | None, typer.Option(help="USD per calendar month; 0 = no budget")] = None,
+    daily_token_limit: Annotated[int | None, typer.Option(help="tokens/day; 0 = unlimited")] = None,
+    monthly_token_limit: Annotated[int | None, typer.Option(help="tokens/month; 0 = unlimited")] = None,
+    max_concurrent_agents: Annotated[int | None, typer.Option(help="running tasks; 0 = no cap")] = None,
+):
+    """Set a tenant's caps — a monthly dollar budget, token budgets, concurrency. Only the options given change."""
+    body = {
+        k: v
+        for k, v in {
+            "monthly_budget_usd": monthly_budget_usd,
+            "daily_token_limit": daily_token_limit,
+            "monthly_token_limit": monthly_token_limit,
+            "max_concurrent_agents": max_concurrent_agents,
+        }.items()
+        if v is not None
+    }
+    if not body:
+        error_console.print("Give at least one limit to change.")
+        raise typer.Exit(code=2)
+    tenant = _request_one("POST", f"/v1/admin/tenants/{tenant_id}/limits", admin=True, json=body)
+    console.print(
+        f"[green]Updated[/green] {tenant['name']}: budget ${tenant['monthly_budget_usd']}/month, "
+        f"tokens {tenant['daily_token_limit']}/day {tenant['monthly_token_limit']}/month, "
+        f"concurrency {tenant['max_concurrent_agents']} (0 = unlimited)"
+    )
+
+
 @users_app.command("add")
 def user_add(
     tenant_id: Annotated[str, typer.Argument()],

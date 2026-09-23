@@ -16,6 +16,7 @@ own error shape, never dropped.
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 import structlog
@@ -24,7 +25,13 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from src.api.middleware.auth import require_scope
 from src.api.models.requests import CountTokensRequest, MessagesRequest
-from src.api.routes._inference_common import account_usage, admit_inference_request, usage_tokens
+from src.api.routes._inference_common import (
+    account_usage,
+    admit_inference_request,
+    log_prompt_if_enabled,
+    observe_first_token,
+    usage_tokens,
+)
 from src.db.models import APIKey, Tenant
 from src.inference.anthropic_compat import (
     AnthropicStreamTranslator,
@@ -79,10 +86,12 @@ async def create_message(req: MessagesRequest, auth: tuple = Depends(require_sco
     except UnsupportedContentError as exc:
         return _invalid_request(str(exc))
 
-    client, role, served_name = await admit_inference_request(
-        model=req.model, max_tokens=req.max_tokens, api_key=api_key, tenant=tenant
+    last_user = next((str(m["content"]) for m in reversed(messages) if m["role"] == "user" and m["content"]), "")
+    admission = await admit_inference_request(
+        model=req.model, max_tokens=req.max_tokens, api_key=api_key, tenant=tenant, last_user_message=last_user
     )
-    headers = {"X-VS-Model": role}
+    client, role, served_name = admission.client, admission.role, admission.served_name
+    headers = {"X-VS-Model": role, "X-VS-Route-Decision": admission.decision_header}
 
     if req.stream:
         return StreamingResponse(
@@ -102,6 +111,9 @@ async def create_message(req: MessagesRequest, auth: tuple = Depends(require_sco
     await account_usage(
         tenant=tenant, api_key=api_key, role=role, prompt_tokens=prompt_tokens, completion_tokens=completion_tokens
     )
+    log_prompt_if_enabled(
+        role=role, messages=messages, reply=(response.get("choices") or [{}])[0].get("message", {}).get("content")
+    )
     return JSONResponse(content=openai_response_to_anthropic(response, req.model), headers=headers)
 
 
@@ -110,6 +122,8 @@ async def _stream_message(client, messages, kwargs, model, tenant, api_key, role
     the backend's `stream_options.include_usage` final chunk; a backend that sends none is counted with
     the same tokenizer the agent uses and logged as an estimate."""
     translator = AnthropicStreamTranslator(model, estimate_input_tokens=lambda: count_messages_tokens(messages))
+    started = time.monotonic()
+    first_token_seen = False
     try:
         async for sse in client.stream(messages=messages, model_override=served_name, include_usage=True, **kwargs):
             raw = sse[len("data: ") :].strip() if sse.startswith("data: ") else ""
@@ -122,6 +136,9 @@ async def _stream_message(client, messages, kwargs, model, tenant, api_key, role
             if isinstance(chunk, dict):
                 for event in translator.feed(chunk):
                     yield event
+                if not first_token_seen and translator.text_parts:
+                    first_token_seen = True
+                    observe_first_token(role, time.monotonic() - started)
     except Exception as exc:
         endpoint_health.record_failure(role, f"{type(exc).__name__}: {exc}")
         raise
@@ -151,6 +168,7 @@ async def _stream_message(client, messages, kwargs, model, tenant, api_key, role
         prompt_tokens=usage["input_tokens"],
         completion_tokens=usage["output_tokens"],
     )
+    log_prompt_if_enabled(role=role, messages=messages, reply="".join(translator.text_parts))
 
 
 @router.post("/messages/count_tokens")

@@ -20,6 +20,15 @@ spec:
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets: {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if .Values.secrets.useOpenBao }}
+      volumes:
+        - name: openbao-secrets
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: {{ include "keystone.fullname" . }}-openbao
+      {{- end }}
       containers:
         - name: worker
           image: {{ include "keystone.image" (dict "root" $ "image" .Values.image.app) }}
@@ -41,6 +50,12 @@ spec:
             - name: REDIS_URL
               value: "redis://:$(REDIS_PASSWORD)@{{ include "keystone.fullname" . }}-redis:6379/0"
           resources: {{- toYaml .Values.worker.resources | nindent 12 }}
+          {{- if .Values.secrets.useOpenBao }}
+          volumeMounts:
+            - name: openbao-secrets
+              mountPath: /var/run/secrets/openbao
+              readOnly: true
+          {{- end }}
           securityContext:
             runAsNonRoot: true
             runAsUser: 1000

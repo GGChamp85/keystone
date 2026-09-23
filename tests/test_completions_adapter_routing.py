@@ -285,5 +285,8 @@ async def test_a_completion_lands_in_the_usage_ledger_with_dollars(tenant_and_ke
             "estimated_cost_usd": pytest.approx(7 / 1_000_000 * 2.0),
         }
         assert body["rows"][0]["model_role"] == "coding"
+        # the tenant's monthly dollar budget (0 = none) and this month's priced spend ride along for the Spend view
+        assert body["budget"]["monthly_budget_usd"] == 0
+        assert body["budget"]["month_to_date_usd"] == pytest.approx(7 / 1_000_000 * 2.0)
     finally:
         get_settings.cache_clear()

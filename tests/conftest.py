@@ -17,6 +17,10 @@ import os
 
 import pytest
 
+# The test suite is a deployment: API keys are hashed with this pepper (ADR 0004) and the app refuses to
+# start in production without a stable one. CI sets it; a developer's shell may not.
+os.environ.setdefault("VS_SECRET_KEY", "test-suite-pepper-" + "0" * 46)
+
 
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "integration: requires real Postgres/Redis/Qdrant/Docker")

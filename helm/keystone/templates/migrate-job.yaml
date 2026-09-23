@@ -1,0 +1,57 @@
+# Copyright 2024-2026 Gaurav Gupta / Keystone — Apache 2.0
+#
+# Database migrations as a Helm hook Job, run once per install/upgrade BEFORE the new app and worker
+# pods roll — instead of an initContainer on every app replica racing each other against the same
+# database on every restart. Waits for Postgres to answer first (the hook runs before the app pods
+# but Postgres may still be starting on a fresh install). A failed migration fails the release, so a
+# broken upgrade never reaches traffic.
+{{- if .Values.migrations.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "keystone.fullname" . }}-migrate
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.migrations.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.migrations.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "keystone.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: migrate
+          image: {{ include "keystone.image" (dict "root" $ "image" .Values.image.app) }}
+          imagePullPolicy: {{ .Values.image.app.pullPolicy }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              for i in $(seq 1 60); do
+                python -c "import asyncio, asyncpg, os; asyncio.run(asyncpg.connect(os.environ['DATABASE_URL'].replace('postgresql+asyncpg://', 'postgresql://')))" && break
+                echo "waiting for postgres ($i/60)"; sleep 5
+              done
+              alembic upgrade head
+          envFrom:
+            - configMapRef: { name: {{ include "keystone.fullname" . }}-config }
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ include "keystone.fullname" . }}-secrets, key: POSTGRES_PASSWORD } }
+            - name: DATABASE_URL
+              value: "postgresql+asyncpg://keystone:$(POSTGRES_PASSWORD)@{{ include "keystone.fullname" . }}-postgres:5432/keystone"
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+{{- end }}

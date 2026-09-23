@@ -17,6 +17,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -128,6 +129,9 @@ class Tenant(Base):
     # 0 = no cap (the default): concurrency is bounded by deployed capacity, not by policy.
     # A positive value is enforced by src/orchestrator/concurrency.py with per-user fairness.
     max_concurrent_agents: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # USD this tenant may spend per calendar month across gateway requests and agent tasks, from the ledger's
+    # priced cost (MODEL_PRICES_PER_MILLION); 0 = no budget.
+    monthly_budget_usd: Mapped[float] = mapped_column(Numeric(12, 4), nullable=False, default=0)
     subscription_status: Mapped[SubscriptionStatus] = mapped_column(
         SAEnum(SubscriptionStatus), default=SubscriptionStatus.ACTIVE, nullable=False
     )

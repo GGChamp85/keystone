@@ -65,3 +65,19 @@ ingress:
 
 secrets:
   useOpenBao: true # production: real secrets come from OpenBao, not the dev-tier Secret template
+
+# Production posture added with the W4 hardening: nightly database backups, migrations as a release
+# hook, egress allowlisting. Fill allowedCIDRs with the git host / mirror ranges before install.
+postgres:
+  backup:
+    enabled: true
+    storage: 200Gi
+    storageClassName: "" # TODO: client's block-storage StorageClass
+
+networkPolicy:
+  enabled: true
+  egress:
+    enabled: true
+    allowedCIDRs: [] # TODO: the internal git host and package mirror CIDRs
+    vllmInternet: false
+

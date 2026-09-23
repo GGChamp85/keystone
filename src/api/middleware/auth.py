@@ -1,9 +1,15 @@
 """
 Keystone — API Key authentication.
 
-OpenAI-compatible: keys are sent as `Authorization: Bearer ks-{prefix}-{secret}`.
+OpenAI-compatible: keys are sent as `Authorization: Bearer ks-{prefix}-{secret}` (or `x-api-key`).
   - prefix: 8 random hex chars (stored, used for lookup)
-  - secret: 48 random hex chars (only the SHA-256 hash is stored)
+  - secret: 48 random hex chars; only a hash is stored
+
+Hashing (ADR 0004): HMAC-SHA256 keyed with the deployment's pepper (`VS_SECRET_KEY`), so a leaked
+database alone cannot verify a candidate key. Keys stored before the pepper (plain SHA-256) are still
+accepted — looked up by the legacy hash — and re-hashed with the pepper on their first successful use,
+so the legacy window closes by itself. The pepper must therefore be stable: `src/main.py` refuses to
+start in production with a generated one, and `keystone doctor` warns everywhere else.
 """
 
 from __future__ import annotations
@@ -13,6 +19,7 @@ import hmac
 import secrets
 from datetime import UTC, datetime
 
+import structlog
 from fastapi import Depends, HTTPException, Request, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select, update
@@ -41,11 +48,20 @@ def generate_api_key() -> tuple[str, str, str]:
     prefix = secrets.token_hex(4)  # 8 chars
     secret = secrets.token_hex(24)  # 48 chars
     full_key = f"{API_KEY_PREFIX}{prefix}-{secret}"
-    key_hash = hashlib.sha256(full_key.encode()).hexdigest()
-    return full_key, f"{API_KEY_PREFIX}{prefix}", key_hash
+    return full_key, f"{API_KEY_PREFIX}{prefix}", hash_key(full_key)
+
+
+def _pepper() -> bytes:
+    return get_settings().vs_secret_key.get_secret_value().encode()
 
 
 def hash_key(raw_key: str) -> str:
+    """HMAC-SHA256(pepper, key) — the only hash new keys are stored under."""
+    return hmac.new(_pepper(), raw_key.encode(), hashlib.sha256).hexdigest()
+
+
+def legacy_hash_key(raw_key: str) -> str:
+    """The pre-pepper plain SHA-256, accepted for keys stored before the change (dual-read)."""
     return hashlib.sha256(raw_key.encode()).hexdigest()
 
 
@@ -70,9 +86,16 @@ async def _resolve_api_key(
         )
 
     key_hash = hash_key(raw_key)
-    stmt = select(APIKey).where(APIKey.key_hash == key_hash).options()
-    result = await db.execute(stmt)
+    result = await db.execute(select(APIKey).where(APIKey.key_hash == key_hash))
     api_key = result.scalar_one_or_none()
+    if api_key is None:
+        # dual-read: a key stored before the pepper; re-hash it now so this path is used once per key
+        legacy = await db.execute(select(APIKey).where(APIKey.key_hash == legacy_hash_key(raw_key)))
+        api_key = legacy.scalar_one_or_none()
+        if api_key is not None:
+            await db.execute(update(APIKey).where(APIKey.id == api_key.id).values(key_hash=key_hash))
+            await db.commit()
+            api_key.key_hash = key_hash
 
     if api_key is None:
         raise HTTPException(
@@ -140,6 +163,8 @@ async def require_auth(
     request.state.api_key = api_key
     request.state.tenant = tenant
     request.state.user = user
+    # every log line for the rest of this request carries the tenant and key (structlog contextvars)
+    structlog.contextvars.bind_contextvars(tenant_id=str(tenant.id), api_key_prefix=api_key.key_prefix)
     return api_key, tenant, user
 
 

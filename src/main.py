@@ -19,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from prometheus_client import make_asgi_app
 
+from src.api.middleware.request_context import RequestContextMiddleware
 from src.config import get_settings
 from src.observability import http_request_duration_seconds, http_requests_total
 
@@ -29,6 +30,13 @@ logger = structlog.get_logger(__name__)
 async def lifespan(app: FastAPI):
     settings = get_settings()
     logger.info("vs.starting", env=settings.vs_env.value, platform=settings.vs_platform_name)
+    if settings.is_production and settings.secret_key_is_ephemeral:
+        # API keys are hashed with this pepper (ADR 0004); a per-process random value would invalidate
+        # every key at the next restart. Fail loudly now, not silently later.
+        raise RuntimeError(
+            "VS_SECRET_KEY is not set: in production it must be a stable secret (openssl rand -hex 32), "
+            "because API-key hashes are peppered with it"
+        )
     from src.db.connection import init_db
 
     await init_db()
@@ -95,6 +103,8 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    app.add_middleware(RequestContextMiddleware)
 
     @app.middleware("http")
     async def metrics_middleware(request: Request, call_next):

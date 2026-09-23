@@ -38,6 +38,7 @@ from typing import Any, Protocol
 import structlog
 
 from src.config import get_settings
+from src.observability import upstream_errors_total
 
 logger = structlog.get_logger(__name__)
 
@@ -98,6 +99,7 @@ class EndpointHealthRegistry:
 
     def record_failure(self, role: str, error: str) -> None:
         settings = get_settings()
+        upstream_errors_total.labels(role).inc()
         st = self.state(role)
         st.consecutive_failures += 1
         st.healthy = False

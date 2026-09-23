@@ -222,6 +222,17 @@ def check_secrets(settings: Settings) -> list[CheckResult]:
     if settings.qdrant_api_key:
         secrets_to_check.append(("QDRANT_API_KEY", settings.qdrant_api_key.get_secret_value()))
 
+    if settings.secret_key_is_ephemeral:
+        results.append(
+            CheckResult(
+                "Secret (VS_SECRET_KEY)",
+                CheckStatus.FAIL if settings.is_production else CheckStatus.WARN,
+                "not set — a random one is generated per process, so API-key hashes (peppered with it) stop "
+                "verifying after a restart; set a stable value: `openssl rand -hex 32`",
+            )
+        )
+        secrets_to_check = [s for s in secrets_to_check if s[0] != "VS_SECRET_KEY"]
+
     for name, value in secrets_to_check:
         if value.lower() in _WEAK_SECRET_SENTINELS:
             severity = CheckStatus.FAIL if settings.is_production else CheckStatus.WARN

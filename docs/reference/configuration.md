@@ -147,6 +147,13 @@ Every setting Keystone reads, generated from `src/config.py` by `scripts/gen_con
 | `AGENT_MAX_CONTEXT_TOKENS` | `int` | `24000` | Token budget for the coding loop's own conversation (context.py's trimming/summarising); keep headroom under the serving model's max_model_len for the 8192-token completion. |
 | `AGENT_STREAM_TURNS` | `bool` | `True` | Stream each coding turn (tool calls + text accumulated from deltas) instead of one blocking request — live progress in the trace and no idle read-timeout on long turns. Set false for a backend that cannot stream tool calls. |
 
+## Gateway behaviour
+
+| Variable | Type | Default | What it does |
+|---|---|---|---|
+| `LOG_PROMPTS` | `bool` | `False` | Log every gateway prompt and reply (through PII redaction) — off by default: prompts are your users' data. |
+| `GATEWAY_COST_ROUTING` | `bool` | `False` | model="auto" on the gateway routes a simple last message to coding_fallback (cheaper) instead of coding; the decision is returned in X-VS-Route-Decision. Off by default: a wrong downgrade costs quality. |
+
 ## Temporal
 
 | Variable | Type | Default | What it does |

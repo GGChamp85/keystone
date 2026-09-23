@@ -29,6 +29,40 @@ groups:
           summary: "Keystone API p95 latency above 5s"
           description: "p95 request latency has been above 5s for 10m — check vLLM queue depth and GPU cache usage."
 
+      - alert: KeystoneHighLatencyP99
+        expr: |
+          histogram_quantile(0.99, sum by (le) (rate(keystone_http_request_duration_seconds_bucket[5m]))) > 10
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Keystone API p99 latency above 10s"
+          description: "p99 request latency above 10s for 10m — a saturated model role or a slow upstream; see keystone_time_to_first_token_seconds by model_role."
+
+      - alert: KeystoneTimeToFirstTokenHigh
+        expr: |
+          histogram_quantile(0.95, sum by (le, model_role) (rate(keystone_time_to_first_token_seconds_bucket[5m]))) > 5
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.model_role }}: p95 time to first token above 5s"
+          description: "Streamed requests wait more than 5s for the first token — queueing at the model endpoint or a cold start (scale-to-zero)."
+
+      - alert: KeystoneUpstreamErrorsBurning
+        expr: sum by (model_role) (rate(keystone_upstream_errors_total[5m])) > 0.1
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.model_role }} endpoint failing"
+          description: "More than 0.1 upstream failures/s for 5m on {{ $labels.model_role }} — the router's breaker is likely open and requests fall back or answer 503; check the endpoint and the Model Library's health view."
+
+      - alert: KeystoneBudgetRejections
+        expr: sum by (tenant_id) (increase(keystone_budget_rejections_total[1h])) > 0
+        for: 0m
+        labels: { severity: info }
+        annotations:
+          summary: "tenant {{ $labels.tenant_id }} is over its monthly budget"
+          description: "Requests or tasks were refused in the last hour because the tenant's monthly dollar budget is spent — raise it with `keystone tenants set-limits` if intended."
+
   - name: keystone-agents
     rules:
       - alert: KeystoneSandboxFailureRateHigh
@@ -58,6 +92,17 @@ groups:
         annotations:
           summary: "{{ $labels.job }} is down"
           description: "Prometheus has not been able to scrape {{ $labels.job }} for 2m."
+
+      - alert: KeystonePersistentVolumeNearFull
+        # Kubernetes only (kubelet volume metrics); never fires on the compose tier
+        expr: |
+          kubelet_volume_stats_available_bytes{persistentvolumeclaim=~".*(postgres|qdrant|model-cache|backups).*"}
+          / kubelet_volume_stats_capacity_bytes < 0.10
+        for: 15m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.persistentvolumeclaim }} has less than 10% free"
+          description: "Database, vector store, model cache or backup volume nearly full — expand the PVC before writes start failing."
 
       - alert: KeystoneVLLMKVCacheNearCapacity
         expr: vllm:kv_cache_usage_perc{job=~"vllm-.*"} > 0.95

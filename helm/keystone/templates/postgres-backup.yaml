@@ -1,0 +1,73 @@
+# Copyright 2024-2026 Gaurav Gupta / Keystone — Apache 2.0
+#
+# Nightly logical backups of the platform database (postgres.backup.enabled): a CronJob runs
+# `pg_dump --format=custom` into a dedicated PVC and prunes dumps older than `retentionDays`. Restore
+# with scripts/restore_drill.sh, which is also what CI runs to prove a dump restores cleanly. Copy the
+# PVC off-cluster (object storage, tape) with whatever your organisation already uses — a backup that
+# lives only next to the database it protects is not a backup.
+{{- if and .Values.postgres.enabled .Values.postgres.backup.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "keystone.fullname" . }}-postgres-backups
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres-backup
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- if .Values.postgres.backup.storageClassName }}
+  storageClassName: {{ .Values.postgres.backup.storageClassName }}
+  {{- end }}
+  resources:
+    requests: { storage: {{ .Values.postgres.backup.storage }} }
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "keystone.fullname" . }}-postgres-backup
+  labels: {{- include "keystone.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres-backup
+spec:
+  schedule: {{ .Values.postgres.backup.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            {{- include "keystone.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: postgres-backup
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: pg-dump
+              image: postgres:16-alpine
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  stamp=$(date -u +%Y%m%dT%H%M%SZ)
+                  out=/backups/keystone-$stamp.dump
+                  pg_dump --format=custom --no-owner --file="$out" \
+                    --host={{ include "keystone.fullname" . }}-postgres --username=keystone keystone
+                  size=$(stat -c %s "$out")
+                  echo "wrote $out ($size bytes)"
+                  find /backups -name 'keystone-*.dump' -mtime +{{ .Values.postgres.backup.retentionDays }} -print -delete
+                  ls -la /backups
+              env:
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef: { name: {{ include "keystone.fullname" . }}-secrets, key: POSTGRES_PASSWORD }
+              volumeMounts:
+                - name: backups
+                  mountPath: /backups
+              resources:
+                requests: { cpu: "100m", memory: "128Mi" }
+                limits: { cpu: "1", memory: "1Gi" }
+          volumes:
+            - name: backups
+              persistentVolumeClaim:
+                claimName: {{ include "keystone.fullname" . }}-postgres-backups
+{{- end }}

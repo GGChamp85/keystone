@@ -39,3 +39,33 @@ def test_prefix_is_short_lookup_token_not_the_secret():
     secret_part = full_key[len(prefix) + 1 :]  # after "ks-xxxxxxxx-"
     assert len(secret_part) == 48  # 24 raw bytes as hex
     assert prefix not in secret_part
+
+
+def test_hash_is_peppered_with_the_deployment_secret_and_differs_from_the_legacy_sha256(monkeypatch):
+    """ADR 0004: the stored hash is HMAC(pepper, key); a database alone cannot verify a key, and the legacy
+    plain SHA-256 is a different value (accepted only through the dual-read path)."""
+    from src.api.middleware.auth import legacy_hash_key
+    from src.config import get_settings
+
+    full_key, _prefix, key_hash = generate_api_key()
+    assert key_hash != legacy_hash_key(full_key)
+    assert len(key_hash) == 64 and len(legacy_hash_key(full_key)) == 64
+
+    monkeypatch.setenv("VS_SECRET_KEY", "a" * 64)
+    get_settings.cache_clear()
+    try:
+        with_pepper_a = hash_key(full_key)
+        monkeypatch.setenv("VS_SECRET_KEY", "b" * 64)
+        get_settings.cache_clear()
+        with_pepper_b = hash_key(full_key)
+    finally:
+        get_settings.cache_clear()
+    assert with_pepper_a != with_pepper_b  # the pepper is part of the hash, so it must be stable per deployment
+
+
+def test_settings_know_whether_the_pepper_was_generated(monkeypatch):
+    from src.config import Settings
+
+    monkeypatch.delenv("VS_SECRET_KEY", raising=False)
+    assert Settings(_env_file=None).secret_key_is_ephemeral is True
+    assert Settings(_env_file=None, vs_secret_key="c" * 64).secret_key_is_ephemeral is False

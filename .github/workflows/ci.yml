@@ -109,6 +109,15 @@ jobs:
         run: docker logs demo-model 2>&1 | tail -50
       - name: pytest (unit + integration — integration tests self-skip only if a required service is unreachable)
         run: python -m pytest tests/ -v --tb=short
+      - name: Restore drill (a dump of the CI database restores into a fresh Postgres with the same revision and row counts)
+        run: DRILL_PORT=55432 bash scripts/restore_drill.sh --from-url postgresql://keystone:ci-test-password@localhost:5432/keystone
+      - uses: grafana/setup-k6-action@v1
+      - name: Load-test smoke (k6 against the real app and the CPU demo model)
+        run: VUS=2 DURATION=15s bash scripts/k6_smoke.sh k6-smoke.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: k6-smoke-summary
+          path: k6-smoke.json
       - name: Sandbox daemon log (on failure)
         if: failure()
         run: cat sandbox-daemon.log

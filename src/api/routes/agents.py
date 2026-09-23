@@ -21,7 +21,8 @@ from src.api.models.responses import (
     AgentTaskSummaryResponse,
     TaskFeedbackResponse,
 )
-from src.billing.ledger import usage_summary
+from src.api.routes._inference_common import check_dollar_budget
+from src.billing.ledger import month_to_date_cost_usd, usage_summary
 from src.db.connection import get_db_context
 from src.db.models import AgentTask, APIKey, FeedbackVerdict, TaskFeedback, Tenant, User
 from src.memory.ingestion import CodeIngestionPipeline, InvalidRepositoryURLError
@@ -41,6 +42,7 @@ async def submit_task(
     api_key: APIKey = auth[0]
     tenant: Tenant = auth[1]
     user: User | None = auth[2]
+    await check_dollar_budget(tenant, surface="agent")
     engine = get_keystone_engine()
 
     try:
@@ -104,7 +106,13 @@ async def tenant_usage(
     for the last `days` days, plus totals. `pricing_configured` is false until the operator sets
     MODEL_PRICES_PER_MILLION; cost is then 0 rather than a made-up number."""
     tenant: Tenant = auth[1]
-    return await usage_summary(tenant.id, days=max(1, min(days, 3650)))
+    summary = await usage_summary(tenant.id, days=max(1, min(days, 3650)))
+    budget = float(tenant.monthly_budget_usd or 0)
+    summary["budget"] = {
+        "monthly_budget_usd": budget,  # 0 = no budget
+        "month_to_date_usd": await month_to_date_cost_usd(tenant.id),
+    }
+    return summary
 
 
 @router.get("/tasks/{task_id}/stream")

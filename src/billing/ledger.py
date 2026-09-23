@@ -141,6 +141,17 @@ async def record_task_usage(tenant_id: UUID, api_key_id: UUID | None, trace: lis
         )
 
 
+async def month_to_date_cost_usd(tenant_id: UUID) -> float:
+    """This calendar month's priced spend for a tenant (gateway requests and agent tasks), in USD."""
+    now = hour_bucket()
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    stmt = select(func.coalesce(func.sum(UsageRecord.estimated_cost_usd), 0.0)).where(
+        UsageRecord.tenant_id == tenant_id, UsageRecord.date >= month_start
+    )
+    async with get_db_context() as db:
+        return float((await db.execute(stmt)).scalar_one() or 0.0)
+
+
 @dataclass(frozen=True)
 class UsageRow:
     day: datetime

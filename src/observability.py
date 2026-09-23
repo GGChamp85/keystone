@@ -48,3 +48,28 @@ agent_task_duration_seconds = Histogram(
     "Autonomous agent task duration in seconds",
     ["status"],
 )
+
+time_to_first_token_seconds = Histogram(
+    "keystone_time_to_first_token_seconds",
+    "Streamed gateway requests: seconds from request to the first content chunk",
+    ["model_role"],
+    buckets=(0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60),
+)
+
+upstream_errors_total = Counter(
+    "keystone_upstream_errors_total",
+    "Model endpoint failures as seen by the router (probe failures and request errors)",
+    ["model_role"],
+)
+
+route_decisions_total = Counter(
+    "keystone_route_decisions_total",
+    "Gateway routing decisions: which role served what was requested, and why",
+    ["requested", "served", "reason"],
+)
+
+budget_rejections_total = Counter(
+    "keystone_budget_rejections_total",
+    "Requests and tasks refused because a tenant's monthly dollar budget is exhausted",
+    ["tenant_id", "surface"],  # surface: gateway | agent
+)
