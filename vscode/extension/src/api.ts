@@ -120,6 +120,7 @@ export type StepEventType =
   | 'route_decision'
   | 'diff'
   | 'pr'
+  | 'candidate'
 
 export interface StepEvent {
   event_type: StepEventType

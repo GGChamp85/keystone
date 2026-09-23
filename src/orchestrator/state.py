@@ -149,6 +149,8 @@ class AgentState:
     # Which tools' findings block (Settings.quality_gate_blocking_tools, per-task override
     # via AgentTaskRequest.quality_blocking_tools). bandit blocks on high/medium only.
     quality_blocking_tools: list[str] = field(default_factory=lambda: ["bandit", "mypy"])
+    # Best-of-N coding (src/orchestrator/best_of_n.py): 1 = a single attempt.
+    best_of_n: int = 1
 
     # ── Sandbox ───────────────────────────────────────────────
     sandbox_id: str | None = None

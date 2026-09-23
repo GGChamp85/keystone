@@ -42,6 +42,7 @@ async def run_agent_task(
     user_id: str | None = None,
     user_slug: str | None = None,
     quality_blocking_tools: list[str] | None = None,
+    best_of_n: int | None = None,
 ) -> dict[str, Any]:
     """
     Runs the full Plan -> Code -> Review -> Test -> Fix loop for one task.
@@ -77,6 +78,7 @@ async def run_agent_task(
             user_id=UUID(user_id) if user_id else None,
             user_slug=user_slug,
             quality_blocking_tools=quality_blocking_tools,
+            best_of_n=best_of_n,
             heartbeat_callback=_heartbeat,
         )
     except Exception as exc:

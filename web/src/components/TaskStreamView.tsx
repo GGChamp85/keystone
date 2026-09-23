@@ -87,6 +87,17 @@ function describeStep(ev: StepEvent): { title: string; body: string; ok: boolean
       }
     case 'pr':
       return { title: `Pull request #${str(ev.pr_number)}: ${str(ev.pr_url)}`, body: '', ok: true }
+    case 'candidate': {
+      if (ev.winner !== null && ev.winner !== undefined) {
+        return { title: `Best of ${str(ev.of)}: candidate ${str(ev.winner)} wins`, body: str(ev.ranking), ok: true }
+      }
+      const tests = ev.tests_passed === null || ev.tests_passed === undefined ? 'no related tests' : ev.tests_passed ? 'tests passed' : 'tests failed'
+      return {
+        title: `Candidate ${str(ev.index)}/${str(ev.of)}: ${tests}, ${str(ev.blocking_findings)} blocking finding(s), ${str(ev.findings)} total`,
+        body: str(ev.summary),
+        ok: ev.tests_passed === false ? false : null,
+      }
+    }
     default:
       return { title: str(ev.event_type), body: str(ev), ok: null }
   }

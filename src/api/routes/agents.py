@@ -57,6 +57,7 @@ async def submit_agent_task(req: AgentTaskRequest, api_key: APIKey, tenant: Tena
         enable_sandbox_testing=req.enable_sandbox_testing,
         context_files=req.context_files,
         quality_blocking_tools=req.quality_blocking_tools,
+        best_of_n=req.best_of_n,
     )
 
 

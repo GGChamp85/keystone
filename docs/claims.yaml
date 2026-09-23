@@ -50,3 +50,7 @@ claims:
     docs: [CHANGELOG.md]
     tests: [tests/test_doctor_checks.py]
 
+  - text: "really scored by pytest and ruff, the clean one wins and lands, the branches are gone"
+    docs: [CHANGELOG.md]
+    tests: [tests/test_best_of_n.py::test_the_candidate_that_passes_the_repos_own_checks_wins]
+

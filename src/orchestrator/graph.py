@@ -244,6 +244,7 @@ def _state_to_dict(state: AgentState) -> dict[str, Any]:
         "pr_url": state.pr_url,
         "pr_number": state.pr_number,
         "max_tool_steps": state.max_tool_steps,
+        "best_of_n": state.best_of_n,
         "tool_protocol": state.tool_protocol,
         "files_touched": state.files_touched,
         "max_context_tokens": state.max_context_tokens,
@@ -365,6 +366,7 @@ def _dict_to_state(d: dict[str, Any]) -> AgentState:
     state.pr_url = d.get("pr_url")
     state.pr_number = d.get("pr_number")
     state.max_tool_steps = d.get("max_tool_steps", 25)
+    state.best_of_n = int(d.get("best_of_n", 1) or 1)
     state.tool_protocol = d.get("tool_protocol", "native")
     state.files_touched = d.get("files_touched", [])
     state.max_context_tokens = d.get("max_context_tokens", 24_000)

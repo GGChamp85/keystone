@@ -145,6 +145,7 @@ Every setting Keystone reads, generated from `src/config.py` by `scripts/gen_con
 |---|---|---|---|
 | `QUALITY_GATE_BLOCKING_TOOLS` | `list[str]` | `['bandit', 'mypy']` | Which quality-gate tools send a task back to fixing on a finding (nodes/quality.py). bandit (high/medium) and mypy by default; add "ruff", "eslint", "tsc", "go", "cargo" to fail on lint too. Per-task override: AgentTaskRequest.quality_blocking_tools. |
 | `AGENT_MAX_CONTEXT_TOKENS` | `int` | `24000` | Token budget for the coding loop's own conversation (context.py's trimming/summarising); keep headroom under the serving model's max_model_len for the 8192-token completion. |
+| `AGENT_BEST_OF_N` | `int` | `1` | Best-of-N coding: N independent attempts from the same base, each scored by the repo's own quality commands and related tests, the winner applied — multiplies model spend by N. 1 = off. Per-task override: AgentTaskRequest.best_of_n (no ceiling). |
 | `AGENT_STREAM_TURNS` | `bool` | `True` | Stream each coding turn (tool calls + text accumulated from deltas) instead of one blocking request — live progress in the trace and no idle read-timeout on long turns. Set false for a backend that cannot stream tool calls. |
 
 ## Gateway behaviour

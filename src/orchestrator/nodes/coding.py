@@ -32,6 +32,7 @@ import structlog
 from src.config import get_settings
 from src.inference.client import get_inference_client
 from src.inference.model_router import resolve_model_name_for_client
+from src.orchestrator.best_of_n import run_best_of_n
 from src.orchestrator.context import Summarizer, fit_to_tokens, trim_turns_to_budget_async
 from src.orchestrator.events import publish_task_step
 from src.orchestrator.nodes._shared import ensure_repo_map, get_or_clone_workspace
@@ -346,7 +347,12 @@ async def _code_with_tools(state: AgentState) -> AgentState:
     try:
         ws = await get_or_clone_workspace(state)
         await ensure_repo_map(state, ws)
-        completed, summary, touched, steps = await _run_agentic_loop(state, ws)
+        if state.best_of_n > 1:
+            completed, summary, touched, steps = await run_best_of_n(
+                state, ws, state.best_of_n, run_loop=_run_agentic_loop
+            )
+        else:
+            completed, summary, touched, steps = await _run_agentic_loop(state, ws)
 
         for path in touched:
             if path not in state.files_touched:

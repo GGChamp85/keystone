@@ -216,6 +216,12 @@ class AgentTaskRequest(BaseModel):
         description="Quality-gate tools whose findings send the task back to fixing. Default: the server's "
         "QUALITY_GATE_BLOCKING_TOOLS (bandit, mypy). Add 'ruff', 'eslint', 'tsc', 'go', 'cargo' to be stricter.",
     )
+    best_of_n: int | None = Field(
+        default=None,
+        ge=1,
+        description="Run N independent coding attempts and keep the one that passes the repo's own lint and "
+        "related tests best (multiplies model spend by N). Default: the server's AGENT_BEST_OF_N (1 = off).",
+    )
 
 
 # ── Fine-Tuning Requests ─────────────────────────────────────

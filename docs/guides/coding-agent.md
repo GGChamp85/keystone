@@ -30,6 +30,10 @@ curl -X POST http://localhost:8080/v1/keystone/tasks \
 
 Then watch: `GET /v1/keystone/tasks/{id}/stream` is a live event stream (the web UI renders it) with every tool call and result, every diff, every test run and quality finding, the review, and the pull request link. Nothing is truncated in storage: full test output, full diffs and full install logs stay on the task record.
 
+## Best of N
+
+For work worth more than one attempt, set `best_of_n` on the task (or `AGENT_BEST_OF_N` for the deployment; default 1, no ceiling). The agent makes N independent attempts from the same clean base, each on its own branch in the sandbox, scores every attempt with the repository's own lint, type checks and the tests related to what it touched, and carries the best one forward as ordinary uncommitted edits into the normal quality, review and test gates. The trace shows every attempt's score and the ranking; losing branches are deleted. It multiplies model spend by N, which is why it is off by default.
+
 ## Where the work happens
 
 Each task gets its own sandbox (gVisor by default; Firecracker microVMs where KVM is available) with the repository cloned inside it, its own branch and its own pull request. The sandbox's network egress is restricted to the git hosts you allow and the package mirrors you configure. Tasks never share a working copy, so many developers can run many tasks against many repositories at once; throughput is bounded by the GPU, worker and sandbox capacity you deploy, not by a policy number.

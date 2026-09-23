@@ -135,6 +135,7 @@ class KeystoneEngine:
         user_id: UUID | None = None,
         user_slug: str | None = None,
         quality_blocking_tools: list[str] | None = None,
+        best_of_n: int | None = None,
     ) -> UUID:
         """
         Create a new agent task and start execution.
@@ -215,6 +216,7 @@ class KeystoneEngine:
             "user_id": user_id,
             "user_slug": user_slug,
             "quality_blocking_tools": quality_blocking_tools,
+            "best_of_n": best_of_n,
             "heartbeat_callback": _publish_event,
         }
 
@@ -241,6 +243,7 @@ class KeystoneEngine:
                     user_id=str(user_id) if user_id else None,
                     user_slug=user_slug,
                     quality_blocking_tools=quality_blocking_tools,
+                    best_of_n=best_of_n,
                 ),
                 id=workflow_id,
                 task_queue=settings.temporal_task_queue,
@@ -296,6 +299,7 @@ class KeystoneEngine:
         user_id: UUID | None = None,
         user_slug: str | None = None,
         quality_blocking_tools: list[str] | None = None,
+        best_of_n: int | None = None,
         heartbeat_callback: HeartbeatCallback | None = None,
     ) -> dict[str, Any]:
         """
@@ -329,6 +333,7 @@ class KeystoneEngine:
             user_slug=user_slug,
             quality_blocking_tools=list(quality_blocking_tools or get_settings().quality_gate_blocking_tools),
             max_context_tokens=get_settings().agent_max_context_tokens,
+            best_of_n=max(1, int(best_of_n or get_settings().agent_best_of_n)),
         )
 
         # Retrieve RAG context: vector similarity fused with full-text rank (src/memory/hybrid_search.py),

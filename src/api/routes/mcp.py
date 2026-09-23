@@ -156,6 +156,7 @@ async def task_submit(
     max_iterations: int = 15,
     file_paths: list[str] | None = None,
     quality_blocking_tools: list[str] | None = None,
+    best_of_n: int | None = None,
 ) -> dict[str, Any]:
     """Submit a background coding task to Keystone Agents.
 
@@ -179,6 +180,7 @@ async def task_submit(
             model=model,  # type: ignore[arg-type]  # pydantic validates the Literal at runtime → ToolError
             max_iterations=max_iterations,
             quality_blocking_tools=quality_blocking_tools,
+            best_of_n=best_of_n,
         )
     except ValidationError as exc:
         raise ToolError(_validation_message(exc)) from exc

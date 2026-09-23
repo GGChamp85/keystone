@@ -211,6 +211,10 @@ class Settings(BaseSettings):
     # Token budget for the coding loop's own conversation (context.py's trimming/summarising);
     # keep headroom under the serving model's max_model_len for the 8192-token completion.
     agent_max_context_tokens: int = 24_000
+    # Best-of-N coding: N independent attempts from the same base, each scored by the repo's own quality
+    # commands and related tests, the winner applied — multiplies model spend by N. 1 = off. Per-task
+    # override: AgentTaskRequest.best_of_n (no ceiling).
+    agent_best_of_n: int = 1
     # Stream each coding turn (tool calls + text accumulated from deltas) instead of one
     # blocking request — live progress in the trace and no idle read-timeout on long turns.
     # Set false for a backend that cannot stream tool calls.

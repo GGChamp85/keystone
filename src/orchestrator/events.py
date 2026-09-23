@@ -56,6 +56,7 @@ STEP_EVENT_TYPES = frozenset(
         "route_decision",  # model="auto" resolved to a role, and why
         "diff",  # the final working-tree diff, commit sha, branch
         "pr",  # the pull request opened
+        "candidate",  # best-of-N: one candidate's score, then the ranking and the winner
     }
 )
 

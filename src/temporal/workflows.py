@@ -47,6 +47,7 @@ class AgentWorkflowInput:
     user_id: str | None = None
     user_slug: str | None = None
     quality_blocking_tools: list[str] | None = None
+    best_of_n: int | None = None
 
 
 @workflow.defn
@@ -86,6 +87,7 @@ class CodingAgentWorkflow:
                 input.user_id,
                 input.user_slug,
                 input.quality_blocking_tools,
+                input.best_of_n,
             ],
             start_to_close_timeout=timedelta(seconds=DEFAULT_MAX_WALL_CLOCK_SECONDS + 300),
             heartbeat_timeout=timedelta(minutes=3),
