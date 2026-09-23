@@ -34,6 +34,32 @@ from src.orchestrator.nodes._shared import slugify_for_branch
 router = APIRouter(prefix="/v1/keystone", tags=["keystone"])
 
 
+async def submit_agent_task(req: AgentTaskRequest, api_key: APIKey, tenant: Tenant, user: User | None) -> UUID:
+    """The one submission path behind `POST /v1/keystone/tasks` and the MCP `task_submit` tool
+    (src/api/routes/mcp.py): a validated AgentTaskRequest plus the authenticated caller, handed
+    to the engine with the user's branch slug. Raises ConcurrencyLimitExceeded; each caller maps
+    it to its own protocol's error (HTTP 429 here, a ToolError over MCP). The tenant's monthly dollar
+    budget is checked here too, so every submission path honours it."""
+    await check_dollar_budget(tenant, surface="agent")
+    engine = get_keystone_engine()
+    return await engine.submit_task(
+        tenant_id=tenant.id,
+        api_key_id=api_key.id,
+        user_id=user.id if user else None,
+        user_slug=slugify_for_branch(user.email.split("@")[0]) if user else None,
+        task_description=req.task,
+        repository_url=req.repository_url,
+        branch=req.branch,
+        file_paths=req.file_paths,
+        model=req.model,
+        max_iterations=req.max_iterations,
+        enable_reasoning_review=req.enable_reasoning_review,
+        enable_sandbox_testing=req.enable_sandbox_testing,
+        context_files=req.context_files,
+        quality_blocking_tools=req.quality_blocking_tools,
+    )
+
+
 @router.post("/tasks", response_model=AgentTaskSubmittedResponse, status_code=202)
 async def submit_task(
     req: AgentTaskRequest,
@@ -42,26 +68,9 @@ async def submit_task(
     api_key: APIKey = auth[0]
     tenant: Tenant = auth[1]
     user: User | None = auth[2]
-    await check_dollar_budget(tenant, surface="agent")
-    engine = get_keystone_engine()
 
     try:
-        task_id = await engine.submit_task(
-            tenant_id=tenant.id,
-            api_key_id=api_key.id,
-            user_id=user.id if user else None,
-            user_slug=slugify_for_branch(user.email.split("@")[0]) if user else None,
-            task_description=req.task,
-            repository_url=req.repository_url,
-            branch=req.branch,
-            file_paths=req.file_paths,
-            model=req.model,
-            max_iterations=req.max_iterations,
-            enable_reasoning_review=req.enable_reasoning_review,
-            enable_sandbox_testing=req.enable_sandbox_testing,
-            context_files=req.context_files,
-            quality_blocking_tools=req.quality_blocking_tools,
-        )
+        task_id = await submit_agent_task(req, api_key, tenant, user)
     except ConcurrencyLimitExceeded as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
 

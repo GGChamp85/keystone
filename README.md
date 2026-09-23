@@ -35,7 +35,7 @@ Nothing leaves your network unless you choose to send it: not your code, not you
 | **Fine-tuning** | Describe, review the plan and cost, approve, watch it train, verdict, promote. Runs on one 24 GB GPU. |
 | **Memory and retrieval** | Per-repository, per-tenant memory the agent learns from and a human can inspect, pin or forget; incremental indexing of your repositories. |
 | **Multi-tenant controls** | Tenants, users and roles, scoped API keys, an audit log on every task, memory, fine-tune and admin action. |
-| **IDE and terminal** | VS Code through the Continue extension, an interactive terminal agent (OpenCode), and a web UI with a live trace of every task. |
+| **IDE and terminal** | VS Code through the Keystone extension (submit tasks, watch the trace, search memory) or the Continue extension (chat, edit, autocomplete), an interactive terminal agent (OpenCode), and a web UI with a live trace of every task. |
 | **Operations** | Prometheus, Grafana, Loki and alerting; health and readiness endpoints; Helm chart with multi-node serving and autoscaling. |
 
 ---

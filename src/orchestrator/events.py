@@ -167,9 +167,13 @@ async def publish_task_final(
 
 
 def is_final_event(payload: dict[str, Any]) -> bool:
-    """True for the engine's `final` event; also for a terminal-phase event with no `event_type`
-    (recorded before step events existed) so an old task's replay still closes."""
-    if payload.get("final"):
+    """True for the engine's `final` node event; also for a terminal-phase event with no `event_type`
+    (recorded before step events existed) so an old task's replay still closes.
+
+    Only a *node* event's `final` counts: the coding loop's `model_text` step also carries a
+    `final` key (True for the model's last message of a turn sequence, coding.py) and must not
+    close the stream — the quality gates, tests, diff and PR all follow it."""
+    if payload.get("final") and payload.get("event_type", "node") == "node":
         return True
     return "event_type" not in payload and payload.get("phase") in TERMINAL_PHASES
 
