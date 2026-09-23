@@ -1,6 +1,6 @@
 # ADR 0002 — Multi-GPU training: Ray Train via KubeRay, not Kubeflow
 
-**Status**: accepted (2026-09-22); implementation tracked in ROADMAP Phase 5
+**Status**: accepted (2026-09-22); implemented 2026-09-23 (`src/finetuning/backends/ray_train.py`, `helm/keystone/templates/kuberay.yaml`)
 
 ## Context
 

@@ -24,9 +24,25 @@ from temporalio import workflow
 from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
-    from src.temporal.finetune_activities import run_finetune_job_activity
+    from src.temporal.finetune_activities import run_finetune_export_activity, run_finetune_job_activity
 
 DEFAULT_MAX_TRAINING_HOURS = 12
+DEFAULT_MAX_EXPORT_HOURS = 4  # merging a 32B adapter and converting it is a long, single-threaded write
+
+
+@workflow.defn
+class FineTuneExportWorkflow:
+    """One activity runs an export of a completed job's adapter (src/finetuning/runner.py's
+    run_finetune_export). Same no-automatic-re-run policy as training: the outcome is on the job row."""
+
+    @workflow.run
+    async def run(self, job_id: str, fmt: str, quant: str | None) -> dict:
+        return await workflow.execute_activity(
+            run_finetune_export_activity,
+            args=[job_id, fmt, quant],
+            start_to_close_timeout=timedelta(hours=DEFAULT_MAX_EXPORT_HOURS),
+            retry_policy=RetryPolicy(maximum_attempts=1, non_retryable_error_types=["CancelledError"]),
+        )
 
 
 @workflow.defn

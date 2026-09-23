@@ -194,3 +194,30 @@ Every setting Keystone reads, generated from `src/config.py` by `scripts/gen_con
 | `FINETUNING_OUTPUT_DIR` | `str` | `'/data/finetuning/output'` | where adapters and the lora_modules.json manifest are written; mount it into the serving pods |
 | `FINETUNING_DATA_DIR` | `str` | `'/data/finetuning/data'` | where guided fine-tunes write their datasets and manifests |
 | `HF_TOKEN` | `str | None` | `unset` | Hugging Face token for gated model downloads |
+| `FINETUNE_BACKEND` | `str` | `'inprocess'` | Where a job's trainer runs (src/finetuning/backends/): "inprocess" = this process, on the host's own GPUs; "ray" = a Ray Train job submitted to the KubeRay cluster at RAY_ADDRESS (ADR 0002); "runpod_pod" = an on-demand RunPod GPU pod running the training image, the adapter synced to a network volume (ADR 0005) |
+
+## Fine-Tuning: Ray Train backend (src/finetuning/backends/ray_train.py)
+
+| Variable | Type | Default | What it does |
+|---|---|---|---|
+| `RAY_ADDRESS` | `str` | `'http://keystone-training-head-svc:8265'` | the Ray dashboard URL jobs are submitted to — KubeRay names it <cluster>-head-svc; the chart sets this |
+| `RAY_TRAIN_NUM_WORKERS` | `int` | `0` | Ray Train workers, one GPU each (0 = the plan's gpu_count, else 1) |
+| `RAY_TRAIN_USE_GPU` | `bool` | `True` | ask Ray for a GPU per worker (false only for a CPU smoke on a CPU cluster) |
+| `RAY_JOB_POLL_INTERVAL_SECONDS` | `float` | `5.0` | how often the runner asks the Ray Jobs API for the job's status |
+| `RAY_JOB_TIMEOUT_SECONDS` | `int` | `0` | give up on a Ray job after this long (0 = wait as long as it runs) |
+
+## Fine-Tuning: RunPod pod backend (src/finetuning/backends/runpod_pod.py)
+
+| Variable | Type | Default | What it does |
+|---|---|---|---|
+| `RUNPOD_TRAINING_IMAGE` | `str` | `'keystone-training:latest'` | docker/training.Dockerfile's image, as RunPod can pull it (a registry RunPod reaches, not a local tag) |
+| `RUNPOD_TRAINING_GPU_TYPE_IDS` | `list[str]` | `['NVIDIA L4', 'NVIDIA RTX A5000', 'NVIDIA GeForce RTX 4090']` | RunPod `gpuTypeIds` tried in order for the training pod (exact enum values from RunPod's OpenAPI document) |
+| `RUNPOD_TRAINING_GPU_COUNT` | `int` | `1` | GPUs on the training pod |
+| `RUNPOD_TRAINING_CONTAINER_DISK_GB` | `int` | `50` | the pod's container disk (image + model cache) |
+| `RUNPOD_TRAINING_CLOUD_TYPE` | `str` | `'SECURE'` | RunPod cloud tier for the pod: SECURE or COMMUNITY |
+| `RUNPOD_NETWORK_VOLUME_ID` | `str | None` | `unset` | the RunPod network volume the adapter is written to (mounted at /runpod-volume); a serverless endpoint created with the same volume serves it — required for this backend, a pod's own disk dies with it |
+| `RUNPOD_POD_POLL_INTERVAL_SECONDS` | `float` | `15.0` | how often the runner polls the pod and its status endpoint |
+| `RUNPOD_POD_TIMEOUT_SECONDS` | `int` | `0` | stop and delete the pod after this long (0 = as long as training runs) |
+| `RUNPOD_REST_BASE_URL` | `str` | `'https://rest.runpod.io/v1'` | RunPod's REST API (override only to test locally) |
+| `RUNPOD_PROXY_URL_TEMPLATE` | `str` | `'https://{pod_id}-{port}.proxy.runpod.net'` | RunPod's HTTP proxy for a pod's exposed port — how the runner reads the pod's live status endpoint |
+| `RUNPOD_POD_STATUS_PORT` | `int` | `8000` | the port the training pod's status endpoint listens on |

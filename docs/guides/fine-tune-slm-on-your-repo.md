@@ -73,6 +73,47 @@ The adapter directory must be visible to the vLLM process: mount the same volume
 
 Verified for real (`tests/test_finetune_promote_gate.py`, real Postgres + the real route): the failing job is refused, a non-admin's `force` is refused, an admin's force is audited, the passing job promotes, the manifest lists both, and the live load is attempted for each. The base-model eval and the per-step progress are exercised by the CPU trainer run in CI (`tests/test_trainer_smoke.py`).
 
+## 4. Export the adapter
+
+What you get: the trained adapter in a form other runtimes load without Keystone — a plain Hugging Face checkpoint with the adapter folded into the base weights (`merged`), a GGUF file for llama.cpp and the CPU demo backend (`gguf`), or an AWQ 4-bit checkpoint for vLLM on a GPU (`awq`). Exports live next to the adapter under `<output_dir>/export/` and are recorded on the job (`metrics.exports.<format>`: path, size in bytes, quant, or the error).
+
+```bash
+keystone finetune export <job-id> --format gguf --quant q8_0 --wait
+#   Export gguf (q8_0) started for <job-id> via asyncio_fallback — output under /data/finetuning/output/guided/<job-id>/export
+#   Done /data/finetuning/output/guided/<job-id>/export/qwen2.5-coder-7b-instruct-q8_0.gguf  (8,101,234,688 bytes)
+keystone finetune export <job-id> --format merged
+keystone finetune export <job-id> --format awq          # needs a CUDA GPU and the autoawq package
+```
+
+Over the API: `POST /v1/finetune/jobs/{id}/export {"format": "gguf", "quant": "q8_0"}` answers 202 and runs the export in the background through the same mechanism as training (Temporal when reachable, the asyncio fallback otherwise); only a `completed` job with an adapter on disk is accepted (409 otherwise), `quant` is one of `f32`, `f16`, `bf16`, `q8_0` (422 otherwise). The merge and the conversion run where the trainers run (the training image, `docker/training.Dockerfile`, which vendors llama.cpp's converter at a pinned commit); the API process itself has no ML stack and records the reason if it is asked to export where none is installed.
+
+Verified for real (`tests/test_trainer_smoke.py`, CPU, the 0.5B model): the smoke's adapter is merged with PEFT, the merged checkpoint is reloaded with plain transformers and runs a forward pass, and llama.cpp's converter writes a GGUF file whose header carries the `GGUF` magic and which is less than half the float32 checkpoint's size at `q8_0`. The route's refusals and the background outcome are verified over real HTTP against a real Postgres (`tests/test_finetune_export.py`). **Not verified**: the AWQ export — it needs a CUDA GPU, which this project's development environment does not have; on a CPU host it refuses with that reason rather than writing anything.
+
+## 5. Train on more than one GPU / on a rented pod
+
+`FINETUNE_BACKEND` chooses where a job's trainer runs; the job, the API, the CLI, the wizard, the verdict and the promotion are the same in every case.
+
+| Backend | What you get | Set |
+|---|---|---|
+| `inprocess` (default) | the trainer runs in the API/worker process on that host's GPUs — the path every test above exercises | nothing |
+| `ray` | a Ray Train job on a KubeRay cluster (ADR 0002): one Ray worker per GPU, data-parallel, the adapter written to the shared fine-tuning volume, progress streamed as usual | `helm ... --set training.ray.enabled=true` (sets `FINETUNE_BACKEND=ray` and `RAY_ADDRESS` in the chart's ConfigMap); `RAY_TRAIN_NUM_WORKERS` (0 = the plan's GPU count) |
+| `runpod_pod` | an on-demand RunPod GPU pod runs the training image with the job in its environment and writes the adapter to a RunPod network volume at `/runpod-volume/adapters/<job-id>` — the path a serverless endpoint created with the same volume serves (ADR 0005); the pod is deleted when the result is in, so billing stops | `FINETUNE_BACKEND=runpod_pod`, `RUNPOD_API_KEY`, `RUNPOD_NETWORK_VOLUME_ID`, `RUNPOD_TRAINING_IMAGE` (the training image on a registry RunPod can pull from); GPU tier via `RUNPOD_TRAINING_GPU_TYPE_IDS` |
+
+```bash
+# KubeRay: the operator once per cluster, then the chart with the training cluster enabled
+helm upgrade --install keystone helm/keystone -f helm/keystone/values-client-vpc.yaml --set training.ray.enabled=true
+keystone finetune guided --repo ... --goal ...        # unchanged; the job now runs on the Ray workers
+
+# RunPod: a network volume in the pod's region, the training image on a registry, then the same commands
+FINETUNE_BACKEND=runpod_pod RUNPOD_NETWORK_VOLUME_ID=<volume id> RUNPOD_TRAINING_IMAGE=registry.example/keystone-training:2026.09
+keystone finetune guided --repo ... --goal ... --gpu "NVIDIA L4:22.5" --gpu-hourly-cost 0.44
+```
+
+What is verified, and what is not:
+
+- **Ray**: the `TorchTrainer` configuration is built by pure functions (`src/finetuning/backends/ray_train.py`: `build_scaling_config`, `build_run_config`, `ray_job_spec`) that `tests/test_ray_train_backend.py` asserts exactly, and, where `ray[train]` is installed (the `.venv-train` environment, the training image), constructs the real `ScalingConfig`, `RunConfig` and `TorchTrainer` objects. The submission and polling loop — submit, poll, relay each progress line once, read the metrics line, surface a failure with Ray's message and the log tail, stop on timeout — runs against a real local server speaking Ray's Jobs REST API. The chart renders the `RayCluster` (head, GPU worker group, model cache and fine-tuning output PVCs) in CI. **No real Ray cluster and no GPU were available: a real multi-worker run has not happened**, and the data-parallel behaviour of transformers' Trainer inside a Ray worker is documented upstream, not observed here.
+- **RunPod pod**: the `PodCreateInput` the backend sends is asserted against RunPod's published OpenAPI document (`tests/fixtures/runpod_openapi_pods.json`, a verbatim subset), and the whole loop — create, poll the pod and its status endpoint, relay progress, read the metrics, delete the pod on success, failure and timeout — runs against a real local server that speaks those shapes and rejects undocumented fields. The process the pod runs (`src/finetuning/backends/pod_entrypoint.py`) is executed for real on CPU in `tests/test_trainer_smoke.py`: it trains, writes the adapter and `metrics.json`, serves its status, and exits on the shutdown request. **No pod has been launched: the RunPod account has no credit**, so pod scheduling, the image pull, the network volume mount and the proxied status port have not been observed against RunPod itself.
+
 ## What "estimate" means here
 
 - **Steps** are exact: `ceil(train_examples / (batch × accumulation × GPUs)) × epochs`.

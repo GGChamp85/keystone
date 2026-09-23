@@ -252,6 +252,38 @@ class Settings(BaseSettings):
     finetuning_output_dir: str = "/data/finetuning/output"
     finetuning_data_dir: str = "/data/finetuning/data"  # where guided fine-tunes write their datasets and manifests
     hf_token: str | None = None  # Hugging Face token for gated model downloads
+    # Where a job's trainer runs (src/finetuning/backends/): "inprocess" = this process, on the host's own GPUs;
+    # "ray" = a Ray Train job submitted to the KubeRay cluster at RAY_ADDRESS (ADR 0002); "runpod_pod" = an
+    # on-demand RunPod GPU pod running the training image, the adapter synced to a network volume (ADR 0005)
+    finetune_backend: str = "inprocess"
+
+    # ── Fine-Tuning: Ray Train backend (src/finetuning/backends/ray_train.py) ──
+    # the Ray dashboard URL jobs are submitted to — KubeRay names it <cluster>-head-svc; the chart sets this
+    ray_address: str = "http://keystone-training-head-svc:8265"
+    ray_train_num_workers: int = 0  # Ray Train workers, one GPU each (0 = the plan's gpu_count, else 1)
+    ray_train_use_gpu: bool = True  # ask Ray for a GPU per worker (false only for a CPU smoke on a CPU cluster)
+    ray_job_poll_interval_seconds: float = 5.0  # how often the runner asks the Ray Jobs API for the job's status
+    ray_job_timeout_seconds: int = 0  # give up on a Ray job after this long (0 = wait as long as it runs)
+
+    # ── Fine-Tuning: RunPod pod backend (src/finetuning/backends/runpod_pod.py) ──
+    # docker/training.Dockerfile's image, as RunPod can pull it (a registry RunPod reaches, not a local tag)
+    runpod_training_image: str = "keystone-training:latest"
+    # RunPod `gpuTypeIds` tried in order for the training pod (exact enum values from RunPod's OpenAPI document)
+    runpod_training_gpu_type_ids: list[str] = Field(
+        default_factory=lambda: ["NVIDIA L4", "NVIDIA RTX A5000", "NVIDIA GeForce RTX 4090"]
+    )
+    runpod_training_gpu_count: int = 1  # GPUs on the training pod
+    runpod_training_container_disk_gb: int = 50  # the pod's container disk (image + model cache)
+    runpod_training_cloud_type: str = "SECURE"  # RunPod cloud tier for the pod: SECURE or COMMUNITY
+    # the RunPod network volume the adapter is written to (mounted at /runpod-volume); a serverless
+    # endpoint created with the same volume serves it — required for this backend, a pod's own disk dies with it
+    runpod_network_volume_id: str | None = None
+    runpod_pod_poll_interval_seconds: float = 15.0  # how often the runner polls the pod and its status endpoint
+    runpod_pod_timeout_seconds: int = 0  # stop and delete the pod after this long (0 = as long as training runs)
+    runpod_rest_base_url: str = "https://rest.runpod.io/v1"  # RunPod's REST API (override only to test locally)
+    # RunPod's HTTP proxy for a pod's exposed port — how the runner reads the pod's live status endpoint
+    runpod_proxy_url_template: str = "https://{pod_id}-{port}.proxy.runpod.net"
+    runpod_pod_status_port: int = 8000  # the port the training pod's status endpoint listens on
 
     # ── Derived helpers ───────────────────────────────────────
     @property

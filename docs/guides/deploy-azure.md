@@ -16,7 +16,7 @@ One command stands up an AKS cluster with a CPU pool for the platform and one NV
 | Block storage | Premium SSD managed disks — `keystone-managed-premium` |
 | GPU scheduling | NVIDIA device plugin 0.17.1; AKS installs the driver itself on N-series sizes |
 | Sandbox | gVisor (no nested virtualisation on these sizes) |
-| Not installed | An ingress controller, the OpenBao secrets CSI path, the Kubeflow Trainer controller — the overlay disables the first two; see `docs/deployment/KUBERNETES_CLIENT_VPC.md` for adding them |
+| Not installed | An ingress controller, the OpenBao secrets CSI path, the KubeRay operator for multi-GPU training — the overlay disables the first two; see `docs/deployment/KUBERNETES_CLIENT_VPC.md` for adding them |
 
 ## What it costs
 

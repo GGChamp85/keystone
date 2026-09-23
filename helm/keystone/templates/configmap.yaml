@@ -26,3 +26,12 @@ data:
   TRANSFORMERS_OFFLINE: "1"
   HF_HUB_DISABLE_TELEMETRY: "1"
   {{- end }}
+  {{- if .Values.training.ray.enabled }}
+  # Fine-tuning jobs run as Ray Train jobs on the RayCluster in kuberay.yaml (ADR 0002); the app submits
+  # them to the head's dashboard (KubeRay names the Service <cluster>-head-svc) and the adapters land on
+  # the shared finetuning-output PVC every Ray pod mounts at /data/finetuning.
+  FINETUNE_BACKEND: "ray"
+  RAY_ADDRESS: "http://{{ include "keystone.fullname" . }}-training-head-svc:8265"
+  FINETUNING_OUTPUT_DIR: "/data/finetuning/output"
+  FINETUNING_DATA_DIR: "/data/finetuning/data"
+  {{- end }}

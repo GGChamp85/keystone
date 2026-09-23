@@ -28,7 +28,7 @@ One EKS cluster sized for a Keystone GPU pilot. Used by `environments/aws-pilot`
 | `rwx_storage_class` | `keystone-efs-rwx` | `modelCache.storageClassName`, `training.storageClassName` |
 | `block_storage_class` | `keystone-gp3` | `postgres/redis/qdrant/openbao.storageClassName` |
 | `gpu_node_selector` | `{ nodepool = "gpu-coding" }` | `vllm.*.nodeSelector`, `training.nodeSelector` |
-| `gpu_toleration` | `nvidia.com/gpu=present:NoSchedule` | already tolerated by `templates/vllm.yaml` and `templates/training-runtime.yaml` (`operator: Exists`) |
+| `gpu_toleration` | `nvidia.com/gpu=present:NoSchedule` | already tolerated by `templates/vllm.yaml` and `templates/kuberay.yaml` (`operator: Exists`) |
 | `kubeconfig_command` | `aws eks update-kubeconfig --region … --name …` | step 1 after apply |
 | `helm_install_command` | the `helm upgrade --install … -f values-client-vpc.yaml -f values-aws.yaml` line | step 2 after apply |
 

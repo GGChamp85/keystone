@@ -49,3 +49,14 @@ async def run_finetune_job_activity(job_id: str) -> dict[str, Any]:
         # retry/failure semantics apply, same convention as run_agent_task.
         logger.error("temporal.finetune_activity_failed", job_id=job_id, error=str(exc))
         raise
+
+
+@activity.defn
+async def run_finetune_export_activity(job_id: str, fmt: str, quant: str | None) -> dict[str, Any]:
+    from src.finetuning.runner import run_finetune_export
+
+    try:
+        return await run_finetune_export(UUID(job_id), fmt, quant)
+    except Exception as exc:
+        logger.error("temporal.finetune_export_activity_failed", job_id=job_id, format=fmt, error=str(exc))
+        raise

@@ -291,6 +291,7 @@ Commands:
   preview   Preview the first records of a job's real training data.
   promote   Promote a completed job's adapter to the tenant's default for its base model.
   rollback  Retire a promoted job's adapter — routing falls back to the base model.
+  export    Export a completed job's adapter: merged Hugging Face checkpoint, GGUF (llama.cpp),...
   watch     Stream a job's live progress until it reaches a terminal status.
 ```
 
@@ -421,6 +422,27 @@ Arguments:
 
 Options:
   --help  Show this message and exit.
+```
+
+## keystone finetune export
+
+```text
+Usage: keystone finetune export [OPTIONS] {job_id}
+
+  Export a completed job's adapter: merged Hugging Face checkpoint, GGUF (llama.cpp), or AWQ 4-bit.
+
+  Runs on the server in the background; the artifact's path and size land under the job's
+  metrics.exports.<format>. --wait polls until then.
+
+Arguments:
+  job_id  [required]
+
+Options:
+  --format <str>          merged | gguf | awq  [default: gguf]
+  --quant <str>           GGUF only: f32 | f16 | bf16 | q8_0 (default q8_0)
+  --wait                  Poll until the export finishes and print the artifact
+  --poll-seconds <float>  Polling interval with --wait  [default: 5.0]
+  --help                  Show this message and exit.
 ```
 
 ## keystone finetune watch

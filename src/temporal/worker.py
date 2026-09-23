@@ -21,8 +21,8 @@ from temporalio.worker import Worker
 
 from src.config import get_settings
 from src.temporal.activities import run_agent_task
-from src.temporal.finetune_activities import run_finetune_job_activity
-from src.temporal.finetune_workflow import FineTuneJobWorkflow
+from src.temporal.finetune_activities import run_finetune_export_activity, run_finetune_job_activity
+from src.temporal.finetune_workflow import FineTuneExportWorkflow, FineTuneJobWorkflow
 from src.temporal.workflows import CodingAgentWorkflow
 
 logger = structlog.get_logger(__name__)
@@ -46,8 +46,8 @@ async def run_worker() -> None:
     worker = Worker(
         client,
         task_queue=settings.temporal_task_queue,
-        workflows=[CodingAgentWorkflow, FineTuneJobWorkflow],
-        activities=[run_agent_task, run_finetune_job_activity],
+        workflows=[CodingAgentWorkflow, FineTuneJobWorkflow, FineTuneExportWorkflow],
+        activities=[run_agent_task, run_finetune_job_activity, run_finetune_export_activity],
         max_concurrent_activities=5,
         max_concurrent_workflow_tasks=10,
     )

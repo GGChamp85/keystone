@@ -16,7 +16,7 @@ One command stands up a GKE Standard cluster with a CPU pool for the platform an
 | Block storage | pd-balanced — `keystone-pd-balanced` |
 | GPU scheduling | GKE installs the NVIDIA driver and runs its own device plugin — nothing extra to install |
 | Sandbox | gVisor (what GKE Sandbox itself uses) |
-| Not installed | An ingress controller, the OpenBao secrets CSI path, the Kubeflow Trainer controller — the overlay disables the first two; see `docs/deployment/KUBERNETES_CLIENT_VPC.md` for adding them |
+| Not installed | An ingress controller, the OpenBao secrets CSI path, the KubeRay operator for multi-GPU training — the overlay disables the first two; see `docs/deployment/KUBERNETES_CLIENT_VPC.md` for adding them |
 
 ## What it costs
 

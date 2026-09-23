@@ -279,20 +279,43 @@ networkPolicy:
     vllmInternet: false # true only when vLLM must pull weights from a hub; air-gapped sites keep false
 
 training:
-  # Multi-node distributed fine-tuning (LoRA/SFT/DPO) via Kubeflow Trainer's
-  # TrainJob/ClusterTrainingRuntime CRDs (trainer.kubeflow.org/v1alpha1).
-  # The Trainer controller itself is cluster-scoped shared infrastructure
-  # installed separately — see docs/deployment/KUBERNETES_CLIENT_VPC.md.
-  enabled: false
-  defaultNumNodes: 2
-  gpusPerNode: 4
-  nodeSelector:
-    nodepool: gpu-coding
-  storage: 200Gi
-  storageClassName: ""
-  resourcesPerNode:
-    requests: { cpu: "8", memory: "64Gi", nvidia.com/gpu: "4" }
-    limits: { cpu: "16", memory: "128Gi", nvidia.com/gpu: "4" }
+  # Multi-GPU fine-tuning (LoRA/SFT/DPO) on a KubeRay RayCluster (templates/kuberay.yaml, ADR 0002):
+  # one Ray for serving and training. The KubeRay operator and its CRDs are cluster-scoped shared
+  # infrastructure installed separately — see docs/deployment/KUBERNETES_CLIENT_VPC.md. With
+  # ray.enabled the app's FINETUNE_BACKEND becomes "ray" and every fine-tune job is submitted to the
+  # cluster's head over the Ray Jobs API (src/finetuning/backends/ray_train.py).
+  image:
+    repository: keystone-training # docker/training.Dockerfile — torch, the trainers, Ray, the GGUF converter
+    tag: latest
+    pullPolicy: IfNotPresent
+  ray:
+    enabled: false
+    rayVersion: "2.58.0" # must match the ray pinned by the image's `finetuning-ray` extra (pyproject.toml)
+    head:
+      nodeSelector: {}
+      resources:
+        requests: { cpu: "2", memory: "8Gi" }
+        limits: { cpu: "4", memory: "16Gi" }
+    workers:
+      replicas: 2 # one Ray Train worker per GPU: replicas x gpusPerWorker GPUs train one job
+      minReplicas: 0 # KubeRay's autoscaler may scale the group to zero between jobs
+      maxReplicas: 4
+      gpusPerWorker: 1
+      shmSize: 8Gi # /dev/shm for NCCL and the data loaders
+      nodeSelector:
+        nodepool: gpu-coding
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      resources: # nvidia.com/gpu is added from gpusPerWorker
+        requests: { cpu: "8", memory: "64Gi" }
+        limits: { cpu: "16", memory: "128Gi" }
+  output:
+    # The finetuning-output PVC: adapters, datasets and Ray run storage, mounted at /data/finetuning
+    # on every Ray pod (and on the serving pods, so a promoted adapter is readable there).
+    storage: 200Gi
+    storageClassName: "" # must be RWX-capable (NFS/EFS/Filestore) — shared across GPU nodes
 
 observability:
   enabled: true
