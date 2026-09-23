@@ -14,6 +14,7 @@ Every page here says what has been verified and by which test. A claim with no t
 | fine-tune a small model on my repositories | [Fine-tune an SLM on your repo](guides/fine-tune-slm-on-your-repo.md) |
 | use it from VS Code | [Use it from VS Code](guides/use-from-vscode.md) |
 | deploy on Kubernetes, RunPod, or with no internet | [Deployment](deployment/KUBERNETES_CLIENT_VPC.md), [RunPod](deployment/RUNPOD_SETUP.md), [Air-gapped](airgap/OFFLINE_INSTALL_RUNBOOK.md) |
+| stand up a GPU pilot on AWS, Azure or Google Cloud | [AWS](guides/deploy-aws.md), [Azure](guides/deploy-azure.md), [Google Cloud](guides/deploy-gcp.md) — validate-only so far, see the [verification log](deployment/verification-log.md) |
 | look up a setting | [Configuration reference](reference/configuration.md) |
 | understand why it is built this way | [Architecture](architecture/SANDBOX_ARCHITECTURE.md), [Decision records](architecture/adr/README.md) |
 

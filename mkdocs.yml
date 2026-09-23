@@ -41,9 +41,13 @@ nav:
       - Model Library and Playground: guides/model-library-and-playground.md
       - Fine-tune an SLM on your repo: guides/fine-tune-slm-on-your-repo.md
       - Use it from VS Code: guides/use-from-vscode.md
+      - Deploy a GPU pilot on AWS: guides/deploy-aws.md
+      - Deploy a GPU pilot on Azure: guides/deploy-azure.md
+      - Deploy a GPU pilot on Google Cloud: guides/deploy-gcp.md
   - Deployment:
       - Kubernetes (client VPC): deployment/KUBERNETES_CLIENT_VPC.md
       - RunPod: deployment/RUNPOD_SETUP.md
+      - Verification log: deployment/verification-log.md
       - OpenCode: deployment/OPENCODE_SETUP.md
       - Air-gapped install: airgap/OFFLINE_INSTALL_RUNBOOK.md
   - Reference:

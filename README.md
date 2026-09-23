@@ -30,6 +30,7 @@ Every tier below runs the exact same code — `docker-compose.yml` for a single 
 |---|---|---|---|
 | **Locally** — laptop, no GPU required | None — point the coding role at a real frontier model instead (`benchmarks/frontier_proxy.py`) | Normal internet | [Run it locally in 10 minutes](#run-it-locally-in-10-minutes) |
 | **RunPod** — cloud GPUs, rented by the hour | Real GPU(s), no upfront hardware purchase | Normal internet | [`docs/deployment/RUNPOD_SETUP.md`](docs/deployment/RUNPOD_SETUP.md) |
+| **AWS / Azure / GCP GPU pilot** — a managed Kubernetes cluster with one 24 GB GPU node, from `keystone deploy cloud` | One L4 (AWS, GCP) or A10 (Azure), scales to 0 | Normal internet | [`docs/guides/deploy-aws.md`](docs/guides/deploy-aws.md), [`deploy-azure.md`](docs/guides/deploy-azure.md), [`deploy-gcp.md`](docs/guides/deploy-gcp.md) — validate-only so far, see [`docs/deployment/verification-log.md`](docs/deployment/verification-log.md) |
 | **Cloud VPC or on-prem** — production, your own Kubernetes cluster | Real multi-GPU/multi-node hardware you own or rent, sized per [Models](#models) | Normal internet, or **zero egress** if you also follow the air-gap bundle steps | [`docs/deployment/KUBERNETES_CLIENT_VPC.md`](docs/deployment/KUBERNETES_CLIENT_VPC.md) — add [Deploy air-gapped](#deploy-air-gapped) on top for zero internet egress after bring-up |
 
 Model serving itself scales the same way across every tier: from one GPU to real multi-node pipeline-parallel serving (`nodeCount` > 1) for a model too large for one node's GPU pool, and from one replica to KEDA-based autoscaling on real queue depth — see [Distributed serving](#distributed-serving). And because every container image, Python wheel, npm package, and model weight the platform needs bundles through the same `airgap/` scripts, the air-gapped path isn't a stripped-down mode — it's the identical Cloud VPC / on-prem deployment with the network cable pulled.
@@ -602,6 +603,8 @@ Published as a site with `mkdocs build --strict` in CI (`mkdocs.yml`; `pip insta
 | `docs/guides/fine-tune-slm-on-your-repo.md` | Guided fine-tune: describe → plan & cost → approve → train → promote, with what every estimate means |
 | `docs/guides/use-from-vscode.md` | VS Code via the Continue extension: chat, edit, autocomplete and MCP memory against your gateway |
 | `docs/deployment/KUBERNETES_CLIENT_VPC.md` | Helm install, and what's verified on a real cluster vs. not |
+| `docs/guides/deploy-aws.md`, `deploy-azure.md`, `deploy-gcp.md` | A GPU pilot on EKS / AKS / GKE: what you get, list-price cost per hour, the five commands, what is verified vs. not |
+| `docs/deployment/verification-log.md` | Dated record of what each cloud path has really been applied against (currently: fmt/validate/helm-template only) |
 | `docs/deployment/RUNPOD_SETUP.md` | Step-by-step: real GPU pods on RunPod, wired to the rest of the stack |
 | `docs/deployment/OPENCODE_SETUP.md` | Wiring the interactive CLI to Keystone |
 | `docs/LICENSES_AND_COMPLIANCE.md` | Full license inventory + every real finding that changed the build |
@@ -615,6 +618,7 @@ Published as a site with `mkdocs build --strict` in CI (`mkdocs.yml`; `pip insta
 |------|----------|-----|
 | Single-box dev | Local development, demos | `docker-compose.yml` (`make up`) |
 | RunPod test/staging | Multi-GPU testing before rollout | `infra/opentofu/environments/runpod-test/`, `helm/keystone/values-runpod-test.yaml` |
+| AWS / Azure / GCP GPU pilot | One managed Kubernetes cluster with a 24 GB GPU node, the full chart on it | `keystone deploy cloud --cloud aws\|azure\|gcp --env pilot --plan\|--apply\|--destroy` over `infra/opentofu/environments/{aws,azure,gcp}-pilot/` (modules `aws-eks-gpu`, `azure-aks-gpu`, `gcp-gke-gpu`) + `helm/keystone/values-{aws,azure,gcp}.yaml` stacked on `values-client-vpc.yaml`. fmt/validate/template verified in CI; no real apply yet — `docs/deployment/verification-log.md` |
 | Client VPC production | Air-gapped, multi-node, inside your own network | `helm/keystone/` Kubernetes chart with `helm/keystone/values-client-vpc.yaml`, plus the reusable `infra/opentofu/modules/client-vpc-network/` module (no fully assembled `environments/` entry for this tier yet — see `docs/deployment/KUBERNETES_CLIENT_VPC.md` for what's verified) |
 
 ---
