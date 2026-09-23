@@ -38,6 +38,8 @@ nav:
       - Quickstart (one path): getting-started/quickstart.md
       - Hardware sizing: getting-started/hardware-sizing.md
   - Guides:
+      - The gateway API: guides/gateway-api.md
+      - The coding agent: guides/coding-agent.md
       - Model Library and Playground: guides/model-library-and-playground.md
       - Fine-tune an SLM on your repo: guides/fine-tune-slm-on-your-repo.md
       - Use it from VS Code: guides/use-from-vscode.md
@@ -46,6 +48,9 @@ nav:
       - RunPod: deployment/RUNPOD_SETUP.md
       - OpenCode: deployment/OPENCODE_SETUP.md
       - Air-gapped install: airgap/OFFLINE_INSTALL_RUNBOOK.md
+  - Benchmarks: benchmarks/README.md
+  - Enterprise:
+      - Open weights, risk and support: enterprise/open-weights-risk-and-support.md
   - Reference:
       - Configuration: reference/configuration.md
   - Architecture:

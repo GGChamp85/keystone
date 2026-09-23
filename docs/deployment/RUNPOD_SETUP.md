@@ -49,7 +49,7 @@ What it does under the hood, so nothing is a black box: one `POST /v1/templates`
 
 ### What this actually provisions
 
-`infra/opentofu/environments/runpod-test/` provisions one real RunPod GPU pod running vLLM (`infra/opentofu/modules/runpod-gpu-pool/`), sized down to Qwen2.5-Coder-32B-Instruct on a single GPU — not the full 8-GPU GLM-5.3-Flash production profile, which needs far more VRAM than one test pod has (see the [Models](https://github.com/GGChamp85/keystone#models) table). Everything else — Postgres, Redis, Qdrant, the Keystone app itself — still runs via the normal `docker-compose.yml`, just pointed at the RunPod pod's public URL instead of a local vLLM container.
+`infra/opentofu/environments/runpod-test/` provisions one real RunPod GPU pod running vLLM (`infra/opentofu/modules/runpod-gpu-pool/`), sized down to Qwen2.5-Coder-32B-Instruct on a single GPU — not the full 8-GPU GLM-5.3-Flash production profile, which needs far more VRAM than one test pod has (see the [Models](../getting-started/hardware-sizing.md) table). Everything else — Postgres, Redis, Qdrant, the Keystone app itself — still runs via the normal `docker-compose.yml`, just pointed at the RunPod pod's public URL instead of a local vLLM container.
 
 ### Prerequisites
 

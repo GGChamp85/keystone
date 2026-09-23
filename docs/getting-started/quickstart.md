@@ -1,5 +1,7 @@
 # Quickstart — one path
 
+**Outcome:** a running Keystone on your machine, a real model answering through the API and the web UI, and the coding agent fixing a real bug and opening a pull request. **Time:** about 10 minutes for the gateway, 20 more for the agent task.
+
 One sequence of commands from a clone to a real completion and a real coding task. Two tracks differ only in what serves the model: **Track A** needs no GPU (a real 0.5B model on CPU for the gateway, and a frontier model behind the same interface for the coding task — this track is not air-gapped); **Track B** is one 24 GB GPU serving Qwen2.5-Coder-7B, fully self-hosted.
 
 Steps 1 and 3 are executed literally by `tests/e2e/test_golden_path.py` in CI against the same demo model (the `.env` that `keystone init --backend demo-cpu` writes, a tenant and key created through the real admin routes, a real completion through the real router); step 2's compose invocations are the ones `tests/test_cli_ops.py` pins. The steps are true for the commit you have, or CI is red.

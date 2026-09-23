@@ -10,10 +10,14 @@ Every page here says what has been verified and by which test. A claim with no t
 |---|---|
 | run it on a laptop in minutes, then on one GPU | [Quickstart](getting-started/quickstart.md) |
 | know what GPU a model needs | [Hardware sizing](getting-started/hardware-sizing.md) |
+| call it from my apps and tools | [The gateway API](guides/gateway-api.md) |
+| hand a task to the coding agent | [The coding agent](guides/coding-agent.md) |
 | see what models are up and try one | [Model Library and Playground](guides/model-library-and-playground.md) |
 | fine-tune a small model on my repositories | [Fine-tune an SLM on your repo](guides/fine-tune-slm-on-your-repo.md) |
 | use it from VS Code | [Use it from VS Code](guides/use-from-vscode.md) |
 | deploy on Kubernetes, RunPod, or with no internet | [Deployment](deployment/KUBERNETES_CLIENT_VPC.md), [RunPod](deployment/RUNPOD_SETUP.md), [Air-gapped](airgap/OFFLINE_INSTALL_RUNBOOK.md) |
+| decide whether open weights fit my organisation | [Open weights: risk and support](enterprise/open-weights-risk-and-support.md) |
+| see how quality and cost are measured | [Benchmarks](benchmarks/README.md) |
 | look up a setting | [Configuration reference](reference/configuration.md) |
 | understand why it is built this way | [Architecture](architecture/SANDBOX_ARCHITECTURE.md), [Decision records](architecture/adr/README.md) |
 

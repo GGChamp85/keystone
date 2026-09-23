@@ -1,0 +1,68 @@
+# The coding agent
+
+**What it is.** A background engineer for your repositories. Give it a task and a repository; it clones the repository into a sandbox, reads and searches the real code, edits it with real tools, runs your quality gates and your test suite, asks a second model to review, fixes what failed, and opens a pull request for you to read like any contributor's. You watch every step live.
+
+**Who it is for.** Development teams that want to hand off well-defined work (a bug with a failing test, a pagination endpoint, a migration) and get back a reviewed pull request; leads who need to see what an agent did, not trust that it did it.
+
+## What "done" means
+
+- **Verified, not asserted.** Pass or fail comes from the real exit code of your linters, type checkers, security scanners and test suite, run inside a sandbox. No model grades its own work.
+- **Fails closed.** A review the model could not complete, a gate that could not run, a test the sandbox could not execute: each blocks the task. Nothing is labelled reviewed or tested that was not.
+- **A real git workflow.** Clone, branch (`keystone/<user>/<task_id>`), commit, push, pull request on your git server, then a fresh clone of the pushed branch is re-verified before the task is called complete.
+- **Repository-aware.** It starts from a ranked map of your repository's symbols, reads line ranges rather than whole files, installs your dependencies once, runs the tests related to what it touched before the full suite, and can re-plan from the root cause after repeated failures rather than retrying blindly.
+
+## Submit a task
+
+From the web UI (**Tasks**), from VS Code, from the terminal agent, or over the API:
+
+```bash
+curl -X POST http://localhost:8080/v1/keystone/tasks \
+  -H "Authorization: Bearer ks-XXXX-XXXXXXXX" -H "Content-Type: application/json" \
+  -d '{
+    "task": "Add pagination to the /users endpoint with cursor-based navigation",
+    "repository_url": "https://<your-git-server>/myorg/myapi",
+    "model": "coding",
+    "max_iterations": 10
+  }'
+```
+
+`"model": "auto"` lets the router choose the role from the task description, recorded on the task as the role actually used, never a hidden live decision. `max_iterations` is the one per-task safety bound, with no ceiling.
+
+Then watch: `GET /v1/keystone/tasks/{id}/stream` is a live event stream (the web UI renders it) with every tool call and result, every diff, every test run and quality finding, the review, and the pull request link. Nothing is truncated in storage: full test output, full diffs and full install logs stay on the task record.
+
+## Where the work happens
+
+Each task gets its own sandbox (gVisor by default; Firecracker microVMs where KVM is available) with the repository cloned inside it, its own branch and its own pull request. The sandbox's network egress is restricted to the git hosts you allow and the package mirrors you configure. Tasks never share a working copy, so many developers can run many tasks against many repositories at once; throughput is bounded by the GPU, worker and sandbox capacity you deploy, not by a policy number.
+
+## Connect your git server
+
+The agent only talks to hosts you list. Gitea is the reference implementation (`src/git/gitea.py`); a local one takes five minutes.
+
+```bash
+# .env
+GIT_ALLOWED_HOSTS=["git.yourcompany.internal"]
+GIT_HOST_API_URL=https://git.yourcompany.internal/api/v1
+GIT_HOST_TOKEN=<a bot account token with push and pull-request permissions>
+```
+
+A repository URL outside the allowlist is rejected before any clone, with the host named in the error.
+
+## Safety on untrusted content
+
+Everything the agent reads from a repository is untrusted. Every tool result is wrapped in an explicit delimiter naming its source before it re-enters the model's context, and common prompt-injection phrasings are flagged with a visible notice inside that result. Content is never altered or dropped, so this is on by default. It is defence in depth, not a guarantee: a disguised injection can still evade the patterns.
+
+When a role is pointed at a frontier model through the proxy, `FRONTIER_PROXY_REDACT_PII=1` redacts emails, phone numbers, national identifiers, card numbers (with a real checksum) and IP addresses from everything that leaves the network. It is deterministic pattern matching, auditable and dependency-free, and it will not catch free-text personal details.
+
+## Other ways in
+
+- **Web UI**: `http://localhost:8080/app/`: submit, watch the trace, browse the team's tasks, manage memory, see spend.
+- **VS Code**: the Continue extension against the gateway, with the agent's memory over MCP ([guide](use-from-vscode.md)).
+- **Terminal**: [OpenCode](https://github.com/sst/opencode) pre-configured against your roles, with permission gates that ask before every edit and every command ([setup](../deployment/OPENCODE_SETUP.md)).
+
+## Memory
+
+The agent records what it learned per repository and per tenant (conventions, gotchas, decisions) and retrieves it on later tasks. Humans can inspect, approve, pin or forget any memory from the web UI, the `keystone memory` commands, or the MCP tools an IDE uses.
+
+## Verified how
+
+`tests/test_git_workflow_integration.py` runs a task end to end against a live Gitea, a live sandbox daemon and a live sandbox; `tests/test_tool_impl.py`, `tests/test_repo_map.py` and `tests/test_fuzzy_patch.py` exercise the tools in a real sandbox; `tests/test_review_node.py` and `tests/test_quality_*` prove the gates fail closed; `benchmarks/agent_runner.py` runs the whole loop on seeded repository tasks ([benchmarks](../benchmarks/README.md)).
