@@ -2,12 +2,15 @@ import { useState } from 'react'
 import { ApiKeyBar } from './components/ApiKeyBar'
 import { FineTunePanel } from './components/FineTunePanel'
 import { MemoryPanel } from './components/MemoryPanel'
+import { ModelLibrary } from './components/ModelLibrary'
+import { Playground } from './components/Playground'
 import { SpendPanel } from './components/SpendPanel'
 import { TaskSubmitForm } from './components/TaskSubmitForm'
 import { TaskStreamView } from './components/TaskStreamView'
 import { TeamTaskList } from './components/TeamTaskList'
 
-type View = 'memory' | 'team' | 'finetune' | 'spend'
+type View = 'memory' | 'team' | 'finetune' | 'spend' | 'models' | 'playground'
+const VIEWS: View[] = ['memory', 'team', 'finetune', 'spend', 'models', 'playground']
 
 function taskIdFromUrl(): string | null {
   return new URLSearchParams(window.location.search).get('task')
@@ -15,7 +18,7 @@ function taskIdFromUrl(): string | null {
 
 function viewFromUrl(): View | null {
   const v = new URLSearchParams(window.location.search).get('view')
-  return v === 'memory' || v === 'team' || v === 'finetune' || v === 'spend' ? v : null
+  return VIEWS.includes(v as View) ? (v as View) : null
 }
 
 export default function App() {
@@ -32,11 +35,14 @@ export default function App() {
     setViewState(null)
   }
 
-  function setView(next: View | null) {
+  function setView(next: View | null, params: Record<string, string> = {}) {
     const url = new URL(window.location.href)
     if (next) url.searchParams.set('view', next)
     else url.searchParams.delete('view')
     url.searchParams.delete('task')
+    url.searchParams.delete('model')
+    url.searchParams.delete('base_model')
+    for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v)
     window.history.pushState({}, '', url)
     setViewState(next)
     setTaskIdState(null)
@@ -69,6 +75,16 @@ export default function App() {
                   Spend
                 </button>
               )}
+              {view !== 'models' && (
+                <button className="nav-link" onClick={() => setView('models')}>
+                  Models
+                </button>
+              )}
+              {view !== 'playground' && (
+                <button className="nav-link" onClick={() => setView('playground')}>
+                  Playground
+                </button>
+              )}
             </>
           )}
           <ApiKeyBar />
@@ -84,6 +100,18 @@ export default function App() {
           <FineTunePanel onBack={() => setView(null)} />
         ) : view === 'spend' ? (
           <SpendPanel onBack={() => setView(null)} />
+        ) : view === 'models' ? (
+          <ModelLibrary
+            onBack={() => setView(null)}
+            onPlayground={(modelId) => setView('playground', { model: modelId })}
+            onFineTune={(baseModel) => setView('finetune', { base_model: baseModel })}
+          />
+        ) : view === 'playground' ? (
+          <Playground
+            initialModel={new URLSearchParams(window.location.search).get('model')}
+            onBack={() => setView(null)}
+            onLibrary={() => setView('models')}
+          />
         ) : taskId ? (
           <TaskStreamView taskId={taskId} onBack={() => setTaskId(null)} />
         ) : (

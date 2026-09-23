@@ -40,6 +40,13 @@ async def last_headers():
     return state["last_headers"] or {}
 
 
+@app.get("/models")
+async def models():
+    """vLLM's model listing — the health probe InferenceClient.health() uses, with the `max_model_len`
+    vLLM reports per served model."""
+    return {"object": "list", "data": [{"id": "test-model", "object": "model", "max_model_len": 4096}]}
+
+
 @app.post("/chat/completions")
 async def chat_completions(req: Request):
     payload = await req.json()

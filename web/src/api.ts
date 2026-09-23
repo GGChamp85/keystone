@@ -536,3 +536,144 @@ export async function approveGuidedPlan(jobId: string, force = false): Promise<F
   if (!resp.ok) throw new Error(`Approval failed (${resp.status}): ${await resp.text()}`)
   return resp.json()
 }
+
+// ── Model Library + Playground (src/api/routes/models_library.py, /v1/chat/completions) ─────────
+
+export type ModelState = 'READY' | 'UNHEALTHY' | 'NOT_DEPLOYED' | 'TRAINING'
+
+export interface LibraryAdapter {
+  name: string
+  base_model_id: string
+  path: string
+  rank: number
+  job_type: string
+  job_id: string | null
+  status: string
+  is_default: boolean
+  metrics: Record<string, unknown>
+  created_at: string | null
+}
+
+export interface LibraryModel {
+  kind: 'role' | 'adapter' | 'catalog'
+  id: string
+  name: string
+  purpose: string
+  hf_source: string
+  provider: string
+  endpoint: string | null
+  served_path: string | null
+  served_model_ids?: string[]
+  state: ModelState
+  health?: Record<string, unknown>
+  params_b?: number | null
+  context?: number | null
+  context_source?: string | null
+  license?: string | null
+  moe?: boolean | null
+  tool_parser?: string | null
+  deployment?: Record<string, number | string | null>
+  api_features: Record<string, boolean | null>
+  adapters?: LibraryAdapter[]
+  adapter_status?: string
+  is_default?: boolean
+  path?: string
+  rank?: number
+  job_id?: string | null
+  metrics?: Record<string, unknown>
+}
+
+export interface ModelLibrary {
+  generated_at: number
+  models: LibraryModel[]
+}
+
+export async function getModelLibrary(): Promise<ModelLibrary> {
+  const resp = await fetch('/v1/keystone/models', { headers: authHeaders() })
+  if (!resp.ok) throw new Error(`Failed to load the model library (${resp.status}): ${await resp.text()}`)
+  return resp.json()
+}
+
+export interface ChatTurn {
+  role: 'system' | 'user' | 'assistant'
+  content: string
+}
+
+export interface ChatUsage {
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+}
+
+export interface ChatStreamResult {
+  text: string
+  usage: ChatUsage | null
+  finish_reason: string | null
+  ttft_ms: number | null
+  elapsed_ms: number
+  served_role: string | null
+}
+
+/**
+ * A streamed /v1/chat/completions request (the OpenAI wire shape every backend speaks), with
+ * `stream_options.include_usage` so the final chunk carries the backend's real token usage. `onDelta`
+ * receives each text delta as it arrives; the result carries the timings the Playground shows.
+ */
+export async function streamChat(
+  req: { model: string; messages: ChatTurn[]; temperature?: number; max_tokens?: number },
+  onDelta: (text: string) => void,
+  signal: AbortSignal,
+): Promise<ChatStreamResult> {
+  const started = performance.now()
+  const resp = await fetch('/v1/chat/completions', {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...req, stream: true, stream_options: { include_usage: true } }),
+    signal,
+  })
+  if (!resp.ok || !resp.body) {
+    throw new Error(`Request failed (${resp.status}): ${await resp.text()}`)
+  }
+  const servedRole = resp.headers.get('x-vs-model')
+  const reader = resp.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let text = ''
+  let usage: ChatUsage | null = null
+  let finish: string | null = null
+  let ttft: number | null = null
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const frames = buffer.split('\n\n')
+    buffer = frames.pop() ?? ''
+    for (const frame of frames) {
+      const dataLine = frame.split('\n').find((line) => line.startsWith('data: '))
+      if (!dataLine) continue
+      const raw = dataLine.slice('data: '.length).trim()
+      if (raw === '[DONE]') continue
+      let chunk: {
+        choices?: { delta?: { content?: string }; finish_reason?: string | null }[]
+        usage?: ChatUsage
+      }
+      try {
+        chunk = JSON.parse(raw)
+      } catch {
+        continue
+      }
+      if (chunk.usage) usage = chunk.usage
+      for (const choice of chunk.choices ?? []) {
+        const delta = choice.delta?.content
+        if (delta) {
+          if (ttft === null) ttft = performance.now() - started
+          text += delta
+          onDelta(delta)
+        }
+        if (choice.finish_reason) finish = choice.finish_reason
+      }
+    }
+  }
+  return { text, usage, finish_reason: finish, ttft_ms: ttft, elapsed_ms: performance.now() - started, served_role: servedRole }
+}

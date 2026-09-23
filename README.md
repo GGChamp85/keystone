@@ -244,6 +244,10 @@ message = client.messages.create(model="coding", max_tokens=1024, messages=[{"ro
 
 Swapping in a different open-weight model is a config change, not a code change — see `src/inference/config.py` and `src/inference/model_router.py`. No GPU at all? `benchmarks/frontier_proxy.py` puts a real frontier model behind this same interface, so the gateway (and the coding agent below) work identically either way.
 
+### Model Library and Playground
+
+**Models** in the web UI (`GET /v1/keystone/models`) lists every serving role with its **live state** from the router's own health registry — READY, UNHEALTHY (breaker open, last error shown), NOT_DEPLOYED, TRAINING — plus this tenant's fine-tuned adapters and the deployable catalog with the VRAM each needs. One click copies the exact `model` id, opens the model in the **Playground** (a streamed `/v1/chat/completions` call with real token usage, time to first token and tokens/s), prefills the guided fine-tune wizard, or prints the Helm/RunPod command to deploy it. See `docs/guides/model-library-and-playground.md`.
+
 ### Add a new model
 
 Every call site — the gateway, the router, the coding agent — resolves a model by **role** (`coding`, `coding_fallback`, `reasoning`), never by name. Swapping what's behind a role never touches the orchestrator, the agent loop, or the gateway code.

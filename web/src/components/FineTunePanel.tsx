@@ -49,7 +49,7 @@ function GuidedStep({ onStarted }: { onStarted: (jobId: string) => void }) {
   const [detected, setDetected] = useState<{ name: string; vram_gb: number }[]>([])
   const [repos, setRepos] = useState('')
   const [goal, setGoal] = useState('')
-  const [baseModel, setBaseModel] = useState('auto')
+  const [baseModel, setBaseModel] = useState(() => new URLSearchParams(window.location.search).get('base_model') ?? 'auto')
   const [epochs, setEpochs] = useState(1)
   const [gpuPrice, setGpuPrice] = useState('')
   const [gpuSpec, setGpuSpec] = useState('')
