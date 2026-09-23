@@ -60,7 +60,7 @@ async def _resolve_api_key(
     if not raw_key:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing Authorization: Bearer header",
+            detail="Missing Authorization: Bearer header (or x-api-key header for Anthropic-style clients)",
         )
 
     if not raw_key.startswith(API_KEY_PREFIX):
@@ -133,7 +133,9 @@ async def require_auth(
     None for a key not yet linked to a real person (e.g. a pre-Phase-4 key,
     or a service/system key) — every route must treat it as optional.
     """
-    raw_key = credentials.credentials if credentials else None
+    # OpenAI-style `Authorization: Bearer` first; the Anthropic SDKs send the same key as `x-api-key`
+    # (their default `api_key=` argument), so /v1/messages clients work without a custom header.
+    raw_key = credentials.credentials if credentials else request.headers.get("x-api-key")
     api_key, tenant, user = await _resolve_api_key(raw_key, db)
     request.state.api_key = api_key
     request.state.tenant = tenant

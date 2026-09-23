@@ -12,8 +12,30 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class ChatMessage(BaseModel):
-    role: Literal["system", "user", "assistant"] = "user"
-    content: str
+    """One OpenAI chat message. `content` is a string, OpenAI content parts, or null (an assistant turn that
+    only made tool calls); `tool_calls` on an assistant turn and `tool_call_id` on a `tool` turn carry a
+    tool-use round trip through the gateway unchanged."""
+
+    role: Literal["system", "user", "assistant", "tool"] = "user"
+    content: str | list[dict[str, Any]] | None = None
+    name: str | None = None
+    tool_calls: list[dict[str, Any]] | None = None
+    tool_call_id: str | None = None
+
+    def to_wire(self) -> dict[str, Any]:
+        msg: dict[str, Any] = {"role": self.role, "content": self.content}
+        if self.name:
+            msg["name"] = self.name
+        if self.tool_calls:
+            msg["tool_calls"] = self.tool_calls
+        if self.tool_call_id:
+            msg["tool_call_id"] = self.tool_call_id
+        return msg
+
+
+def _normalize_model(v: str) -> str:
+    shortcuts = {"code": "coding", "reason": "reasoning", "qwen": "coding_fallback"}
+    return shortcuts.get(v.lower(), v.lower())
 
 
 class CompletionRequest(BaseModel):
@@ -35,12 +57,52 @@ class CompletionRequest(BaseModel):
     stop: list[str] | None = None
     frequency_penalty: float = Field(default=0.0, ge=-2.0, le=2.0)
     presence_penalty: float = Field(default=0.0, ge=-2.0, le=2.0)
+    tools: list[dict[str, Any]] | None = Field(
+        default=None, description="OpenAI function-calling tools, passed to the backend unchanged."
+    )
+    tool_choice: str | dict[str, Any] | None = None
+    response_format: dict[str, Any] | None = Field(
+        default=None,
+        description="{'type': 'json_schema', ...} or {'type': 'json_object'} (structured output); "
+        "not combinable with tools in one request.",
+    )
 
     @field_validator("model")
     @classmethod
     def normalize_model(cls, v: str) -> str:
-        shortcuts = {"code": "coding", "reason": "reasoning", "qwen": "coding_fallback"}
-        return shortcuts.get(v.lower(), v.lower())
+        return _normalize_model(v)
+
+
+class MessagesRequest(BaseModel):
+    """Anthropic Messages API request (`POST /v1/messages`) — text, tools and streaming; see
+    src/inference/anthropic_compat.py for what is translated and what is refused."""
+
+    model: str = Field(..., description="Model role: 'coding', 'coding_fallback', 'reasoning', or a full model id")
+    messages: list[dict[str, Any]]
+    max_tokens: int = Field(..., ge=1, le=131072)
+    system: str | list[dict[str, Any]] | None = None
+    temperature: float | None = Field(default=None, ge=0.0, le=1.0)
+    top_p: float | None = Field(default=None, ge=0.0, le=1.0)
+    top_k: int | None = Field(default=None, ge=0)
+    stop_sequences: list[str] | None = None
+    stream: bool = False
+    tools: list[dict[str, Any]] | None = None
+    tool_choice: dict[str, Any] | None = None
+    metadata: dict[str, Any] | None = None
+
+    @field_validator("model")
+    @classmethod
+    def normalize_model(cls, v: str) -> str:
+        return _normalize_model(v)
+
+
+class CountTokensRequest(BaseModel):
+    """`POST /v1/messages/count_tokens`."""
+
+    model: str
+    messages: list[dict[str, Any]]
+    system: str | list[dict[str, Any]] | None = None
+    tools: list[dict[str, Any]] | None = None
 
 
 # ── API Key Requests ──────────────────────────────────────────

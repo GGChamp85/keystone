@@ -139,7 +139,7 @@ async def test_gateway_answers_503_with_retry_after_when_no_model_is_healthy():
         db.add(APIKey(tenant_id=tid, name="k", key_prefix=prefix, key_hash=key_hash, scopes=["inference"]))
     try:
         app = create_app()
-        with patch("src.api.routes.completions.get_model_router", return_value=_NoRouter()):
+        with patch("src.api.routes._inference_common.get_model_router", return_value=_NoRouter()):
             async with app.router.lifespan_context(app):
                 transport = httpx.ASGITransport(app=app)
                 async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:

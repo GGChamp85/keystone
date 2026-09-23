@@ -116,9 +116,11 @@ def create_app() -> FastAPI:
     from src.api.routes.keys import router as keys_router
     from src.api.routes.mcp import build_mcp_asgi_app
     from src.api.routes.memory import router as memory_router
+    from src.api.routes.messages import router as messages_router
 
     app.include_router(health_router)
     app.include_router(completions_router)
+    app.include_router(messages_router)
     app.include_router(keys_router)
     app.include_router(agents_router)
     app.include_router(memory_router)

@@ -109,7 +109,7 @@ async def test_chat_completions_routes_to_the_tenants_promoted_adapter(tenant_an
         await db.flush()
 
     fake_client = _ScriptedInferenceClient()
-    with patch("src.api.routes.completions.get_model_router", return_value=_ScriptedModelRouter(fake_client)):
+    with patch("src.api.routes._inference_common.get_model_router", return_value=_ScriptedModelRouter(fake_client)):
         async with running_client() as client:
             resp = await client.post(
                 "/v1/chat/completions",
@@ -124,7 +124,7 @@ async def test_chat_completions_routes_to_the_tenants_promoted_adapter(tenant_an
 async def test_chat_completions_falls_back_to_base_model_when_no_adapter_promoted(tenant_and_key):
     _tenant_id, api_key = tenant_and_key
     fake_client = _ScriptedInferenceClient()
-    with patch("src.api.routes.completions.get_model_router", return_value=_ScriptedModelRouter(fake_client)):
+    with patch("src.api.routes._inference_common.get_model_router", return_value=_ScriptedModelRouter(fake_client)):
         async with running_client() as client:
             resp = await client.post(
                 "/v1/chat/completions",
@@ -140,7 +140,7 @@ async def test_chat_completions_has_no_max_tokens_ceiling_by_default(tenant_and_
     """MAX_TOKENS_PER_REQUEST defaults to 0 = no deployment ceiling: the model's own limit is the only one."""
     _tenant_id, api_key = tenant_and_key
     fake_client = _ScriptedInferenceClient()
-    with patch("src.api.routes.completions.get_model_router", return_value=_ScriptedModelRouter(fake_client)):
+    with patch("src.api.routes._inference_common.get_model_router", return_value=_ScriptedModelRouter(fake_client)):
         async with running_client() as client:
             resp = await client.post(
                 "/v1/chat/completions",
@@ -160,7 +160,7 @@ async def test_chat_completions_rejects_max_tokens_above_a_configured_deployment
     get_settings.cache_clear()
     _tenant_id, api_key = tenant_and_key
     fake_client = _ScriptedInferenceClient()
-    with patch("src.api.routes.completions.get_model_router", return_value=_ScriptedModelRouter(fake_client)):
+    with patch("src.api.routes._inference_common.get_model_router", return_value=_ScriptedModelRouter(fake_client)):
         async with running_client() as client:
             resp = await client.post(
                 "/v1/chat/completions",
@@ -196,8 +196,8 @@ async def test_streaming_bills_the_backends_real_usage_and_hides_the_usage_chunk
         return {}
 
     with (
-        patch("src.api.routes.completions.get_model_router", return_value=_ScriptedModelRouter(fake_client)),
-        patch("src.api.routes.completions.record_token_usage", fake_record),
+        patch("src.api.routes._inference_common.get_model_router", return_value=_ScriptedModelRouter(fake_client)),
+        patch("src.api.routes._inference_common.record_token_usage", fake_record),
     ):
         async with running_client() as client:
             frames = await _stream_frames(
@@ -213,8 +213,8 @@ async def test_streaming_forwards_the_usage_chunk_when_the_client_asks(tenant_an
     _tenant_id, api_key = tenant_and_key
     fake_client = _ScriptedInferenceClient()
     with (
-        patch("src.api.routes.completions.get_model_router", return_value=_ScriptedModelRouter(fake_client)),
-        patch("src.api.routes.completions.record_token_usage", lambda *a, **k: _noop()),
+        patch("src.api.routes._inference_common.get_model_router", return_value=_ScriptedModelRouter(fake_client)),
+        patch("src.api.routes._inference_common.record_token_usage", lambda *a, **k: _noop()),
     ):
         async with running_client() as client:
             frames = await _stream_frames(
@@ -241,8 +241,8 @@ async def test_streaming_estimates_with_tiktoken_when_the_backend_sends_no_usage
         return {}
 
     with (
-        patch("src.api.routes.completions.get_model_router", return_value=_ScriptedModelRouter(fake_client)),
-        patch("src.api.routes.completions.record_token_usage", fake_record),
+        patch("src.api.routes._inference_common.get_model_router", return_value=_ScriptedModelRouter(fake_client)),
+        patch("src.api.routes._inference_common.record_token_usage", fake_record),
     ):
         async with running_client() as client:
             await _stream_frames(
@@ -265,7 +265,7 @@ async def test_a_completion_lands_in_the_usage_ledger_with_dollars(tenant_and_ke
     _tenant_id, api_key = tenant_and_key
     fake_client = _ScriptedInferenceClient()
     try:
-        with patch("src.api.routes.completions.get_model_router", return_value=_ScriptedModelRouter(fake_client)):
+        with patch("src.api.routes._inference_common.get_model_router", return_value=_ScriptedModelRouter(fake_client)):
             async with running_client() as client:
                 resp = await client.post(
                     "/v1/chat/completions",

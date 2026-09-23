@@ -64,3 +64,49 @@ requires_integration_env = pytest.mark.skipif(
     not _integration_env_ready(),
     reason="Integration tests need DATABASE_URL/REDIS_URL pointed at real services — see tests/conftest.py",
 )
+
+
+@pytest.fixture
+async def fake_vllm_server():
+    """tests/fixtures/fake_vllm_server.py as a real subprocess: a real HTTP server speaking vLLM's
+    OpenAI-compatible shapes (non-streaming + streaming, tool calls split across chunks, the usage-only
+    final chunk), for route tests that need a real backend without a GPU. Yields its base URL."""
+    import asyncio
+    import socket
+    import sys
+    from pathlib import Path
+
+    import httpx
+
+    fixture = Path(__file__).parent / "fixtures" / "fake_vllm_server.py"
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-m",
+        "uvicorn",
+        "fake_vllm_server:app",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        str(port),
+        cwd=str(fixture.parent),
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    base_url = f"http://127.0.0.1:{port}"
+    try:
+        async with httpx.AsyncClient() as probe:
+            for _ in range(60):
+                try:
+                    await probe.get(f"{base_url}/last_payload", timeout=1.0)
+                    break
+                except httpx.TransportError:
+                    await asyncio.sleep(0.1)
+            else:
+                raise RuntimeError("fake_vllm_server did not start in time")
+        yield base_url
+    finally:
+        proc.terminate()
+        await asyncio.wait_for(proc.wait(), timeout=5)

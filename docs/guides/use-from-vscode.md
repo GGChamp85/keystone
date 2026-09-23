@@ -1,6 +1,6 @@
 # Use Keystone from VS Code (Continue)
 
-Keystone's gateway is OpenAI-compatible, so the [Continue](https://www.continue.dev/) extension for VS Code talks to it like any other model server — chat, inline edit, apply, and autocomplete — and Continue's MCP client gets Keystone's memory tools (`memory_search`, `memory_add`) the same way OpenCode does. No Keystone-specific extension is required for this path.
+Keystone's gateway is OpenAI-compatible, so the [Continue](https://www.continue.dev/) extension for VS Code talks to it like any other model server — chat, inline edit, apply, and autocomplete — and Continue's MCP client gets Keystone's memory tools (`memory_search`, `memory_add`) the same way OpenCode does. No Keystone-specific extension is required for this path. Continue's agent mode works too: the gateway passes `tools`, `tool_choice` and `tool` messages through to the model unchanged (`tests/test_messages_api.py` proves the round trip against a real backend), and an extension that speaks the Anthropic Messages API instead can point at `/v1/messages` with the same key.
 
 Verified on: 2026-09-22 — `tests/test_vscode_continue_config.py` parses the generated file and checks every field name against Continue's own config-yaml schema (`packages/config-yaml` in `continuedev/continue`).
 

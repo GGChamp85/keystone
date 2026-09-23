@@ -16,18 +16,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from src.api.middleware.auth import require_scope
-from src.api.middleware.rate_limiter import (
-    check_request_rate,
-    check_token_budget,
-    record_token_usage,
-)
 from src.api.models.requests import CompletionRequest
 from src.api.models.responses import ModelInfo, ModelListResponse
-from src.billing.ledger import record_usage
+from src.api.routes._inference_common import account_usage, admit_inference_request, usage_tokens
 from src.config import get_settings
 from src.db.models import APIKey, Tenant
-from src.inference.health import NoHealthyModelError, endpoint_health
-from src.inference.model_router import get_model_router, resolve_model_name_for_client
+from src.inference.health import endpoint_health
 from src.orchestrator.context import count_messages_tokens, count_tokens
 
 logger = structlog.get_logger(__name__)
@@ -67,45 +61,29 @@ async def chat_completions(
     api_key: APIKey = auth[0]
     tenant: Tenant = auth[1]
 
-    # Deployment-wide ceiling (MAX_TOKENS_PER_REQUEST) — the request model's
-    # own bound is the protocol maximum, not what this deployment is willing
-    # to serve; rejected up front rather than silently clamped.
-    settings = get_settings()
-    max_tokens_ceiling = settings.max_tokens_per_request  # 0 = no deployment ceiling; the model's own limit applies
-    if max_tokens_ceiling > 0 and req.max_tokens > max_tokens_ceiling:
-        raise HTTPException(
-            status_code=422,
-            detail=f"max_tokens={req.max_tokens} exceeds this deployment's limit of {max_tokens_ceiling}",
-        )
+    # Ceiling, rate limit, token budget, health-aware routing, this tenant's promoted adapter —
+    # shared with /v1/messages (src/api/routes/_inference_common.py).
+    client, resolved_role, model_name = await admit_inference_request(
+        model=req.model, max_tokens=req.max_tokens, api_key=api_key, tenant=tenant
+    )
 
-    # Rate limit
-    rpm = api_key.rate_limit_override or settings.default_requests_per_minute  # 0 = unlimited
-    await check_request_rate(tenant.id, api_key.id, rpm)
-
-    # Token budget pre-check
-    daily_limit = api_key.daily_token_limit_override or tenant.daily_token_limit
-    await check_token_budget(tenant.id, daily_limit, tenant.monthly_token_limit)
-
-    # Route to correct model — 503 + Retry-After when no endpoint in the role's chain is healthy
-    router_instance = get_model_router()
-    try:
-        client, resolved_role = await router_instance.get_client(req.model)
-    except NoHealthyModelError as exc:
-        raise HTTPException(
-            status_code=503,
-            detail=str(exc),
-            headers={"Retry-After": str(exc.retry_after_seconds)},
-        ) from exc
-    # This tenant's own promoted LoRA adapter for this base model, if any —
-    # the direct customer-facing gateway, so this is the highest-value
-    # place adapter routing applies (src/inference/model_router.py).
-    model_name = await resolve_model_name_for_client(client, tenant.id)
-
-    messages = [{"role": m.role, "content": m.content} for m in req.messages]
+    messages = [m.to_wire() for m in req.messages]
+    # Tool calling / structured output pass through to the backend unchanged — an OpenAI client's
+    # `tools`, `tool_choice` and `response_format` reach the model exactly as sent (an agent harness or
+    # IDE in agent mode needs the full round trip: tool_calls out, `tool` messages back in).
+    if req.tools and req.response_format:
+        raise HTTPException(status_code=422, detail="tools and response_format cannot be combined in one request")
+    extra: dict[str, Any] = {}
+    if req.tools:
+        extra["tools"] = req.tools
+        if req.tool_choice is not None:
+            extra["tool_choice"] = req.tool_choice
+    if req.response_format:
+        extra["response_format"] = req.response_format
 
     if req.stream:
         return StreamingResponse(
-            _stream_completion(client, messages, req, tenant, api_key, resolved_role, model_name),
+            _stream_completion(client, messages, req, tenant, api_key, resolved_role, model_name, extra),
             media_type="text/event-stream",
             headers={"X-VS-Model": resolved_role, "Cache-Control": "no-cache"},
         )
@@ -121,28 +99,25 @@ async def chat_completions(
             frequency_penalty=req.frequency_penalty,
             presence_penalty=req.presence_penalty,
             model_override=model_name,
+            **extra,
         )
     except Exception as exc:
         endpoint_health.record_failure(resolved_role, f"{type(exc).__name__}: {exc}")
         raise
     endpoint_health.record_success(resolved_role)
 
-    usage = response.get("usage", {})
-    total_tokens = usage.get("total_tokens") or (usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0))
-    if total_tokens > 0:
-        await record_token_usage(tenant.id, total_tokens, model_role=resolved_role)
-        await record_usage(
-            tenant.id,
-            model_role=resolved_role,
-            prompt_tokens=usage.get("prompt_tokens", 0),
-            completion_tokens=usage.get("completion_tokens", 0),
-            api_key_id=api_key.id,
-        )
-
+    prompt_tokens, completion_tokens = usage_tokens(response.get("usage"))
+    await account_usage(
+        tenant=tenant,
+        api_key=api_key,
+        role=resolved_role,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+    )
     return response
 
 
-async def _stream_completion(client, messages, req, tenant, api_key, role, model_override=None):
+async def _stream_completion(client, messages, req, tenant, api_key, role, model_override=None, extra=None):
     """
     Streams the backend's SSE through unchanged and bills REAL usage: the
     backend is always asked for `stream_options.include_usage` (vLLM and
@@ -156,42 +131,46 @@ async def _stream_completion(client, messages, req, tenant, api_key, role, model
     forward_usage = bool((req.stream_options or {}).get("include_usage"))
     usage: dict[str, Any] | None = None
     content_parts: list[str] = []
-    async for sse in client.stream(
-        messages=messages,
-        temperature=req.temperature,
-        max_tokens=req.max_tokens,
-        top_p=req.top_p,
-        stop=req.stop,
-        frequency_penalty=req.frequency_penalty,
-        presence_penalty=req.presence_penalty,
-        model_override=model_override,
-        include_usage=True,
-    ):
-        raw = sse[len("data: ") :].strip() if sse.startswith("data: ") else ""
-        if raw and raw != "[DONE]":
-            try:
-                chunk = json.loads(raw)
-            except json.JSONDecodeError:
-                chunk = None
-            if isinstance(chunk, dict):
-                if chunk.get("usage"):
-                    usage = chunk["usage"]
-                for choice in chunk.get("choices") or []:
-                    text = (choice.get("delta") or {}).get("content")
-                    if text:
-                        content_parts.append(text)
-                if not chunk.get("choices") and chunk.get("usage") and not forward_usage:
-                    continue  # the backend's usage-only chunk was for our accounting; the client did not ask for it
-        yield sse
+    stream_kwargs = {k: v for k, v in (extra or {}).items() if k != "response_format"}
+    try:
+        async for sse in client.stream(
+            messages=messages,
+            temperature=req.temperature,
+            max_tokens=req.max_tokens,
+            top_p=req.top_p,
+            stop=req.stop,
+            frequency_penalty=req.frequency_penalty,
+            presence_penalty=req.presence_penalty,
+            model_override=model_override,
+            include_usage=True,
+            **stream_kwargs,
+        ):
+            raw = sse[len("data: ") :].strip() if sse.startswith("data: ") else ""
+            if raw and raw != "[DONE]":
+                try:
+                    chunk = json.loads(raw)
+                except json.JSONDecodeError:
+                    chunk = None
+                if isinstance(chunk, dict):
+                    if chunk.get("usage"):
+                        usage = chunk["usage"]
+                    for choice in chunk.get("choices") or []:
+                        text = (choice.get("delta") or {}).get("content")
+                        if text:
+                            content_parts.append(text)
+                    if not chunk.get("choices") and chunk.get("usage") and not forward_usage:
+                        continue  # the backend's usage-only chunk was for our accounting; the client did not ask for it
+            yield sse
+    except Exception as exc:
+        endpoint_health.record_failure(role, f"{type(exc).__name__}: {exc}")
+        raise
+    endpoint_health.record_success(role)
 
     if usage:
-        prompt_tokens = int(usage.get("prompt_tokens", 0))
-        completion_tokens = int(usage.get("completion_tokens", 0))
-        total_tokens = usage.get("total_tokens") or (prompt_tokens + completion_tokens)
+        prompt_tokens, completion_tokens = usage_tokens(usage)
     else:
         prompt_tokens = count_messages_tokens(messages)
         completion_tokens = count_tokens("".join(content_parts))
-        total_tokens = prompt_tokens + completion_tokens
         logger.warning(
             "completions.stream_usage_estimated",
             tenant_id=str(tenant.id),
@@ -200,12 +179,6 @@ async def _stream_completion(client, messages, req, tenant, api_key, role, model
             completion_tokens=completion_tokens,
             detail="backend sent no usage chunk despite stream_options.include_usage; counted with tiktoken",
         )
-    if total_tokens > 0:
-        await record_token_usage(tenant.id, total_tokens, model_role=role)
-        await record_usage(
-            tenant.id,
-            model_role=role,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            api_key_id=api_key.id,
-        )
+    await account_usage(
+        tenant=tenant, api_key=api_key, role=role, prompt_tokens=prompt_tokens, completion_tokens=completion_tokens
+    )

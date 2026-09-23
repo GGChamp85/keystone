@@ -193,11 +193,11 @@ open http://localhost:8080/app/   # paste your API key, submit a task, watch the
 
 ## Open-weight model inference
 
-An OpenAI-compatible gateway (`/v1/chat/completions`, `/v1/models`) in front of vLLM, serving open-weight models end to end on your own GPUs — API key management, rate limiting, token budgets, and multi-model routing with health-aware fallback, all self-hosted.
+An OpenAI-compatible **and** Anthropic-compatible gateway (`/v1/chat/completions`, `/v1/models`, `/v1/messages`) in front of vLLM, serving open-weight models end to end on your own GPUs — API key management, rate limiting, token budgets, a dollar ledger, and multi-model routing with health-aware fallback, all self-hosted.
 
 ### Chat completions (OpenAI-compatible)
 
-Point any OpenAI SDK/client at Keystone by swapping the base URL — no agent, no tools, just a completion:
+Point any OpenAI SDK/client at Keystone by swapping the base URL. Tool calling (`tools`, `tool_choice`, `tool` messages) and structured output (`response_format`) pass through to the model unchanged, so an agent harness or an IDE in agent mode gets the full round trip:
 
 ```bash
 curl -X POST http://localhost:8080/v1/chat/completions \
@@ -209,6 +209,30 @@ curl -X POST http://localhost:8080/v1/chat/completions \
     "temperature": 0.2
   }'
 ```
+
+### Messages (Anthropic-compatible)
+
+A client written for the Anthropic Messages API — its SDKs, agent harnesses and IDE tools — points its base URL at Keystone and talks to the same self-hosted models with no code change. Text, tools (`tool_use` / `tool_result`, streamed as `input_json_delta`) and streaming are translated (`src/inference/anthropic_compat.py`); images and documents are refused with Anthropic's own `invalid_request_error`, never silently dropped. Same API keys, limits, routing, adapters and ledger as the OpenAI route.
+
+```bash
+curl -X POST http://localhost:8080/v1/messages \
+  -H "Authorization: Bearer ks-XXXX-XXXXXXXX" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "coding",
+    "max_tokens": 1024,
+    "messages": [{"role": "user", "content": "Write a Python async Redis connection pool"}]
+  }'
+```
+
+```python
+import anthropic
+client = anthropic.Anthropic(base_url="http://localhost:8080", api_key="ks-XXXX-XXXXXXXX")
+message = client.messages.create(model="coding", max_tokens=1024, messages=[{"role": "user", "content": "..."}])
+```
+
+`POST /v1/messages/count_tokens` answers with the gateway's tokenizer count of the prompt. Verified end to end against a real model in CI (`tests/e2e/test_messages_api_ci_backend.py`) and, for every tool/stream shape vLLM emits, against a real HTTP backend process (`tests/test_messages_api.py`).
 
 ### Models
 
