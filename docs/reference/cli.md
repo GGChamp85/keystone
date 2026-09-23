@@ -41,7 +41,8 @@ Usage: root [OPTIONS] COMMAND [ARGS]...
 │ tenants      Bootstrap tenants (KEYSTONE_ROOT_ADMIN_TOKEN required).                             │
 │ users        Manage tenant users (KEYSTONE_ROOT_ADMIN_TOKEN required).                           │
 │ bundle       Build/import the air-gapped offline bundle (wraps airgap/*.sh).                     │
-│ deploy       Deploy a model backend to a cloud (RunPod Serverless today).                        │
+│ deploy       Deploy to a cloud: a RunPod Serverless model backend, or a GPU Kubernetes pilot on  │
+│              AWS/Azure/GCP.                                                                      │
 │ ide          Generate IDE configuration (VS Code via Continue).                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
@@ -691,7 +692,7 @@ Usage: root bundle import [OPTIONS] [bundle_dir]
 ```text
 Usage: root deploy [OPTIONS] COMMAND [ARGS]...
 
- Deploy a model backend to a cloud (RunPod Serverless today).
+ Deploy to a cloud: a RunPod Serverless model backend, or a GPU Kubernetes pilot on AWS/Azure/GCP.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
@@ -701,6 +702,15 @@ Usage: root deploy [OPTIONS] COMMAND [ARGS]...
 │                    model,                                                                        │
 │                    scaled to zero when idle — a real GPU backend with no hardware to buy. Needs  │
 │                    RUNPOD_API_KEY in .env. Prints the exact .env lines that point a role at it.  │
+│ cloud              Stand up (or tear down) a GPU Kubernetes pilot on AWS, Azure or GCP — a thin  │
+│                    wrapper around                                                                │
+│                    `tofu -chdir=infra/opentofu/environments/<cloud>-<env>                        │
+│                    init|plan|apply|destroy` (Terraform is                                        │
+│                    used when OpenTofu is not installed) and, with --helm-install, the matching   │
+│                    Helm install.                                                                 │
+│                    Every command is printed before it runs. See docs/guides/deploy-<cloud>.md    │
+│                    for what you get,                                                             │
+│                    what it costs, and what has and has not been verified.                        │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -731,6 +741,34 @@ Usage: root deploy runpod-serverless [OPTIONS]
 │ --destroy          --no-destroy           Delete the endpoint and template of this name instead  │
 │                                           [default: no-destroy]                                  │
 │ --help                                    Show this message and exit.                            │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+## keystone deploy cloud
+
+```text
+Usage: root deploy cloud [OPTIONS]
+
+ Stand up (or tear down) a GPU Kubernetes pilot on AWS, Azure or GCP — a thin wrapper around `tofu
+ -chdir=infra/opentofu/environments/<cloud>-<env> init|plan|apply|destroy` (Terraform is used when
+ OpenTofu is not installed) and, with --helm-install, the matching Helm install. Every command is
+ printed before it runs. See docs/guides/deploy-<cloud>.md for what you get, what it costs, and
+ what has and has not been verified.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ *  --cloud               <str>   aws | azure | gcp [required]                                    │
+│    --env                 <str>   Environment name — runs in                                      │
+│                                  infra/opentofu/environments/<cloud>-<env>                       │
+│                                  [default: pilot]                                                │
+│    --plan                        init + plan, change nothing (the default)                       │
+│    --apply                       init + apply — asks for the usual yes/no first                  │
+│    --destroy                     init + destroy the whole environment — asks for yes/no first    │
+│    --var-file            <path>  Extra -var-file (terraform.tfvars in the environment directory  │
+│                                  is loaded automatically)                                        │
+│    --helm-install                Run `helm upgrade --install` with values-client-vpc.yaml +      │
+│                                  values-<cloud>.yaml against the current kubeconfig context —    │
+│                                  after --apply, or on its own once the cluster exists            │
+│    --help                        Show this message and exit.                                     │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 

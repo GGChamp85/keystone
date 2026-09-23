@@ -40,6 +40,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
+from fastapi import HTTPException
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
@@ -185,6 +186,8 @@ async def task_submit(
         task_id = await submit_agent_task(req, api_key, tenant, user)
     except ConcurrencyLimitExceeded as exc:
         raise ToolError(str(exc)) from exc
+    except HTTPException as exc:  # the tenant's monthly dollar budget is spent (same refusal as the REST route)
+        raise ToolError(str(exc.detail)) from exc
     return AgentTaskSubmittedResponse(task_id=task_id, status="pending").model_dump(mode="json")
 
 

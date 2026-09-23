@@ -52,3 +52,6 @@ dist/
 build/
 .claude/
 site/
+
+# provider lock files are generated per platform; CI runs tofu init itself
+.terraform.lock.hcl
