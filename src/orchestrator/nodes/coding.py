@@ -117,7 +117,21 @@ def _prompt_budget(state: AgentState) -> int:
     return max(2_000, state.max_context_tokens // 2)
 
 
-def _build_agentic_user_context(state: AgentState) -> str:
+def _with_image_parts(text: str, images: list[dict[str, str]]) -> str | list[dict]:
+    """OpenAI-style content-part list when the task has attached images, plain text otherwise —
+    only a vision-capable backend (src/inference/catalog.py's `vision` flag) does anything with
+    the image_url parts; a text-only backend would either ignore or error on them, which is why
+    the task is refused up front in agents.py if the resolved role isn't vision-capable."""
+    if not images:
+        return text
+    parts: list[dict] = [{"type": "text", "text": text}]
+    parts.extend(
+        {"type": "image_url", "image_url": {"url": f"data:{img['media_type']};base64,{img['data']}"}} for img in images
+    )
+    return parts
+
+
+def _build_agentic_user_context(state: AgentState) -> str | list[dict]:
     parts = [f"## Task\n{state.task_description}"]
 
     if state.plan_steps:
@@ -179,7 +193,7 @@ def _build_agentic_user_context(state: AgentState) -> str:
             "\n## Repository\nAlready cloned and checked out on your working branch. "
             "Start with get_repo_map, then list_dir/grep to orient yourself before editing."
         )
-    return "\n".join(parts)
+    return _with_image_parts("\n".join(parts), state.images)
 
 
 _TOOL_DETAIL_ARG: dict[str, str] = {

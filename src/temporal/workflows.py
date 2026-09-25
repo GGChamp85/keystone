@@ -40,6 +40,7 @@ class AgentWorkflowInput:
     branch: str = "main"
     target_files: list[str] = field(default_factory=list)
     context_files: dict[str, str] = field(default_factory=dict)
+    images: list[dict[str, str]] = field(default_factory=list)
     max_iterations: int = 15
     preferred_model: str | None = None
     enable_reasoning_review: bool = True
@@ -80,6 +81,7 @@ class CodingAgentWorkflow:
                 input.branch,
                 input.target_files,
                 input.context_files,
+                input.images,
                 input.preferred_model,
                 input.max_iterations,
                 input.enable_reasoning_review,

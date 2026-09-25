@@ -168,6 +168,28 @@ class LinkAPIKeyToUserRequest(BaseModel):
 # ── Agent Task Requests ───────────────────────────────────────
 
 
+_ALLOWED_IMAGE_MEDIA_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
+_MAX_IMAGE_BASE64_CHARS = 15_000_000  # ~11 MB of raw image data once base64-decoded
+_MAX_IMAGES_PER_TASK = 4
+
+
+class ImageAttachment(BaseModel):
+    """One image attached to a task — a screenshot of a bug, a UI mockup, an architecture
+    diagram. Threaded through AgentState.images into an OpenAI-style image_url content part
+    on the coding turn (nodes/coding.py::_build_agentic_user_context); only reaches the model
+    for real once the resolved role's backend is a vision-capable model (src/inference/catalog.py)."""
+
+    media_type: str = Field(..., description="One of: " + ", ".join(sorted(_ALLOWED_IMAGE_MEDIA_TYPES)))
+    data: str = Field(..., min_length=1, max_length=_MAX_IMAGE_BASE64_CHARS, description="Base64-encoded image bytes")
+
+    @field_validator("media_type")
+    @classmethod
+    def validate_media_type(cls, v: str) -> str:
+        if v not in _ALLOWED_IMAGE_MEDIA_TYPES:
+            raise ValueError(f"media_type must be one of {sorted(_ALLOWED_IMAGE_MEDIA_TYPES)}, got {v!r}")
+        return v
+
+
 class AgentTaskRequest(BaseModel):
     """Submit a coding task to Keystone Agents."""
 
@@ -210,6 +232,13 @@ class AgentTaskRequest(BaseModel):
     context_files: dict[str, str] | None = Field(
         default=None,
         description="Extra context files as {filename: content}",
+    )
+    images: list[ImageAttachment] | None = Field(
+        default=None,
+        max_length=_MAX_IMAGES_PER_TASK,
+        description="Images attached to the task (a bug screenshot, a UI mockup, a diagram) — only usable if "
+        "the resolved model role's backend is vision-capable (src/inference/catalog.py); the task is refused "
+        "with a clear error otherwise, rather than silently sending an image to a text-only model.",
     )
     quality_blocking_tools: list[str] | None = Field(
         default=None,

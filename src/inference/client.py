@@ -93,7 +93,7 @@ class InferenceClient:
     )
     async def complete(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         temperature: float = 0.2,
         max_tokens: int = 4096,
         top_p: float = 0.95,
@@ -108,6 +108,10 @@ class InferenceClient:
     ) -> dict:
         """
         Send a chat completion request and return the full response dict.
+
+        Each message's `content` is either a plain string or an OpenAI-style list of content
+        parts (`{"type": "text", ...}` / `{"type": "image_url", ...}`) — passed straight through
+        to the backend unchanged, so it only does something real against a vision-capable model.
 
         `tools` / `tool_choice`: OpenAI-compatible tool-calling — see
         src/orchestrator/tools/protocol.py's NativeToolProtocol. `response_format`:
@@ -238,7 +242,7 @@ class InferenceClient:
 
     async def stream(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         temperature: float = 0.2,
         max_tokens: int = 4096,
         top_p: float = 0.95,

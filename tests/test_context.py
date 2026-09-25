@@ -8,7 +8,7 @@ trimming logic.
 
 from __future__ import annotations
 
-from src.orchestrator.context import count_message_tokens, count_tokens, trim_turns_to_budget
+from src.orchestrator.context import count_content_tokens, count_message_tokens, count_tokens, trim_turns_to_budget
 
 
 def test_count_tokens_empty_string_is_zero():
@@ -40,6 +40,47 @@ def test_count_message_tokens_includes_tool_call_arguments():
     bare = count_message_tokens({"role": "assistant", "content": None})
     with_call = count_message_tokens(message)
     assert with_call > bare
+
+
+def test_count_content_tokens_plain_string_matches_count_tokens():
+    text = "Write a one-line Python function that adds two numbers."
+    assert count_content_tokens(text) == count_tokens(text)
+
+
+def test_count_content_tokens_none_or_empty_is_zero():
+    assert count_content_tokens(None) == 0
+    assert count_content_tokens("") == 0
+    assert count_content_tokens([]) == 0
+
+
+def test_count_content_tokens_content_part_list_sums_text_and_image_estimate():
+    text = "## Task\nImplement this UI mockup."
+    parts = [
+        {"type": "text", "text": text},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,aGVsbG8="}},
+    ]
+    assert count_content_tokens(parts) == count_tokens(text) + 1000  # _PER_IMAGE_TOKEN_ESTIMATE
+
+
+def test_count_content_tokens_multiple_images_scale_linearly():
+    one_image = count_content_tokens([{"type": "text", "text": "x"}, {"type": "image_url", "image_url": {}}])
+    three_images = count_content_tokens([{"type": "text", "text": "x"}] + [{"type": "image_url", "image_url": {}}] * 3)
+    assert three_images - one_image == 2000  # two extra images at the same flat per-image estimate
+
+
+def test_count_message_tokens_handles_a_message_whose_content_is_a_content_part_list():
+    """The real bug this fixes: an image-bearing agent-task turn's content is a list of OpenAI
+    content parts, not a string — count_message_tokens must not raise TypeError on it (it used to,
+    since count_tokens called encoding.encode() directly on whatever content held)."""
+    message = {
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "Implement this mockup."},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,aGVsbG8="}},
+        ],
+    }
+    tokens = count_message_tokens(message)  # must not raise
+    assert tokens > 1000  # per-message overhead + text tokens + the flat per-image estimate
 
 
 def test_trim_turns_no_trimming_needed_returns_everything_flattened():

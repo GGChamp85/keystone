@@ -32,7 +32,7 @@ from src.db.connection import get_db_context
 from src.db.models import AgentTask, APIKey, FeedbackVerdict, TaskFeedback, Tenant, User
 from src.memory.ingestion import CodeIngestionPipeline, InvalidRepositoryURLError
 from src.orchestrator.concurrency import ConcurrencyLimitExceeded
-from src.orchestrator.engine import get_keystone_engine
+from src.orchestrator.engine import ImagesRequireVisionModelError, get_keystone_engine
 from src.orchestrator.events import block_for_next_event, is_final_event, read_task_events_from
 from src.orchestrator.nodes._shared import slugify_for_branch
 
@@ -61,6 +61,7 @@ async def submit_agent_task(req: AgentTaskRequest, api_key: APIKey, tenant: Tena
         enable_reasoning_review=req.enable_reasoning_review,
         enable_sandbox_testing=req.enable_sandbox_testing,
         context_files=req.context_files,
+        images=[img.model_dump() for img in req.images] if req.images else None,
         quality_blocking_tools=req.quality_blocking_tools,
         best_of_n=req.best_of_n,
     )
@@ -79,6 +80,8 @@ async def submit_task(
         task_id = await submit_agent_task(req, api_key, tenant, user)
     except ConcurrencyLimitExceeded as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
+    except ImagesRequireVisionModelError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return AgentTaskSubmittedResponse(task_id=task_id, status="pending")
 

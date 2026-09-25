@@ -215,6 +215,40 @@ button:disabled {
   margin-top: 22px;
 }
 
+.attached-images {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.attached-images li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 96px;
+}
+
+.attached-images img {
+  width: 96px;
+  height: 96px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+.attached-images span {
+  font-size: 11.5px;
+  color: var(--text-dim);
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .error-text {
   color: var(--red);
   font-size: 15px;

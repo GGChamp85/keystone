@@ -287,6 +287,7 @@ class AgentTask(Base):
     repository_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     branch: Mapped[str | None] = mapped_column(String(255), default="main")
     file_paths: Mapped[list[Any] | None] = mapped_column(JSONB, default=list)  # specific files to work on
+    images: Mapped[list[Any] | None] = mapped_column(JSONB, default=list)  # [{media_type, data (base64)}, ...]
 
     # Execution state
     status: Mapped[TaskStatus] = mapped_column(SAEnum(TaskStatus), default=TaskStatus.PENDING, nullable=False)

@@ -29,6 +29,7 @@ from temporalio.client import Client, WorkflowHandle
 from src.config import get_settings
 from src.db.connection import get_db_context
 from src.db.models import AgentTask, TaskStatus, Tenant
+from src.inference import catalog as model_catalog
 from src.inference.model_router import classify_task_complexity, classify_task_to_role
 from src.memory.hybrid_search import hybrid_search
 from src.memory.vector_store import VectorStore
@@ -83,6 +84,21 @@ def _pr_body(task_description: str, result_summary: str) -> str:
     return "\n".join(parts)
 
 
+class ImagesRequireVisionModelError(Exception):
+    """Raised by submit_task when a task attaches images but the resolved model role's
+    configured model isn't flagged vision-capable in the catalog (src/inference/catalog.py) —
+    fails the submission with a clear reason rather than silently sending an image to a
+    text-only model, which would either be ignored or error deep inside the coding loop."""
+
+    def __init__(self, role: str, hf_id: str):
+        self.role = role
+        self.hf_id = hf_id
+        super().__init__(
+            f"task has attached images, but the '{role}' role's configured model ({hf_id or 'unknown'}) "
+            "is not vision-capable — configure a vision-capable model for this role, or submit without images"
+        )
+
+
 class KeystoneEngine:
     """
     The main entry point for running Keystone Agents agent tasks.
@@ -132,6 +148,7 @@ class KeystoneEngine:
         enable_reasoning_review: bool = True,
         enable_sandbox_testing: bool = True,
         context_files: dict[str, str] | None = None,
+        images: list[dict[str, str]] | None = None,
         user_id: UUID | None = None,
         user_slug: str | None = None,
         quality_blocking_tools: list[str] | None = None,
@@ -174,6 +191,15 @@ class KeystoneEngine:
             )
             model = resolved_role
 
+        if images:
+            hf_id = settings.model_id_map.get(model, "")
+            try:
+                vision_capable = model_catalog.find(hf_id).vision
+            except KeyError:
+                vision_capable = False
+            if not vision_capable:
+                raise ImagesRequireVisionModelError(model, hf_id)
+
         async with get_db_context() as db:
             tenant = await db.get(Tenant, tenant_id)
         tenant_max = tenant.max_concurrent_agents if tenant is not None else 0  # 0 = no cap
@@ -191,6 +217,7 @@ class KeystoneEngine:
                 repository_url=repository_url,
                 branch=branch,
                 file_paths=file_paths or [],
+                images=images or [],
                 status=TaskStatus.PENDING,
                 max_steps=max_iterations,
                 model_role=model,
@@ -213,6 +240,7 @@ class KeystoneEngine:
             "enable_reasoning_review": enable_reasoning_review,
             "enable_sandbox_testing": enable_sandbox_testing,
             "context_files": context_files or {},
+            "images": images or [],
             "user_id": user_id,
             "user_slug": user_slug,
             "quality_blocking_tools": quality_blocking_tools,
@@ -236,6 +264,7 @@ class KeystoneEngine:
                     branch=branch,
                     target_files=file_paths or [],
                     context_files=context_files or {},
+                    images=images or [],
                     preferred_model=model,
                     max_iterations=max_iterations,
                     enable_reasoning_review=enable_reasoning_review,
@@ -296,6 +325,7 @@ class KeystoneEngine:
         enable_reasoning_review: bool,
         enable_sandbox_testing: bool,
         context_files: dict[str, str],
+        images: list[dict[str, str]] | None = None,
         user_id: UUID | None = None,
         user_slug: str | None = None,
         quality_blocking_tools: list[str] | None = None,
@@ -326,6 +356,7 @@ class KeystoneEngine:
             branch=branch,
             target_files=file_paths,
             context_files=context_files,
+            images=images or [],
             primary_model=model,
             max_iterations=max_iterations,
             enable_reasoning_review=enable_reasoning_review,

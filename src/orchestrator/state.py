@@ -108,6 +108,10 @@ class AgentState:
     branch: str = "main"
     target_files: list[str] = field(default_factory=list)
     context_files: dict[str, str] = field(default_factory=dict)
+    # Each dict is {"media_type": str, "data": str (base64)} — see AgentTaskRequest.images and
+    # nodes/coding.py::_build_agentic_user_context, which turns these into OpenAI-style
+    # image_url content parts on the coding turn.
+    images: list[dict[str, str]] = field(default_factory=list)
 
     # ── Execution control ─────────────────────────────────────
     phase: AgentPhase = AgentPhase.PLANNING

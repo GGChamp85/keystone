@@ -19,12 +19,18 @@ function authHeaders(): HeadersInit {
   return key ? { Authorization: `Bearer ${key}` } : {}
 }
 
+export interface ImageAttachment {
+  media_type: string
+  data: string // base64
+}
+
 export interface TaskSubmitRequest {
   task: string
   repository_url?: string
   branch?: string
   model?: string
   max_iterations?: number
+  images?: ImageAttachment[]
 }
 
 export interface TaskSubmitResponse {

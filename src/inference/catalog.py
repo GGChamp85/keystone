@@ -38,6 +38,7 @@ class CatalogEntry:
     moe: bool = False
     default_lora_r: int = 8
     notes: str = ""
+    vision: bool = False
 
     @property
     def short_name(self) -> str:
@@ -69,6 +70,7 @@ class CatalogEntry:
             "vram_qlora_gb": self.vram_qlora_gb,
             "vram_lora_bf16_gb": self.vram_lora_bf16_gb,
             "notes": self.notes,
+            "vision": self.vision,
         }
 
 
@@ -99,8 +101,13 @@ CATALOG: tuple[CatalogEntry, ...] = (
     ),
 )
 
-# The three role models a deployment may already serve — listed so the Model Library can show them
-# alongside the SLMs; they are not fine-tune defaults.
+# The role models a deployment may already serve — listed so the Model Library can show them
+# alongside the SLMs; they are not fine-tune defaults. Qwen2.5-VL is the one vision-capable entry
+# here: an operator can point a role's endpoint at it to accept image-attached tasks (see
+# AgentTaskRequest.images), but it is a different architecture from the Qwen2.5-Coder family the
+# fine-tune catalog is scoped to, so it is served-only, never a fine-tune target, until a real
+# training run against this exact family happens in this repo (same rule CATALOG's docstring
+# states for any new family).
 ROLE_MODELS: tuple[CatalogEntry, ...] = (
     CatalogEntry(
         "zai-org/GLM-5.3-Flash",
@@ -112,6 +119,16 @@ ROLE_MODELS: tuple[CatalogEntry, ...] = (
         notes="primary coding role; 8x80 GB",
     ),
     CatalogEntry("deepseek-ai/DeepSeek-R1", 671.0, "MIT", 131_072, tool_parser=None, moe=True, notes="reasoning role"),
+    CatalogEntry(
+        "Qwen/Qwen2.5-VL-7B-Instruct",
+        7.0,
+        _QWEN_CODER,
+        32_768,
+        tool_parser=None,
+        vision=True,
+        notes="optional vision-capable role for image-attached tasks (screenshots, mockups, "
+        "diagrams); served-only, not a fine-tune target",
+    ),
 )
 
 

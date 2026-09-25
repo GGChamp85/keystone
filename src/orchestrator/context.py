@@ -35,6 +35,10 @@ logger = structlog.get_logger(__name__)
 DEFAULT_ENCODING = "cl100k_base"
 _FALLBACK_CHARS_PER_TOKEN = 4
 _PER_MESSAGE_OVERHEAD_TOKENS = 4  # OpenAI's own rule-of-thumb per-message framing overhead
+# No tokenizer here can know a vision backend's real image-patch token cost ahead of time;
+# 1000 is a deliberately conservative flat estimate (OpenAI's own high-detail images commonly
+# cost several hundred to ~1500 tokens) so the budget never under-counts an attached image.
+_PER_IMAGE_TOKEN_ESTIMATE = 1000
 
 
 @lru_cache(maxsize=4)
@@ -55,11 +59,27 @@ def count_tokens(text: str, encoding_name: str = DEFAULT_ENCODING) -> int:
         return max(1, len(text) // _FALLBACK_CHARS_PER_TOKEN)
 
 
+def count_content_tokens(content: str | list[dict[str, Any]] | None, encoding_name: str = DEFAULT_ENCODING) -> int:
+    """Token count for a message's `content`, which is either a plain string or an OpenAI-style
+    list of content parts (text + image_url) once a task has an attached image — see
+    `nodes/coding.py::_build_agentic_user_context`."""
+    if not content:
+        return 0
+    if isinstance(content, str):
+        return count_tokens(content, encoding_name)
+    total = 0
+    for part in content:
+        part_type = part.get("type")
+        if part_type == "text":
+            total += count_tokens(part.get("text", ""), encoding_name)
+        elif part_type == "image_url":
+            total += _PER_IMAGE_TOKEN_ESTIMATE
+    return total
+
+
 def count_message_tokens(message: dict[str, Any], encoding_name: str = DEFAULT_ENCODING) -> int:
     total = _PER_MESSAGE_OVERHEAD_TOKENS
-    content = message.get("content")
-    if content:
-        total += count_tokens(content, encoding_name)
+    total += count_content_tokens(message.get("content"), encoding_name)
     for call in message.get("tool_calls") or []:
         fn = call.get("function", {})
         total += count_tokens(fn.get("name", ""), encoding_name)

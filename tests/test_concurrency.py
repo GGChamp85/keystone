@@ -29,7 +29,7 @@ from src.orchestrator.concurrency import (
     release_task_slot,
     try_acquire_task_slot,
 )
-from src.orchestrator.engine import get_keystone_engine
+from src.orchestrator.engine import ImagesRequireVisionModelError, get_keystone_engine
 from src.orchestrator.nodes._shared import slugify_for_branch
 
 from .conftest import requires_integration_env
@@ -175,6 +175,25 @@ async def test_submit_task_raises_when_a_slot_is_already_held(tenant_id, api_key
             api_key_id=api_key_id,
             task_description="Should be rejected — tenant is at its concurrency cap.",
         )
+
+
+async def test_submit_task_with_images_against_a_text_only_role_is_refused_before_any_slot_or_db_row(
+    tenant_id, api_key_id
+):
+    """The default 'coding' role's configured model (zai-org/GLM-5.3-Flash, per config.py's
+    coding_model_id default) is a real catalog entry with vision=False — attaching an image
+    to a task routed there must raise ImagesRequireVisionModelError, and it must do so before
+    any concurrency slot is acquired or DB row created (the exact ordering src/api/routes/agents.py
+    relies on to map this to a clean HTTP 400, not a 429 or an orphaned PENDING task)."""
+    engine = get_keystone_engine()
+    with pytest.raises(ImagesRequireVisionModelError, match="not vision-capable"):
+        await engine.submit_task(
+            tenant_id=tenant_id,
+            api_key_id=api_key_id,
+            task_description="Implement this UI mockup exactly as shown in the attached screenshot.",
+            images=[{"media_type": "image/png", "data": "aGVsbG8="}],
+        )
+    assert await current_tenant_concurrency(tenant_id) == 0
 
 
 async def test_submit_task_acquires_and_releases_a_real_slot_end_to_end(tenant_id, api_key_id):
