@@ -71,6 +71,26 @@ When a role is pointed at a frontier model through the proxy, `FRONTIER_PROXY_RE
 
 The agent records what it learned per repository and per tenant (conventions, gotchas, decisions) and retrieves it on later tasks. Humans can inspect, approve, pin or forget any memory from the web UI, the `keystone memory` commands, or the MCP tools an IDE uses.
 
+## Steer a running task
+
+A task does not have to run to completion unsupervised. `POST /v1/keystone/tasks/{id}/steer` queues a new instruction for a task that is still running or waiting to start; the agent picks it up at the start of its next iteration and treats it as a new turn in the conversation, never mid-tool-call, so an instruction can never split a tool call from its result. Nothing you send is lost — a message that arrives between two checks is simply picked up on the next one — and every steer is visible in the live trace, so the whole team sees what changed and when.
+
+## Skills: standing instructions
+
+A skill is a standing instruction an admin writes once, applied automatically to every matching task from then on — "run the PCI checklist when touching payment code" — distinct from memory, which the agent proposes for itself from what happened on one specific task. `POST /v1/keystone/skills` creates one, with an optional list of trigger keywords (leave it empty and the skill applies to every task); `POST /v1/keystone/skills/match` previews exactly which skills a task description would trigger before you ever submit it.
+
+## Verify as you go
+
+Right after an edit, the agent can ask a real language server to check the file it just changed — a broken signature or an undefined name is caught before the slower test suite runs, not after. Python is supported today, through `python-lsp-server`; `pyright` was deliberately left out, since its package fetches its real implementation over the network on first run, which does not fit an air-gapped deployment.
+
+## Automate: schedules and webhooks
+
+Save a task as a template and it can submit itself later, with no one watching: on a cron schedule, or the instant an external system calls its own unguessable webhook URL. `POST /v1/keystone/schedules` creates one; enable, disable or delete it any time. A CI pipeline, a nightly job, or any other internal tool can trigger a real task this way, through the exact same submission path a human uses from the web UI or the API.
+
+## Replay and export a trace
+
+Every step of a task — the plan, each edit, every tool call, every test run, the review, the final diff — stays on the task record, not just for as long as the task is running. `GET /v1/keystone/tasks/{id}/replay` reconstructs the exact live trace after the fact, for a task from last month as easily as one that finished five minutes ago. `GET /v1/keystone/tasks/{id}/trace` renders the same execution as a real OpenTelemetry trace, ready to load into Jaeger, Tempo, Honeycomb, or any other OTLP-compatible tool your team already runs.
+
 ## Verified how
 
-`tests/test_git_workflow_integration.py` runs a task end to end against a live Gitea, a live sandbox daemon and a live sandbox; `tests/test_tool_impl.py`, `tests/test_repo_map.py` and `tests/test_fuzzy_patch.py` exercise the tools in a real sandbox; `tests/test_review_node.py` and `tests/test_quality_*` prove the gates fail closed; `benchmarks/agent_runner.py` runs the whole loop on seeded repository tasks ([benchmarks](../benchmarks/README.md)).
+`tests/test_git_workflow_integration.py` runs a task end to end against a live Gitea, a live sandbox daemon and a live sandbox; `tests/test_tool_impl.py`, `tests/test_repo_map.py` and `tests/test_fuzzy_patch.py` exercise the tools in a real sandbox (including the language-server check, against a live sandbox running `python-lsp-server`); `tests/test_review_node.py` and `tests/test_quality_*` prove the gates fail closed; `tests/test_steering.py`, `tests/test_steer_route.py`, `tests/test_skills_store.py` and `tests/test_skills_route.py` prove a steer or a skill actually reaches the prompt sent to the model; `tests/test_schedules_store.py` and `tests/test_schedules_route.py` prove a schedule submits a real task, on both the cron and webhook paths; `tests/test_replay.py` proves a replay reproduces the exact recorded event sequence; `tests/test_otel_export.py` proves the exported trace is valid against the real OpenTelemetry encoding library; `benchmarks/agent_runner.py` runs the whole loop on seeded repository tasks ([benchmarks](../benchmarks/README.md)).

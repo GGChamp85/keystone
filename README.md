@@ -31,12 +31,13 @@ Nothing leaves your network unless you choose to send it: not your code, not you
 |---|---|
 | **Model gateway** | `/v1/chat/completions` and `/v1/messages` (Anthropic-compatible) in front of vLLM: tools, structured output, streaming with real token usage, API keys, rate limits, budgets, a per-tenant spend ledger. |
 | **Model Library and Playground** | Which models are up right now, what each needs, and a place to try one before wiring it into an IDE. |
-| **Coding agent** | Plan, code with real tools, quality gates, review, tests, fix, pull request. Durable execution: a task survives a restart. |
+| **Coding agent** | Plan, code with real tools, quality gates, review, tests, fix, pull request. Durable execution: a task survives a restart. Steerable mid-run, checks its own edits with a real language server, and applies your team's standing instructions ("skills") automatically. |
+| **Automation** | Save a task as a template that submits itself later: on a schedule, or the instant an external system calls its own webhook URL — the same submission path a human uses. |
 | **Fine-tuning** | Describe, review the plan and cost, approve, watch it train, verdict, promote. Runs on one 24 GB GPU. |
 | **Memory and retrieval** | Per-repository, per-tenant memory the agent learns from and a human can inspect, pin or forget; incremental indexing of your repositories. |
 | **Multi-tenant controls** | Tenants, users and roles, scoped API keys, an audit log on every task, memory, fine-tune and admin action. |
 | **IDE and terminal** | VS Code through the Keystone extension (submit tasks, watch the trace, search memory) or the Continue extension (chat, edit, autocomplete), an interactive terminal agent (OpenCode), and a web UI with a live trace of every task. |
-| **Operations** | Prometheus, Grafana, Loki and alerting; health and readiness endpoints; Helm chart with multi-node serving and autoscaling. |
+| **Operations** | Prometheus, Grafana, Loki and alerting; health and readiness endpoints; Helm chart with multi-node serving and autoscaling. Every task can be replayed step by step after the fact, or exported as a real OpenTelemetry trace into Jaeger, Tempo or Honeycomb. |
 
 ---
 
