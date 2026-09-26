@@ -233,6 +233,9 @@ class AgentState:
     # ── Recalled memory (src/memory/store.py) — repo-over-tenant ─
     memory_context: str = ""
 
+    # ── Matching skills (src/memory/skills.py) — admin-curated, tenant-wide ─
+    skills_context: str = ""
+
     # ── Helpers ───────────────────────────────────────────────
 
     @property

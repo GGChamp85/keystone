@@ -391,6 +391,17 @@ class KeystoneEngine:
         except Exception as exc:
             logger.warning("keystone.memory_recall_failed", error=str(exc))
 
+        # Matching skills (src/memory/skills.py) — admin-curated, tenant-wide standing
+        # instructions, resolved once here for the same reason memory is: every node that
+        # builds a prompt reads state.skills_context rather than re-querying per node.
+        try:
+            from src.memory.skills import matching_skills, render_skills_for_prompt
+
+            skills = await matching_skills(tenant_id, task_description)
+            state.skills_context = render_skills_for_prompt(skills)
+        except Exception as exc:
+            logger.warning("keystone.skills_match_failed", error=str(exc))
+
         # Build and run graph
         breaker_config = CircuitBreakerConfig(
             max_iterations=max_iterations,

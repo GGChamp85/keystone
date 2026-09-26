@@ -242,6 +242,15 @@ class MemoryResponse(BaseModel):
     created_by: str | None
 
 
+class SkillResponse(BaseModel):
+    id: UUID
+    name: str
+    content: str
+    trigger_keywords: list[str]
+    enabled: bool
+    created_by: str | None
+
+
 # ── Fine-Tuning ──────────────────────────────────────────────
 
 

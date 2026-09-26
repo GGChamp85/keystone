@@ -172,6 +172,9 @@ def _build_agentic_user_context(state: AgentState) -> str | list[dict]:
     if state.memory_context:
         parts.append(f"\n{state.memory_context}")
 
+    if state.skills_context:
+        parts.append(f"\n{state.skills_context}")
+
     if state.rag_context:
         parts.append(f"\n## Codebase Context (retrieved)\n{state.rag_context}")
 

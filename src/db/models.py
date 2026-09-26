@@ -554,6 +554,40 @@ class AgentMemory(Base):
     )
 
 
+# ── Skills ────────────────────────────────────────────────────
+
+
+class Skill(Base):
+    """An admin-curated, reusable standing instruction — 'when touching payment code, run the
+    PCI checklist' — applied to every matching task, not learned per-task the way AgentMemory
+    is. Tenant-scoped, not repo-scoped: a skill is meant to apply across every repo the tenant
+    touches. `trigger_keywords` empty means the skill applies to every task; non-empty means it
+    only applies when one of the keywords appears (case-insensitively) in the task description —
+    see src/memory/skills.py::matching_skills, the same real function nodes/coding.py's prompt
+    building calls, not an approximation of it."""
+
+    __tablename__ = "skills"
+    __table_args__ = (Index("ix_skills_tenant_enabled", "tenant_id", "enabled"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    trigger_keywords: Mapped[list[str]] = mapped_column(JSONB, default=list, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+
 # ── Task Feedback ─────────────────────────────────────────────
 
 

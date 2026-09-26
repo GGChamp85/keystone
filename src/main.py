@@ -129,6 +129,7 @@ def create_app() -> FastAPI:
     from src.api.routes.memory import router as memory_router
     from src.api.routes.messages import router as messages_router
     from src.api.routes.models_library import router as models_library_router
+    from src.api.routes.skills import router as skills_router
 
     app.include_router(health_router)
     app.include_router(completions_router)
@@ -138,6 +139,7 @@ def create_app() -> FastAPI:
     app.include_router(keys_router)
     app.include_router(agents_router)
     app.include_router(memory_router)
+    app.include_router(skills_router)
     app.include_router(finetune_router)
 
     # MCP server (src/api/routes/mcp.py) — real endpoint at /v1/keystone/mcp.

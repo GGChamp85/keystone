@@ -160,6 +160,27 @@ async def test_agentic_loop_includes_recalled_memory_in_the_model_prompt(repo_wo
 
 
 @requires_sandbox
+async def test_agentic_loop_includes_matching_skills_in_the_model_prompt(repo_workspace):
+    """Real proof that src/orchestrator/engine.py's skill matching (state.skills_context) actually
+    reaches the model's prompt — the exact rendered text from memory.skills.render_skills_for_prompt
+    must appear in what the scripted client received, mirroring the memory test above."""
+    _task_id, ws = repo_workspace
+    state = _make_state()
+    state.skills_context = "## Skills (standing instructions for this kind of task)\n- PCI checklist: Run it."
+
+    script = ScriptedClient([_final_response("Nothing to do here.")])
+
+    with (
+        patch("src.orchestrator.nodes.coding.get_inference_client", return_value=script),
+        patch("src.orchestrator.nodes._shared.Workspace", return_value=ws),
+    ):
+        await coding_node(state)
+
+    sent_text = "\n".join(m.get("content") or "" for call in script.calls for m in call["messages"])
+    assert "PCI checklist: Run it." in sent_text
+
+
+@requires_sandbox
 async def test_agentic_loop_applies_a_queued_steering_message_as_a_new_turn_then_stops_resending_it(repo_workspace):
     """Real proof of src/orchestrator/steering.py's contract: a message queued via
     enqueue_steering_message (the exact function POST /v1/keystone/tasks/{id}/steer calls) is

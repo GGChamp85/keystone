@@ -348,6 +348,28 @@ class SubmitTaskFeedbackRequest(BaseModel):
     reason: str | None = None
 
 
+class CreateSkillRequest(BaseModel):
+    """`POST /v1/keystone/skills` — an admin-curated standing instruction applied to every
+    matching task (src/memory/skills.py), not learned per-task the way memory is."""
+
+    name: str = Field(..., min_length=1, max_length=255)
+    content: str = Field(..., min_length=1, max_length=4000)
+    trigger_keywords: list[str] = Field(
+        default=[],
+        max_length=50,
+        description="Applies only when one of these appears (case-insensitively) in the task "
+        "description; empty means every task.",
+    )
+    enabled: bool = True
+
+
+class MatchSkillsRequest(BaseModel):
+    """`POST /v1/keystone/skills/match` — preview exactly which skills a task description would
+    trigger, the same real function nodes/coding.py's prompt building calls."""
+
+    task: str = Field(..., min_length=1)
+
+
 class SteerTaskRequest(BaseModel):
     """`POST /v1/keystone/tasks/{id}/steer` — a new instruction for a task that's already
     running, queued (src/orchestrator/steering.py) and injected as a whole new turn before the
