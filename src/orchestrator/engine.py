@@ -649,6 +649,7 @@ class KeystoneEngine:
             execution_trace = task.execution_trace or []
             return {
                 "id": task.id,
+                "tenant_id": task.tenant_id,
                 "user_id": task.user_id,
                 "status": task.status.value,
                 "task_description": task.task_description,

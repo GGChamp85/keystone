@@ -36,6 +36,7 @@ from src.orchestrator.concurrency import ConcurrencyLimitExceeded
 from src.orchestrator.engine import ImagesRequireVisionModelError, get_keystone_engine
 from src.orchestrator.events import block_for_next_event, is_final_event, publish_task_step, read_task_events_from
 from src.orchestrator.nodes._shared import slugify_for_branch
+from src.orchestrator.replay import build_task_replay
 from src.orchestrator.steering import enqueue_steering_message
 
 router = APIRouter(prefix="/v1/keystone", tags=["keystone"])
@@ -133,9 +134,10 @@ async def get_task(
     task_id: UUID,
     auth: tuple = Depends(require_scope("agent")),
 ):
+    tenant: Tenant = auth[1]
     engine = get_keystone_engine()
     result = await engine.get_task_status(task_id)
-    if result is None:
+    if result is None or result["tenant_id"] != tenant.id:
         raise HTTPException(status_code=404, detail="Task not found")
     return AgentTaskResponse(**result)
 
@@ -173,6 +175,11 @@ async def stream_task(
     itself once the task reaches a terminal phase, or when the client
     disconnects.
     """
+    tenant: Tenant = auth[1]
+    engine = get_keystone_engine()
+    task_status = await engine.get_task_status(task_id)
+    if task_status is None or task_status["tenant_id"] != tenant.id:
+        raise HTTPException(status_code=404, detail="Task not found")
 
     async def event_generator():
         last_id = "0-0"
@@ -195,6 +202,36 @@ async def stream_task(
             yield f"id: {entry_id}\ndata: {json.dumps(payload)}\n\n"
             if is_final_event(payload):
                 break
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.get("/tasks/{task_id}/replay")
+async def replay_task(
+    task_id: UUID,
+    auth: tuple = Depends(require_scope("agent")),
+):
+    """
+    Deterministic replay of a past task's exact recorded execution — built entirely from
+    `AgentTask.execution_trace` in Postgres (src/orchestrator/replay.py), not the live Redis
+    Stream `/stream` reads. Works for any completed task regardless of Redis state or age (the
+    live stream's 7-day Redis key may already be gone). This is a faithful replay of what
+    actually happened, never a re-invocation of the model or sandbox — it is not a claim that
+    re-running the task would reproduce the same result. Emits the identical SSE event shape
+    `/stream` does, so the same frontend rendering applies unchanged.
+    """
+    tenant: Tenant = auth[1]
+    replay = await build_task_replay(task_id)
+    if replay is None or replay.tenant_id != tenant.id:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    async def event_generator():
+        for i, payload in enumerate(replay.events):
+            yield f"id: replay-{i}\ndata: {json.dumps(payload, default=str)}\n\n"
 
     return StreamingResponse(
         event_generator(),
