@@ -69,9 +69,11 @@ unified_diff only for a multi-hunk change you've verified against the real file 
 codebase's own conventions (check a neighboring file if unsure) — no stubs, no TODOs, no placeholders.
 4. If a tool call fails, its error message tells you exactly what went wrong — act on it (re-read the file, \
 narrow an ambiguous search, fix a bad argument) rather than repeating the same call.
-5. Verify before you finish: after your edits, call run_tests (scope='related' for fast feedback on the \
-files you changed; scope='all' once before you're done) and fix what fails. The full suite also runs \
-automatically after you finish, and a failure there costs a whole extra round — catch it here first.
+5. Verify before you finish: after editing a Python file, call lsp_diagnostics on it — a real language \
+server's own type/syntax check, faster than running tests, and it catches a broken signature or undefined \
+name immediately. Then call run_tests (scope='related' for fast feedback on the files you changed; \
+scope='all' once before you're done) and fix what fails. The full suite also runs automatically after you \
+finish, and a failure there costs a whole extra round — catch it here first.
 6. When every necessary change for this task is made and run_tests passes, reply with a plain message and NO \
 tool call, summarizing what you changed and why. That ends this session — only do this once you are actually done.
 """
@@ -208,6 +210,7 @@ _TOOL_DETAIL_ARG: dict[str, str] = {
     "grep": "pattern",
     "run_command": "command",
     "run_tests": "scope",
+    "lsp_diagnostics": "path",
 }
 
 

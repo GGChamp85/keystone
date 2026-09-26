@@ -19,6 +19,7 @@ patch didn't apply."
 from __future__ import annotations
 
 import difflib
+import json
 import shlex
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -31,6 +32,7 @@ from src.orchestrator.context import fit_to_tokens
 from src.orchestrator.repo_map import DEFAULT_MAP_TOKENS, build_repo_map
 from src.orchestrator.repo_profile import detect_repo_profile
 from src.orchestrator.test_scope import related_test_command
+from src.orchestrator.tools import lsp
 from src.orchestrator.workspace import Workspace
 
 DEFAULT_COMMAND_TIMEOUT = 60
@@ -187,6 +189,53 @@ async def run_tests(ws: Workspace, scope: str = "related", touched_paths: list[s
     verdict = "passed" if code == 0 else ("collected no tests" if code == 5 else "FAILED")
     body = _tail((result.get("stdout", "") + "\n" + result.get("stderr", "")).strip())
     return ToolResult(ok=True, output=f"$ {command}\n(exit code {code}) {label} {verdict}{note}\n{body}")
+
+
+async def lsp_diagnostics(ws: Workspace, path: str) -> ToolResult:
+    """Real diagnostics from a real language server for one file (tools/lsp.py) — not ctags,
+    not a heuristic. Unsupported extensions (anything but `.py` today) fail closed with a clear
+    reason rather than silently returning an empty, misleadingly-clean result."""
+    ext = "." + path.rsplit(".", 1)[-1] if "." in path else ""
+    server = lsp.LANGUAGE_SERVERS.get(ext)
+    if server is None:
+        return ToolResult(
+            ok=False,
+            error=f"No language server configured for {ext!r} files (path={path!r}); supported: "
+            f"{sorted(lsp.LANGUAGE_SERVERS)}",
+        )
+    command, language_id = server
+
+    script_path = await ws.write_sandbox_file(lsp.CLIENT_SCRIPT_NAME, lsp.CLIENT_SCRIPT)
+    abs_repo_path = f"/workspace/repo/{path.lstrip('/')}"
+    result = await ws.run(
+        f"python3 {script_path} {command} /workspace/repo {abs_repo_path} {language_id} "
+        f"{lsp.DIAGNOSTIC_TIMEOUT_SECONDS}",
+        timeout=lsp.DIAGNOSTIC_TIMEOUT_SECONDS + 10,
+        check=False,
+    )
+    if result.get("exit_code") != 0:
+        return ToolResult(ok=False, error=f"lsp_diagnostics failed: {result.get('stderr') or result.get('stdout')}")
+
+    try:
+        parsed = json.loads(result["stdout"].strip().splitlines()[-1])
+    except (ValueError, IndexError, KeyError) as exc:
+        return ToolResult(ok=False, error=f"lsp_diagnostics produced no parseable output: {exc}")
+
+    if parsed.get("timed_out"):
+        return ToolResult(
+            ok=False,
+            error=f"The language server for {path!r} did not respond within {lsp.DIAGNOSTIC_TIMEOUT_SECONDS}s",
+        )
+    diagnostics = parsed.get("diagnostics", [])
+    if not diagnostics:
+        return ToolResult(ok=True, output=f"No diagnostics for {path} — {command} reports it clean.")
+
+    lines = [
+        f"{path}:{d['range']['start']['line'] + 1}:{d['range']['start']['character'] + 1} "
+        f"[{lsp.severity_name(d.get('severity'))}] {d.get('message', '')} ({d.get('source', command)})"
+        for d in diagnostics
+    ]
+    return ToolResult(ok=True, output="\n".join(lines))
 
 
 async def apply_patch(
@@ -370,6 +419,7 @@ TOOL_IMPLS: dict[str, Callable[..., Awaitable[ToolResult]]] = {
     "apply_patch": apply_patch,
     "run_command": run_command,
     "run_tests": run_tests,
+    "lsp_diagnostics": lsp_diagnostics,
 }
 
 

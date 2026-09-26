@@ -52,7 +52,14 @@ RUN pip install --no-cache-dir \
     structlog>=24.4.0 \
     ruff>=0.6.0 \
     mypy>=1.11.0 \
-    bandit>=1.7.9
+    bandit>=1.7.9 \
+    "python-lsp-server[pyflakes]>=1.11.0"
+
+# python-lsp-server (pylsp), not pyright: pyright's PyPI package fetches its actual JS
+# implementation over the network on first run, which this project's air-gap posture can't
+# allow — pylsp is pure Python, fully baked into this image, no runtime fetch. Backs the
+# lsp_diagnostics tool (src/orchestrator/tools/lsp.py) — real type/syntax diagnostics for the
+# coding agent, mid-loop, via the real LSP stdio protocol.
 
 COPY docker/sandbox-runtimes/ca-certs/ /usr/local/share/ca-certificates/
 RUN update-ca-certificates

@@ -15,7 +15,16 @@ import uuid
 
 import pytest
 
-from src.orchestrator.tools.impl import apply_patch, get_repo_map, grep, list_dir, read_file, run_command, run_tests
+from src.orchestrator.tools.impl import (
+    apply_patch,
+    get_repo_map,
+    grep,
+    list_dir,
+    lsp_diagnostics,
+    read_file,
+    run_command,
+    run_tests,
+)
 from src.orchestrator.workspace import Workspace
 from src.sandbox.manager import SandboxManager
 
@@ -264,3 +273,32 @@ async def test_run_command_real_test_suite_passes(ws):
     assert result.ok
     assert "exit code 0" in result.output
     assert "1 passed" in result.output
+
+
+@requires_sandbox
+async def test_lsp_diagnostics_finds_a_real_undefined_name(ws):
+    """Real proof this is a real language server, not a heuristic: pylsp (python-lsp-server,
+    baked into the sandbox image — docker/sandbox-runtimes/python.Dockerfile) actually running
+    inside the sandbox, speaking the real LSP stdio protocol, catching a real undefined-name
+    error pyflakes would flag."""
+    await ws.write_file("broken.py", "def greet(name):\n    return f'hello {undefined_variable}'\n")
+    result = await lsp_diagnostics(ws, "broken.py")
+    assert result.ok
+    assert "broken.py:2:" in result.output
+    assert "undefined_variable" in result.output.lower() or "undefined name" in result.output.lower()
+
+
+@requires_sandbox
+async def test_lsp_diagnostics_reports_clean_for_a_real_valid_file(ws):
+    result = await lsp_diagnostics(ws, "app.py")
+    assert result.ok
+    assert "No diagnostics" in result.output
+
+
+@requires_sandbox
+async def test_lsp_diagnostics_refuses_an_unsupported_extension_with_a_clear_reason(ws):
+    await ws.write_file("script.sh", "#!/bin/bash\necho hi\n")
+    result = await lsp_diagnostics(ws, "script.sh")
+    assert not result.ok
+    assert "No language server configured" in result.error
+    assert ".sh" in result.error

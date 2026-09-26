@@ -117,6 +117,15 @@ class Workspace:
         handle = await self.ensure_sandbox()
         return await self._manager.read_file(handle, self._repo_relative(path))
 
+    async def write_sandbox_file(self, name: str, content: str) -> str:
+        """Write `content` at `/workspace/<name>`, a sibling of the repo checkout rather than
+        inside it — for internal tooling (the LSP diagnostics client, `tools/lsp.py`) that must
+        never appear in `git status`/a diff the agent could accidentally commit. Returns the
+        absolute sandbox path."""
+        handle = await self.ensure_sandbox()
+        await self._manager.write_file(handle, name.lstrip("/"), content)
+        return f"/workspace/{name.lstrip('/')}"
+
     async def run(
         self,
         command: str,

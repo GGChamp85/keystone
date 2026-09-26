@@ -199,6 +199,26 @@ TOOL_SCHEMAS: list[dict] = [
     {
         "type": "function",
         "function": {
+            "name": "lsp_diagnostics",
+            "description": (
+                "Real type/syntax diagnostics for one file from a real language server — not the repo "
+                "map's heuristic outline. Use it right after editing a file to catch a broken signature, "
+                "an undefined name, or a type error immediately, before running the full test suite. "
+                "Python (.py) only for now; other extensions are refused with a clear message, not a "
+                "silently empty result."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Repo-relative path to the file to check."},
+                },
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "run_command",
             "description": (
                 "Run a shell command in the repository working tree (e.g. to run a linter directly, or "
