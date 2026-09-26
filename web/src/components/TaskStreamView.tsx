@@ -3,6 +3,7 @@ import {
   getTask,
   isNodeEvent,
   isStepEvent,
+  steerTask,
   streamTask,
   TERMINAL_PHASES,
   type StepEvent,
@@ -100,6 +101,11 @@ function describeStep(ev: StepEvent): { title: string; body: string; ok: boolean
       }
     case 'pr':
       return { title: `Pull request #${str(ev.pr_number)}: ${str(ev.pr_url)}`, body: '', ok: true }
+    case 'steering': {
+      const messages = (ev.messages as unknown[]) ?? (ev.message ? [ev.message] : [])
+      const title = ev.status === 'applied' ? `Applied ${messages.length} steering message(s)` : 'Steering message queued'
+      return { title, body: str(messages.length ? messages : ev.message), ok: null }
+    }
     case 'candidate': {
       if (ev.winner !== null && ev.winner !== undefined) {
         return { title: `Best of ${str(ev.of)}: candidate ${str(ev.winner)} wins`, body: str(ev.ranking), ok: true }
@@ -136,6 +142,9 @@ export function TaskStreamView({ taskId, onBack }: { taskId: string; onBack: () 
   const [connectionError, setConnectionError] = useState<string | null>(null)
   const [connected, setConnected] = useState(true)
   const [costBreakdown, setCostBreakdown] = useState<TaskCostBreakdown | null>(null)
+  const [steerInput, setSteerInput] = useState('')
+  const [steerStatus, setSteerStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
+  const [steerError, setSteerError] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -178,6 +187,23 @@ export function TaskStreamView({ taskId, onBack }: { taskId: string; onBack: () 
       .catch(() => setCostBreakdown(null))
   }, [isDone, taskId])
 
+  async function handleSteer(e: React.FormEvent) {
+    e.preventDefault()
+    const message = steerInput.trim()
+    if (!message) return
+    setSteerStatus('sending')
+    setSteerError(null)
+    try {
+      await steerTask(taskId, message)
+      setSteerStatus('sent')
+      setSteerInput('')
+      setTimeout(() => setSteerStatus('idle'), 2000)
+    } catch (err) {
+      setSteerStatus('error')
+      setSteerError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
   return (
     <div className="task-stream-view">
       <button className="back-link" onClick={onBack}>
@@ -188,6 +214,28 @@ export function TaskStreamView({ taskId, onBack }: { taskId: string; onBack: () 
       </h2>
 
       <PhaseTimeline current={phase} />
+
+      {!isDone && (
+        <form className="steer-form" onSubmit={handleSteer}>
+          <label htmlFor="steer">Steer this task</label>
+          <div className="steer-row">
+            <input
+              id="steer"
+              type="text"
+              placeholder="e.g. also add a test for the empty-input case"
+              value={steerInput}
+              onChange={(e) => setSteerInput(e.target.value)}
+            />
+            <button type="submit" disabled={!steerInput.trim() || steerStatus === 'sending'}>
+              {steerStatus === 'sending' ? 'Sending…' : steerStatus === 'sent' ? 'Sent' : 'Send'}
+            </button>
+          </div>
+          <p className="steps-hint">
+            Picked up at the start of the coding loop's next iteration — not mid tool-call.
+          </p>
+          {steerError && <p className="error-text">{steerError}</p>}
+        </form>
+      )}
 
       {latest?.plan_steps && latest.plan_steps.length > 0 && (
         <div className="plan-card">

@@ -267,6 +267,31 @@ button:disabled {
   flex-wrap: wrap;
 }
 
+.steer-form {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 20px;
+}
+
+.steer-form label {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+.steer-row {
+  display: flex;
+  gap: 8px;
+}
+
+.steer-row input {
+  flex: 1;
+}
+
 .phase-step {
   display: flex;
   align-items: center;

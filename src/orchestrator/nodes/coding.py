@@ -43,6 +43,7 @@ from src.orchestrator.state import (
     FileChange,
     IterationRecord,
 )
+from src.orchestrator.steering import drain_steering_messages
 from src.orchestrator.tools.impl import ToolResult, dispatch_tool_call, touched_path
 from src.orchestrator.tools.protocol import ToolCallError, get_tool_protocol
 from src.orchestrator.workspace import Workspace
@@ -305,6 +306,13 @@ async def _run_agentic_loop(state: AgentState, ws: Workspace) -> tuple[bool, str
     stream_turns = get_settings().agent_stream_turns
 
     for _step in range(state.max_tool_steps):
+        steering_messages = await drain_steering_messages(state.task_id)
+        if steering_messages:
+            joined = "\n".join(f"- {m}" for m in steering_messages)
+            header = "## New instructions from the user (received while this task was running)"
+            turns.append([{"role": "user", "content": f"{header}\n{joined}"}])
+            await step("steering", {"turn": _step, "messages": steering_messages, "status": "applied"})
+
         messages = await trim_turns_to_budget_async(
             turns, max_tokens=state.max_context_tokens, keep_head_turns=1, summarizer=summarizer
         )

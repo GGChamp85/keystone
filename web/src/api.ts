@@ -51,6 +51,18 @@ export async function submitTask(req: TaskSubmitRequest): Promise<TaskSubmitResp
   return resp.json()
 }
 
+export async function steerTask(taskId: string, message: string): Promise<{ status: string; task_id: string }> {
+  const resp = await fetch(`/v1/keystone/tasks/${taskId}/steer`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ message }),
+  })
+  if (!resp.ok) {
+    throw new Error(`Steering failed (${resp.status}): ${await resp.text()}`)
+  }
+  return resp.json()
+}
+
 export interface TaskCostEstimateRequest {
   task: string
   repository_url?: string
@@ -280,6 +292,7 @@ export type StepEventType =
   | 'diff'
   | 'pr'
   | 'candidate'
+  | 'steering'
 
 export interface StepEvent {
   event_type: StepEventType

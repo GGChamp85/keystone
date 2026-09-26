@@ -348,6 +348,14 @@ class SubmitTaskFeedbackRequest(BaseModel):
     reason: str | None = None
 
 
+class SteerTaskRequest(BaseModel):
+    """`POST /v1/keystone/tasks/{id}/steer` — a new instruction for a task that's already
+    running, queued (src/orchestrator/steering.py) and injected as a whole new turn before the
+    coding loop's next model call, never mid-tool-call."""
+
+    message: str = Field(..., min_length=1, max_length=10_000)
+
+
 # ── Codebase Ingestion ────────────────────────────────────────
 
 

@@ -160,6 +160,43 @@ async def test_agentic_loop_includes_recalled_memory_in_the_model_prompt(repo_wo
 
 
 @requires_sandbox
+async def test_agentic_loop_applies_a_queued_steering_message_as_a_new_turn_then_stops_resending_it(repo_workspace):
+    """Real proof of src/orchestrator/steering.py's contract: a message queued via
+    enqueue_steering_message (the exact function POST /v1/keystone/tasks/{id}/steer calls) is
+    injected as a whole new user turn with the expected header on the very next model call, and
+    is never sent again once drained — proving the queue is really cleared, not resent every
+    iteration."""
+    from src.orchestrator.steering import enqueue_steering_message
+
+    _task_id, ws = repo_workspace
+    state = _make_state()
+    await enqueue_steering_message(state.task_id, "also add a docstring to greet()")
+
+    script = ScriptedClient(
+        [
+            _tool_call_response("apply_patch", {"path": "app.py", "search": "hello {name}", "replace": "HI {name}"}),
+            _final_response("Changed the greeting from hello to HI."),
+        ]
+    )
+
+    with (
+        patch("src.orchestrator.nodes.coding.get_inference_client", return_value=script),
+        patch("src.orchestrator.nodes._shared.Workspace", return_value=ws),
+    ):
+        await coding_node(state)
+
+    assert len(script.calls) == 2
+    first_call_text = "\n".join(m.get("content") or "" for m in script.calls[0]["messages"])
+    second_call_text = "\n".join(m.get("content") or "" for m in script.calls[1]["messages"])
+    assert "## New instructions from the user" in first_call_text
+    assert "also add a docstring to greet()" in first_call_text
+    # The injected turn legitimately stays in conversation history on the second call (it's a
+    # real turn now, same as any other) — what must NOT happen is a *second* injection of the
+    # same message, which would mean the queue wasn't really cleared by the first drain.
+    assert second_call_text.count("also add a docstring to greet()") == 1
+
+
+@requires_sandbox
 async def test_agentic_loop_recovers_from_a_bad_search_and_still_completes(repo_workspace):
     _task_id, ws = repo_workspace
     state = _make_state()

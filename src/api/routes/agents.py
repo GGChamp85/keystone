@@ -17,6 +17,7 @@ from src.api.middleware.auth import require_scope
 from src.api.models.requests import (
     AgentTaskRequest,
     IngestRepositoryRequest,
+    SteerTaskRequest,
     SubmitTaskFeedbackRequest,
     TaskCostEstimateRequest,
 )
@@ -29,12 +30,13 @@ from src.api.models.responses import (
 from src.api.routes._inference_common import check_dollar_budget
 from src.billing.ledger import month_to_date_cost_usd, usage_summary
 from src.db.connection import get_db_context
-from src.db.models import AgentTask, APIKey, FeedbackVerdict, TaskFeedback, Tenant, User
+from src.db.models import AgentTask, APIKey, FeedbackVerdict, TaskFeedback, TaskStatus, Tenant, User
 from src.memory.ingestion import CodeIngestionPipeline, InvalidRepositoryURLError
 from src.orchestrator.concurrency import ConcurrencyLimitExceeded
 from src.orchestrator.engine import ImagesRequireVisionModelError, get_keystone_engine
-from src.orchestrator.events import block_for_next_event, is_final_event, read_task_events_from
+from src.orchestrator.events import block_for_next_event, is_final_event, publish_task_step, read_task_events_from
 from src.orchestrator.nodes._shared import slugify_for_branch
+from src.orchestrator.steering import enqueue_steering_message
 
 router = APIRouter(prefix="/v1/keystone", tags=["keystone"])
 
@@ -211,6 +213,34 @@ async def cancel_task(
     if not cancelled:
         raise HTTPException(status_code=404, detail="Task not found or not running")
     return {"status": "cancelled", "task_id": str(task_id)}
+
+
+@router.post("/tasks/{task_id}/steer", status_code=202)
+async def steer_task(
+    task_id: UUID,
+    req: SteerTaskRequest,
+    auth: tuple = Depends(require_scope("agent")),
+):
+    """Queue a new instruction for a task that's already running — the coding loop picks it up
+    at the start of its next iteration (src/orchestrator/steering.py), never mid-tool-call.
+    Refuses a task that isn't still pending/running rather than queuing a message nothing will
+    ever read."""
+    tenant: Tenant = auth[1]
+
+    async with get_db_context() as db:
+        task = await db.get(AgentTask, task_id)
+        if task is None or task.tenant_id != tenant.id:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if task.status not in (TaskStatus.PENDING, TaskStatus.RUNNING):
+            raise HTTPException(
+                status_code=409, detail=f"Task is {task.status.value} — only a pending or running task can be steered"
+            )
+
+    await enqueue_steering_message(task_id, req.message)
+    await publish_task_step(
+        task_id, "steering", "submit", {"message": req.message, "status": "queued"}, phase="pending"
+    )
+    return {"status": "queued", "task_id": str(task_id)}
 
 
 @router.post("/tasks/{task_id}/feedback", response_model=TaskFeedbackResponse, status_code=201)

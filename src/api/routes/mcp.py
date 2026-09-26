@@ -53,10 +53,12 @@ from src.api.models.responses import AgentTaskSubmittedResponse, AgentTaskSummar
 from src.api.routes.agents import submit_agent_task
 from src.config import get_settings
 from src.db.connection import get_db_context
-from src.db.models import APIKey, Tenant, User
+from src.db.models import AgentTask, APIKey, TaskStatus, Tenant, User
 from src.memory.store import MemoryRecord, create_memory, recall
 from src.orchestrator.concurrency import ConcurrencyLimitExceeded
 from src.orchestrator.engine import get_keystone_engine
+from src.orchestrator.events import publish_task_step
+from src.orchestrator.steering import enqueue_steering_message
 
 mcp_server: MCPServer = MCPServer(
     name="keystone",
@@ -209,6 +211,29 @@ async def task_status(task_id: str, ctx: Context) -> dict[str, Any]:
     if row is None:
         raise ToolError("Task not found")
     return AgentTaskSummaryResponse(**row).model_dump(mode="json")
+
+
+@mcp_server.tool()
+async def task_steer(task_id: str, message: str, ctx: Context) -> dict[str, Any]:
+    """Queue a new instruction for a task that's already running — picked up at the start of
+    the coding loop's next iteration, never mid-tool-call. Refuses a task that has already
+    reached a terminal state. Exactly `POST /v1/keystone/tasks/{task_id}/steer`."""
+    _api_key, tenant, _user = await _authenticate(ctx)
+    try:
+        task_uuid = UUID(task_id)
+    except ValueError as exc:
+        raise ToolError(f"task_id must be a UUID, got {task_id!r}") from exc
+
+    async with get_db_context() as db:
+        task = await db.get(AgentTask, task_uuid)
+        if task is None or task.tenant_id != tenant.id:
+            raise ToolError("Task not found")
+        if task.status not in (TaskStatus.PENDING, TaskStatus.RUNNING):
+            raise ToolError(f"Task is {task.status.value} — only a pending or running task can be steered")
+
+    await enqueue_steering_message(task_uuid, message)
+    await publish_task_step(task_uuid, "steering", "submit", {"message": message, "status": "queued"}, phase="pending")
+    return {"status": "queued", "task_id": task_id}
 
 
 def _validation_message(exc: ValidationError) -> str:

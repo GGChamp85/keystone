@@ -121,6 +121,7 @@ export type StepEventType =
   | 'diff'
   | 'pr'
   | 'candidate'
+  | 'steering'
 
 export interface StepEvent {
   event_type: StepEventType

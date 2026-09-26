@@ -169,7 +169,7 @@ async def test_tools_list_exposes_memory_and_task_tools(tenant_and_key):
             json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
         )
         tools = {t["name"] for t in _parse_sse_json(resp.text)["result"]["tools"]}
-        assert tools == {"memory_search", "memory_add", "task_submit", "task_status"}
+        assert tools == {"memory_search", "memory_add", "task_submit", "task_status", "task_steer"}
 
 
 async def test_memory_add_then_search_round_trips_through_the_real_store(tenant_and_key):
@@ -316,6 +316,41 @@ async def test_task_submit_applies_the_rest_route_s_validation(tenant_and_key):
         )
         assert zero_iterations["isError"] is True
         assert "max_iterations:" in zero_iterations["content"][0]["text"]
+
+
+async def test_task_steer_queues_a_real_message_then_refuses_once_the_task_is_gone(
+    tenant_and_key, _inference_endpoints_unreachable
+):
+    """Exactly POST /v1/keystone/tasks/{id}/steer, over MCP: a real submitted task can be
+    steered while it exists, and a made-up task id is refused rather than silently accepted."""
+    from src.orchestrator.steering import drain_steering_messages
+
+    tenant_id, api_key = tenant_and_key
+    async with running_client() as client:
+        session_id = await _initialize(client, api_key)
+        submitted = await _call_tool(
+            client,
+            api_key,
+            session_id,
+            "task_submit",
+            {"task": "A real task description long enough to pass validation."},
+        )
+        task_id = submitted["structuredContent"]["task_id"]
+
+        steered = await _call_tool(
+            client, api_key, session_id, "task_steer", {"task_id": task_id, "message": "also handle unicode input"}
+        )
+        assert steered["isError"] is False, steered
+        assert steered["structuredContent"] == {"status": "queued", "task_id": task_id}
+        assert await drain_steering_messages(task_id) == ["also handle unicode input"]
+
+        missing = await _call_tool(
+            client, api_key, session_id, "task_steer", {"task_id": str(uuid.uuid4()), "message": "hello"}
+        )
+        assert missing["isError"] is True
+        assert "not found" in missing["content"][0]["text"].lower()
+
+        await _wait_for_background_execution_to_finish(tenant_id)
 
 
 async def test_task_status_is_tenant_scoped_and_readable_on_bad_input(tenant_and_key, _inference_endpoints_unreachable):
