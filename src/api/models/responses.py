@@ -251,6 +251,27 @@ class SkillResponse(BaseModel):
     created_by: str | None
 
 
+class ScheduleResponse(BaseModel):
+    id: UUID
+    name: str
+    trigger_type: str
+    cron_expression: str | None
+    webhook_url: str | None = Field(
+        default=None, description="Only set for trigger_type='webhook' — POST here to run this schedule's task now."
+    )
+    task: str
+    repository_url: str | None
+    branch: str
+    model: str
+    max_iterations: int
+    context_files: dict[str, str] | None
+    enabled: bool
+    last_triggered_at: datetime | None
+    last_task_id: UUID | None
+    next_run_at: datetime | None
+    created_by: str | None
+
+
 # ── Fine-Tuning ──────────────────────────────────────────────
 
 

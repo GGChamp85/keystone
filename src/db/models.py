@@ -113,6 +113,11 @@ class AdapterStatus(enum.StrEnum):
     RETIRED = "retired"
 
 
+class ScheduleTrigger(enum.StrEnum):
+    CRON = "cron"
+    WEBHOOK = "webhook"
+
+
 # ── Tenant ────────────────────────────────────────────────────
 
 
@@ -577,6 +582,57 @@ class Skill(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     trigger_keywords: Mapped[list[str]] = mapped_column(JSONB, default=list, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+
+# ── Task Schedules ────────────────────────────────────────────
+
+
+class TaskSchedule(Base):
+    """A saved task template that submits a real `AgentTask` on its own, either on a cron
+    schedule or when its unguessable webhook URL is hit — a running/pending task list only ever
+    shows what a human already asked for; this is how a recurring or CI-triggered task gets
+    created without one. `trigger_type=CRON` uses `cron_expression`/`next_run_at` (advanced by
+    src/orchestrator/schedules.py's polling loop, croniter); `trigger_type=WEBHOOK` uses
+    `webhook_token` instead and is never polled — triggered directly by
+    `POST /v1/keystone/webhooks/schedules/{token}`."""
+
+    __tablename__ = "task_schedules"
+    __table_args__ = (Index("ix_task_schedules_tenant_enabled", "tenant_id", "enabled"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    api_key_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("api_keys.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    trigger_type: Mapped[ScheduleTrigger] = mapped_column(SAEnum(ScheduleTrigger), nullable=False)
+    cron_expression: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    webhook_token: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+
+    # The task template — the subset of AgentTaskRequest that makes sense unattended, without a
+    # human present to attach images or tune per-run quality-gate/best-of-n knobs.
+    task_description: Mapped[str] = mapped_column(Text, nullable=False)
+    repository_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    branch: Mapped[str] = mapped_column(String(255), default="main", nullable=False)
+    model_role: Mapped[str] = mapped_column(String(32), default="coding", nullable=False)
+    max_iterations: Mapped[int] = mapped_column(Integer, default=15, nullable=False)
+    context_files: Mapped[dict[str, str] | None] = mapped_column(JSONB, nullable=True)
+
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    last_triggered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_task_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False

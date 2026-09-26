@@ -67,10 +67,21 @@ async def lifespan(app: FastAPI):
         pr_poll_task = asyncio.create_task(run_pr_polling_loop(pr_poll_stop))
         logger.info("vs.pr_polling_started", interval_seconds=settings.pr_poll_interval_seconds)
 
+        # Periodic due-cron-schedule poller (src/orchestrator/schedules.py) — same
+        # non-durable-asyncio-loop shape as the PR poller just above; a webhook-triggered
+        # schedule needs no loop at all, since its route calls trigger_schedule directly.
+        from src.orchestrator.schedules import run_schedule_polling_loop
+
+        schedule_poll_stop = asyncio.Event()
+        schedule_poll_task = asyncio.create_task(run_schedule_polling_loop(schedule_poll_stop))
+        logger.info("vs.schedule_polling_started", interval_seconds=settings.schedule_poll_interval_seconds)
+
         yield
 
         pr_poll_stop.set()
         await pr_poll_task
+        schedule_poll_stop.set()
+        await schedule_poll_task
 
     from src.api.middleware.rate_limiter import close_redis
     from src.db.connection import close_db
@@ -129,6 +140,8 @@ def create_app() -> FastAPI:
     from src.api.routes.memory import router as memory_router
     from src.api.routes.messages import router as messages_router
     from src.api.routes.models_library import router as models_library_router
+    from src.api.routes.schedules import router as schedules_router
+    from src.api.routes.schedules import webhook_router as schedules_webhook_router
     from src.api.routes.skills import router as skills_router
 
     app.include_router(health_router)
@@ -140,6 +153,8 @@ def create_app() -> FastAPI:
     app.include_router(agents_router)
     app.include_router(memory_router)
     app.include_router(skills_router)
+    app.include_router(schedules_router)
+    app.include_router(schedules_webhook_router)
     app.include_router(finetune_router)
 
     # MCP server (src/api/routes/mcp.py) — real endpoint at /v1/keystone/mcp.

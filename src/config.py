@@ -165,6 +165,7 @@ class Settings(BaseSettings):
     git_host_commit_author_name: str = "Keystone Agents"  # author on the agent's commits
     git_host_commit_author_email: str = "keystone-agents@keystone.local"  # author email on the agent's commits
     pr_poll_interval_seconds: int = 300  # src/orchestrator/pr_polling.py's periodic merged/rejected feedback check
+    schedule_poll_interval_seconds: int = 60  # src/orchestrator/schedules.py's periodic due-cron-schedule check
 
     # ── Package mirrors (internal, air-gap-safe — src/orchestrator/repo_profile.py) ──
     pip_index_url: str | None = None  # e.g. https://pypi.internal.keystone.local/simple

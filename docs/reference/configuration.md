@@ -95,6 +95,7 @@ Every setting Keystone reads, generated from `src/config.py` by `scripts/gen_con
 | `GIT_HOST_COMMIT_AUTHOR_NAME` | `str` | `'Keystone Agents'` | author on the agent's commits |
 | `GIT_HOST_COMMIT_AUTHOR_EMAIL` | `str` | `'keystone-agents@keystone.local'` | author email on the agent's commits |
 | `PR_POLL_INTERVAL_SECONDS` | `int` | `300` | src/orchestrator/pr_polling.py's periodic merged/rejected feedback check |
+| `SCHEDULE_POLL_INTERVAL_SECONDS` | `int` | `60` | src/orchestrator/schedules.py's periodic due-cron-schedule check |
 
 ## Package mirrors (internal, air-gap-safe — src/orchestrator/repo_profile.py)
 

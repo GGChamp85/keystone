@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # ── Inference Requests ────────────────────────────────────────
 
@@ -376,6 +376,35 @@ class SteerTaskRequest(BaseModel):
     coding loop's next model call, never mid-tool-call."""
 
     message: str = Field(..., min_length=1, max_length=10_000)
+
+
+class CreateScheduleRequest(BaseModel):
+    """`POST /v1/keystone/schedules` — a saved task template that submits a real task on its own,
+    either on a cron schedule or when its webhook URL is hit (src/orchestrator/schedules.py).
+    Deliberately a subset of `AgentTaskRequest`: no `images` (nobody's present to attach one) and
+    no `quality_blocking_tools`/`best_of_n` (per-run tuning, not a standing template's job)."""
+
+    name: str = Field(..., min_length=1, max_length=255)
+    trigger_type: Literal["cron", "webhook"]
+    cron_expression: str | None = Field(
+        default=None,
+        max_length=120,
+        description="Required (and validated as a real cron expression) when trigger_type is 'cron'; "
+        "ignored for 'webhook'.",
+    )
+    task: str = Field(..., min_length=10, max_length=50000)
+    repository_url: str | None = None
+    branch: str = Field(default="main")
+    model: Literal["coding", "coding_fallback", "reasoning", "auto"] = Field(default="coding")
+    max_iterations: int = Field(default=15, ge=1)
+    context_files: dict[str, str] | None = None
+    enabled: bool = True
+
+    @model_validator(mode="after")
+    def _cron_expression_required_for_cron_trigger(self) -> CreateScheduleRequest:
+        if self.trigger_type == "cron" and not self.cron_expression:
+            raise ValueError("cron_expression is required when trigger_type is 'cron'")
+        return self
 
 
 # ── Codebase Ingestion ────────────────────────────────────────
