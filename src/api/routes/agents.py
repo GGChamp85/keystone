@@ -36,6 +36,7 @@ from src.orchestrator.concurrency import ConcurrencyLimitExceeded
 from src.orchestrator.engine import ImagesRequireVisionModelError, get_keystone_engine
 from src.orchestrator.events import block_for_next_event, is_final_event, publish_task_step, read_task_events_from
 from src.orchestrator.nodes._shared import slugify_for_branch
+from src.orchestrator.otel_export import build_task_otel_export
 from src.orchestrator.replay import build_task_replay
 from src.orchestrator.steering import enqueue_steering_message
 
@@ -238,6 +239,27 @@ async def replay_task(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.get("/tasks/{task_id}/trace")
+async def export_task_trace(
+    task_id: UUID,
+    auth: tuple = Depends(require_scope("agent")),
+):
+    """
+    A task's execution as a real OpenTelemetry trace (src/orchestrator/otel_export.py): one root
+    span for the task, one child span per graph iteration, one grandchild span per recorded step
+    inside it — encoded with the real opentelemetry-sdk/opentelemetry-exporter-otlp-proto-common
+    library, the exact OTLP JSON a real collector (Jaeger, Tempo, Honeycomb, any OTLP-compatible
+    backend) would receive. Built entirely from `AgentTask.execution_trace`, the same durable
+    data `/replay` reads — every span's timestamps come from what was actually recorded, never
+    fabricated. Not a live tracer: nothing is instrumented while the task is still running.
+    """
+    tenant: Tenant = auth[1]
+    export = await build_task_otel_export(task_id)
+    if export is None or export.tenant_id != tenant.id:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return export.payload
 
 
 @router.post("/tasks/{task_id}/cancel")

@@ -40,6 +40,8 @@ dependencies = [
     "rich>=13.7.0",
     "mcp>=2.2.0",
     "croniter>=2.0.0",
+    "opentelemetry-sdk>=1.27.0",
+    "opentelemetry-exporter-otlp-proto-common>=1.27.0",
 ]
 
 [project.scripts]
